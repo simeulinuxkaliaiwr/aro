@@ -33,6 +33,7 @@ enum q_action {
 	Q_WORKSPACE,    /* num: index, 0-based */
 	Q_SENDTO,       /* num: index, 0-based */
 	Q_SPLIT,        /* num: ly_dir */
+	Q_SWITCH,       /* num: +1 next, -1 previous */
 };
 
 struct q_bind {
@@ -49,6 +50,7 @@ struct q_bind {
 struct q_rule {
 	char *app_id;           /* glob, NULL = any; owned */
 	char *title;            /* glob, NULL = any; owned */
+	char *type;             /* glob against the window type; owned */
 	int floating;           /* 1 float, 0 tile */
 	int workspace;          /* 0-based */
 	int fullscreen;         /* 1 only: a rule can ask for it, not forbid it */
@@ -100,6 +102,7 @@ struct q_theme {
 	uint32_t notify_bg;
 	uint32_t scrim;                 /* behind a prompt */
 	int notify_ms, notify_max_w;
+	int switch_delay_ms, switch_debounce_ms, switch_preview_h;
 
 	char *font, *font_small;        /* owned */
 };
@@ -156,7 +159,8 @@ void config_set_modkey(struct aro_config *c, uint32_t modkey);
 
 /* evaluate window rules */
 void config_rules_eval(const struct aro_config *c, const char *app_id,
-                       const char *title, struct q_rule_result *out);
+                       const char *title, const char *type,
+                       struct q_rule_result *out);
 
 /* evaluate monitor blocks */
 void config_monitor_eval(const struct aro_config *c, const char *name,

@@ -136,6 +136,9 @@ static void lock_release(struct aro_server *s, struct aro_lock *l)
 	/* whatever was focused before is still in s->focused; re-assert it so
 	 * the keyboard comes back from the lock surface */
 	aro_focus(s, s->focused);
+
+	/* the windows count for idle inhibition again */
+	idle_update(s);
 	wlr_log(WLR_INFO, "session unlocked");
 }
 
@@ -175,6 +178,7 @@ static void lock_handle_destroy(struct wl_listener *listener, void *data)
 	lock_blank_fit(s, l);
 	wlr_seat_keyboard_notify_clear_focus(s->seat);
 	wlr_seat_pointer_clear_focus(s->seat);
+	idle_update(s);                 /* nothing inhibits a black screen */
 
 	wlr_log(WLR_ERROR, "the lock client died; the session stays locked");
 	notify(s, NOTIFY_ERROR, "lock client crashed — session is still locked");
@@ -239,6 +243,9 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 	wlr_seat_pointer_clear_focus(s->seat);
 
 	wlr_session_lock_v1_send_locked(lock);
+
+	/* windows behind the lock stop holding the screen awake */
+	idle_update(s);
 	wlr_log(WLR_INFO, "session locked");
 }
 

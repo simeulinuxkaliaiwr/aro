@@ -204,6 +204,16 @@ static bool parse_bind(struct aro_config *c, char *value)
 		                num - 1, NULL);
 	}
 
+	if (!strcasecmp(action, "switch")) {
+		if (!arg || !*arg || !strcasecmp(arg, "next"))
+			num = 1;
+		else if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "previous"))
+			num = -1;
+		else
+			return false;
+		return bind_add(c, mods, sym, Q_SWITCH, num, NULL);
+	}
+
 	if (!strcasecmp(action, "split")) {
 		if (!arg)
 			return false;
@@ -235,6 +245,8 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_f, Q_FULLSCREEN, 0, NULL);
 	bind_add(c, M, XKB_KEY_v, Q_SPLIT, LY_ROW, NULL);
 	bind_add(c, M, XKB_KEY_s, Q_SPLIT, LY_COL, NULL);
+	bind_add(c, M, XKB_KEY_Tab, Q_SWITCH, 1, NULL);
+	bind_add(c, M | S, XKB_KEY_Tab, Q_SWITCH, -1, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -306,6 +318,9 @@ void config_defaults(struct aro_config *c)
 		.notify_bg = TH_NOTIFY_BG, .notify_ms = TH_NOTIFY_MS,
 		.scrim = TH_SCRIM,
 		.notify_max_w = TH_NOTIFY_MAX_W,
+		.switch_delay_ms = TH_SWITCH_DELAY_MS,
+		.switch_debounce_ms = TH_SWITCH_DEBOUNCE_MS,
+		.switch_preview_h = TH_SWITCH_PREVIEW_H,
 	};
 	c->theme.font = strdup(TH_FONT);
 	c->theme.font_small = strdup(TH_FONT_SMALL);
@@ -441,7 +456,8 @@ static void rule_free(struct q_rule *r)
 {
 	free(r->app_id);
 	free(r->title);
-	r->app_id = r->title = NULL;
+	free(r->type);
+	r->app_id = r->title = r->type = NULL;
 }
 
 /* parse one rule line */
@@ -456,15 +472,19 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 	char *cur = value, *w;
 
 	while ((w = next_word(&cur, &bad_quote))) {
-		if (!strncasecmp(w, "app_id:", 7) || !strncasecmp(w, "title:", 6)) {
-			bool is_app = (w[0] == 'a' || w[0] == 'A');
+		if (!strncasecmp(w, "app_id:", 7) || !strncasecmp(w, "title:", 6) ||
+		    !strncasecmp(w, "type:", 5)) {
+			char **field = (w[0] == 'a' || w[0] == 'A') ? &r.app_id
+			             : (w[1] == 'i' || w[1] == 'I') ? &r.title
+			             : &r.type;
+			const char *name = field == &r.app_id ? "app_id"
+			                 : field == &r.title ? "title" : "type";
 			char *pat = strchr(w, ':') + 1;
 			if (!*pat) {
-				config_err(c, lineno, "rule: empty %s pattern",
-				           is_app ? "app_id" : "title");
+				config_err(c, lineno, "rule: empty %s pattern", name);
 				goto fail;
 			}
-			if (!set_str(is_app ? &r.app_id : &r.title, pat))
+			if (!set_str(field, pat))
 				goto fail;
 		} else if (!strcasecmp(w, "float")) {
 			r.floating = 1;
@@ -496,9 +516,9 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		config_err(c, lineno, "rule: unterminated quote");
 		goto fail;
 	}
-	if (!r.app_id && !r.title) {
+	if (!r.app_id && !r.title && !r.type) {
 		/* would match every window — much likelier a typo than a wish */
-		config_err(c, lineno, "rule: needs app_id: or title:");
+		config_err(c, lineno, "rule: needs app_id:, title: or type:");
 		goto fail;
 	}
 	if (!acts) {
@@ -519,19 +539,23 @@ fail:
 }
 
 void config_rules_eval(const struct aro_config *c, const char *app_id,
-                       const char *title, struct q_rule_result *out)
+                       const char *title, const char *type,
+                       struct q_rule_result *out)
 {
 	*out = (struct q_rule_result){
 		Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET,
 	};
 	const char *a = app_id ? app_id : "";
 	const char *t = title ? title : "";
+	const char *y = type ? type : "normal";
 
 	for (int i = 0; i < c->nrules; i++) {
 		const struct q_rule *r = &c->rules[i];
 		if (r->app_id && !glob_match(r->app_id, a))
 			continue;
 		if (r->title && !glob_match(r->title, t))
+			continue;
+		if (r->type && !glob_match(r->type, y))
 			continue;
 		if (r->floating != Q_RULE_UNSET)
 			out->floating = r->floating;
@@ -829,6 +853,9 @@ static const struct theme_key theme_keys[] = {
 	{ "notify_color",    K_COLOR, T(notify_bg),    0, 0 },
 	{ "notify_ms",       K_INT,   T(notify_ms),    0, 120000 },
 	{ "notify_max_width",K_INT,   T(notify_max_w), 100, 4000 },
+	{ "switcher_delay_ms",      K_INT, T(switch_delay_ms),    0, 2000 },
+	{ "switcher_debounce_ms",   K_INT, T(switch_debounce_ms), 0, 5000 },
+	{ "switcher_preview_height",K_INT, T(switch_preview_h),   40, 1000 },
 	{ "scrim_color",     K_COLOR, T(scrim),        0, 0 },
 
 	{ "font",       K_STR, T(font),       0, 0 },

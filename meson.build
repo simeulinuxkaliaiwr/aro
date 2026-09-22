@@ -70,6 +70,9 @@ if get_option('compositor')
 
   proto_xml = [
     wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
+    # wlroots' own headers include these two; they are not shipped
+    wl_protocol_dir / 'staging/cursor-shape/cursor-shape-v1.xml',
+    wl_protocol_dir / 'unstable/pointer-constraints/pointer-constraints-unstable-v1.xml',
     'protocols/wlr-layer-shell-unstable-v1.xml',
     'protocols/wlr-output-power-management-unstable-v1.xml',
   ]
@@ -107,6 +110,14 @@ if get_option('compositor')
     install_dir: get_option('datadir') / 'wayland-sessions',
   )
 
+  # shown next to the session name by display managers that show icons
+  install_data('data/icons/aro.svg',
+    install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps',
+  )
+  install_data('data/icons/aro-symbolic.svg',
+    install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps',
+  )
+
   # install the example config somewhere users can find and copy it,
   # since aro doesn't ship a default config.
   install_data('data/config.example',
@@ -117,11 +128,13 @@ if get_option('compositor')
     'src/compositor/aro.c',
     'src/compositor/config.c',
     'src/compositor/idle.c',
+    'src/compositor/ime.c',
     'src/compositor/lock.c',
     'src/ui/ui.c',
     'src/ui/bar.c',
     'src/ui/notify.c',
     'src/ui/prompt.c',
+    'src/ui/switcher.c',
     'src/ui/text.c',
   ]
 

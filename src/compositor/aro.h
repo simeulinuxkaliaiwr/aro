@@ -14,9 +14,11 @@
 #include "bar.h"
 #include "config.h"
 #include "idle.h"
+#include "ime.h"
 #include "lock.h"
 #include "notify.h"
 #include "prompt.h"
+#include "switcher.h"
 #include "layout.h"
 #include "text.h"
 
@@ -57,6 +59,8 @@ struct view_impl {
 	const char *(*title)(struct aro_view *v);
 	/* app_id for rules; WM_CLASS class on X11 */
 	const char *(*app_id)(struct aro_view *v);
+	/* window type for `type:` rules: "normal", "dialog", "splash", ... */
+	const char *(*type)(struct aro_view *v);
 
 	/* visible window geometry inside the surface (CSD shadow margins etc.) */
 	void (*geometry)(struct aro_view *v, struct wlr_box *out);
@@ -118,11 +122,22 @@ struct aro_view {
 
 	anim_box geo;                   /* current vs target geometry */
 	bool mapped;
+	struct wl_list mru_link;        /* aro_switcher.mru; self-linked when out */
+
+	/* foreign toplevel handles (taskbars, window lists); mapped only */
+	struct wlr_foreign_toplevel_handle_v1 *ftl;
+	struct wlr_ext_foreign_toplevel_handle_v1 *ext_ftl;
+	struct wlr_output *ftl_output;  /* the output last reported */
+	bool ftl_fullscreen;            /* the fullscreen state last reported */
+	struct wl_listener ftl_activate;
+	struct wl_listener ftl_close;
+	struct wl_listener ftl_fullscreen_req;
 
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener commit;
 	struct wl_listener set_title;
+	struct wl_listener set_app_id;          /* WM_CLASS on X11 */
 	struct wl_listener request_fullscreen;
 	struct wl_listener request_move;
 	struct wl_listener request_resize;
@@ -170,6 +185,7 @@ struct aro_output {
 	struct q_monitor_set mon_last;
 	bool mon_applied;
 
+
 	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
@@ -179,9 +195,17 @@ struct aro_keyboard {
 	struct wl_list link;
 	struct aro_server *server;
 	struct wlr_keyboard *wlr_keyboard;
+	bool is_virtual;        /* virtual-keyboard: brings its own keymap */
 
 	struct wl_listener modifiers;
 	struct wl_listener key;
+	struct wl_listener destroy;
+};
+
+/* one per pointer constraint, so its destroy can be seen */
+struct aro_constraint {
+	struct aro_server *server;
+	struct wlr_pointer_constraint_v1 *constraint;
 	struct wl_listener destroy;
 };
 
@@ -221,6 +245,18 @@ struct aro_server {
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit_mgr;
 	struct wlr_output_power_manager_v1 *output_power_mgr;
 	struct wlr_output_manager_v1 *output_mgr;   /* wlr-randr, kanshi */
+	struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
+	struct wlr_pointer_constraints_v1 *pointer_constraints;
+	struct wlr_pointer_constraint_v1 *active_constraint;
+	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
+	struct wlr_xdg_activation_v1 *xdg_activation;
+	struct wlr_gamma_control_manager_v1 *gamma_mgr;
+	struct aro_ime *ime;                    /* ime.c; NULL if unavailable */
+	struct wlr_foreign_toplevel_manager_v1 *ftl_mgr;
+	struct wlr_ext_foreign_toplevel_list_v1 *ext_ftl_list;
+	struct aro_view *ftl_activated;         /* last view reported focused */
+	struct wlr_virtual_keyboard_manager_v1 *virtual_kbd_mgr;
+	struct wlr_virtual_pointer_manager_v1 *virtual_ptr_mgr;
 	struct aro_lock *lock;               /* non-NULL while locked */
 	struct wlr_seat *seat;
 	struct wlr_cursor *cursor;
@@ -233,6 +269,7 @@ struct aro_server {
 	struct wl_list layers;
 	struct wl_list notifications;
 	struct aro_prompt prompt;            /* the modal yes/no card */
+	struct aro_switcher switcher;        /* mod+tab */
 	struct wl_list inhibitors;
 
 	/* per-output state lives in aro_output */
@@ -291,6 +328,11 @@ struct aro_server {
 	struct wl_listener output_power_set_mode;
 	struct wl_listener output_mgr_apply;
 	struct wl_listener output_mgr_test;
+	struct wl_listener new_constraint;
+	struct wl_listener request_set_shape;
+	struct wl_listener request_activate;
+	struct wl_listener new_virtual_keyboard;
+	struct wl_listener new_virtual_pointer;
 	struct wl_listener new_input;
 	struct wl_listener cursor_motion;
 	struct wl_listener cursor_motion_abs;
@@ -314,6 +356,8 @@ struct aro_server {
 /* aro.c */
 void aro_arrange(struct aro_server *s);
 void aro_focus(struct aro_server *s, struct aro_view *v);
+/* switch to the window's workspace and focus it */
+void view_raise_and_focus(struct aro_server *s, struct aro_view *v);
 struct aro_output *aro_focused_output(struct aro_server *s);
 
 /* shell wrappers */

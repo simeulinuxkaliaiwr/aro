@@ -92,6 +92,12 @@
 /* focus follows mouse default */
 #define TH_FOCUS_FOLLOWS_MOUSE 0
 
+/* window switcher (mod+tab) */
+#define TH_SWITCH_DELAY_MS    150       /* a quick tap swaps without the card */
+#define TH_SWITCH_DEBOUNCE_MS 750       /* focus this long before it counts */
+#define TH_SWITCH_PREVIEW_H   260       /* preview height; half the screen
+                                           at most */
+
 /* confirm quit default */
 #define TH_CONFIRM_QUIT 1
 #define TH_RESIZE_STEP  0.04    /* one press of the resize bind */

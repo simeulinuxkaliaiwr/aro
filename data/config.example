@@ -107,6 +107,16 @@ focus_anim_ms = 160
 drop_anim_ms = 160
 open_scale = 0.88           # starting scale for new windows
 
+# === window switcher (mod+tab) ===
+# windows in recently-used order, across every workspace and screen.
+# hold mod and tap tab to walk the list; let go of mod to switch.
+switcher_delay_ms = 150         # a quick tap swaps windows without showing the card
+switcher_debounce_ms = 750      # how long a window needs focus to count as "used"
+                                # (typing into it counts immediately)
+switcher_preview_height = 260   # capped at half the screen; with many
+                                # windows previews shrink (to 60% at most)
+                                # so the row fits the screen width
+
 # === pointer ===
 drag_threshold = 12         # pixels to drag before a tiled window detaches
 resize_zone = 8             # edge grab area in pixels
@@ -131,25 +141,34 @@ resize_step = 0.04          # resize amount per keypress
 # === window rules ===
 # rule = <match>... <action>...
 #
-# match:   app_id:<pattern>   title:<pattern>
+# match:   app_id:<pattern>   title:<pattern>   type:<pattern>
 #          supports globs (* and ?). case-insensitive.
 #          wrap patterns with spaces in quotes: title:"Open File".
 #          all matches on a line must be true. you need at least one match.
 #          (app_id maps to WM_CLASS for X11 windows).
 #
+#          type is the window type: normal, dialog, splash, utility,
+#          toolbar, menu, dropdown-menu, popup-menu, tooltip, notification,
+#          combo, dnd, dock, desktop. X11 windows report their own; Wayland
+#          windows are only ever normal, or dialog when they have a parent.
+#          dialog, utility, toolbar and splash already float by default.
+#
 # action:  float | tile | fullscreen | workspace <1..32>
 #          use `tile` to force tiling on dialogs, or `float` to force floating.
 #
 # rules apply top-to-bottom. if multiple rules set the same property, the last one wins.
-# rules are evaluated on window map, title change, and config reload.
+# rules are evaluated on window map, title change, app_id change, and config
+# reload. only what changed is re-applied.
 #
-# tip: check the logs when a window opens to find its app_id:
-#   map: app_id="org.gnome.Calculator" title="Calculator"
+# tip: check the logs when a window opens to find its app_id and type:
+#   map: app_id="org.gnome.Calculator" title="Calculator" type=normal
 #
 # rule = app_id:mpv  workspace 3
 # rule = app_id:firefox  title:Picture-in-Picture  float
 # rule = app_id:org.gnome.Calculator  float
 # rule = title:*YouTube*  fullscreen
+# rule = type:splash  workspace 1
+# rule = type:dialog  app_id:gimp*  tile
 
 # === keybindings ===
 # bind = <combo>, <action>[, <argument>]
@@ -160,12 +179,15 @@ resize_step = 0.04          # resize amount per keypress
 #          focus|move|resize left|right|up|down
 #          workspace|sendto 1..32
 #          split right|down
+#          switch next|prev
 bind = mod+Return, spawn, foot
 bind = mod+d, spawn, fuzzel
 bind = mod+q, close
 bind = mod+shift+e, quit
 bind = mod+space, float
 bind = mod+f, fullscreen
+bind = mod+Tab, switch, next
+bind = mod+shift+Tab, switch, prev
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

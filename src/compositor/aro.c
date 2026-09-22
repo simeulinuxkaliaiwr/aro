@@ -40,7 +40,17 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_relative_pointer_v1.h>
+#include <wlr/types/wlr_virtual_keyboard_v1.h>
+#include <wlr/types/wlr_virtual_pointer_v1.h>
+#include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_xdg_foreign_registry.h>
 #include <wlr/types/wlr_xdg_foreign_v1.h>
@@ -61,6 +71,7 @@
 #include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -69,6 +80,7 @@
 #include <wlr/xwayland.h>
 #endif
 #include <wlr/util/edges.h>
+#include <wlr/util/region.h>
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 
@@ -82,6 +94,14 @@ static const anim_ease FLAT = { TH_EASE_FLAT_X1, TH_EASE_FLAT_Y1,
 static void arrange_layers(struct aro_server *s);
 static void drag_icon_update(struct aro_server *s);
 static void pointer_motion_common(struct aro_server *s, uint32_t time);
+static void constraint_sync(struct aro_server *s);
+static void ftl_sync_view(struct aro_view *v);
+static void ftl_sync_activated(struct aro_server *s);
+static void ftl_create(struct aro_view *v);
+static void ftl_destroy(struct aro_view *v);
+static void ftl_update_ids(struct aro_view *v);
+static struct aro_output *output_from_wlr(struct aro_server *s,
+                                          struct wlr_output *wo);
 static void arrange_layers_output(struct aro_output *o);
 static void output_mgr_update(struct aro_server *s);
 static struct aro_output *output_evacuate(struct aro_server *s,
@@ -284,6 +304,11 @@ void aro_arrange(struct aro_server *s)
 
 	/* recheck idle inhibitors */
 	idle_update(s);
+
+	/* taskbars see outputs and fullscreen changes; arrange follows all of them */
+	struct aro_view *fv;
+	wl_list_for_each(fv, &s->views, link)
+		ftl_sync_view(fv);
 }
 
 static void view_set_visible(struct aro_view *v, bool visible)
@@ -386,7 +411,24 @@ static void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 
 /* ── focus ─────────────────────────────────────────────────────────────── */
 
+static void focus_apply(struct aro_server *s, struct aro_view *v);
+
+/* pointer constraints and text inputs both follow keyboard focus */
+static void keyboard_focus_changed(struct aro_server *s)
+{
+	constraint_sync(s);
+	ime_set_focus(s, s->seat->keyboard_state.focused_surface);
+}
+
 void aro_focus(struct aro_server *s, struct aro_view *v)
+{
+	focus_apply(s, v);
+	keyboard_focus_changed(s);
+	ftl_sync_activated(s);
+	mru_focus(s, s->focused);
+}
+
+static void focus_apply(struct aro_server *s, struct aro_view *v)
 {
 	/* while locked, remember focus but don't apply it */
 	if (aro_locked(s)) {
@@ -477,6 +519,12 @@ static const char *xdg_app_id(struct aro_view *v)
 	return v->toplevel ? v->toplevel->app_id : NULL;
 }
 
+/* xdg-shell has no window types; a toplevel with a parent is a dialog */
+static const char *xdg_type(struct aro_view *v)
+{
+	return v->toplevel && v->toplevel->parent ? "dialog" : "normal";
+}
+
 /* float heuristics */
 static bool xdg_wants_float(struct aro_view *v)
 {
@@ -536,6 +584,7 @@ static const struct view_impl xdg_impl = {
 	.set_fullscreen  = xdg_set_fullscreen,
 	.title           = xdg_title,
 	.app_id          = xdg_app_id,
+	.type            = xdg_type,
 	.geometry        = xdg_geometry,
 	.wants_float     = xdg_wants_float,
 	.wants_fullscreen = xdg_wants_fullscreen,
@@ -580,6 +629,11 @@ const char *view_app_id(struct aro_view *v)
 	return (v && v->impl && v->impl->app_id) ? v->impl->app_id(v) : NULL;
 }
 
+static const char *view_type(struct aro_view *v)
+{
+	return v && v->impl && v->impl->type ? v->impl->type(v) : "normal";
+}
+
 struct wlr_surface *view_surface(struct aro_view *v)
 {
 	return (v && v->impl && v->impl->surface) ? v->impl->surface(v) : NULL;
@@ -604,10 +658,31 @@ bool aro_surface_visible(struct aro_server *s, struct wlr_surface *surface)
 	if (!surface->mapped)
 		return false;
 
+	/* locked: only what the lock screen itself shows is on screen */
+	if (aro_locked(s)) {
+		if (s->lock->abandoned)
+			return false;
+		struct aro_lock_surface *ls;
+		wl_list_for_each(ls, &s->lock->surfaces, link)
+			if (ls->surface->surface == surface)
+				return true;
+		return false;
+	}
+
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (view_surface(v) == surface)
-			return view_visible(v);
+		if (view_surface(v) != surface)
+			continue;
+		if (!view_visible(v))
+			return false;
+		/* a fullscreen window on the same screen and workspace hides it */
+		struct aro_view *f;
+		wl_list_for_each(f, &s->views, link) {
+			if (f != v && f->fullscreen && view_visible(f) &&
+			    f->output == v->output && f->workspace == v->workspace)
+				return false;
+		}
+		return true;
 	}
 	return true;
 }
@@ -803,6 +878,16 @@ static void view_request_fullscreen(struct wl_listener *l, void *data)
 	struct aro_view *v = wl_container_of(l, v, request_fullscreen);
 	(void)data;
 
+#ifdef ARO_XWAYLAND
+	/* shared by both shells; an X11 view has no xdg toplevel. Before
+	 * map the state is read by wants_fullscreen instead. */
+	if (v->xsurface) {
+		if (v->mapped)
+			view_set_fullscreen(v->server, v, v->xsurface->fullscreen);
+		return;
+	}
+#endif
+
 	/* answer fullscreen requests even when unmapped */
 	if (!v->mapped) {
 		wlr_xdg_surface_schedule_configure(v->toplevel->base);
@@ -821,7 +906,7 @@ static void view_rules_reapply(struct aro_view *v)
 		return;
 
 	struct q_rule_result r, last = v->rule_last;
-	config_rules_eval(&s->cfg, view_app_id(v), view_title(v), &r);
+	config_rules_eval(&s->cfg, view_app_id(v), view_title(v), view_type(v), &r);
 	v->rule_last = r;       /* before acting: nothing below re-enters, but
 	                           a stale answer must never be compared twice */
 
@@ -1449,11 +1534,11 @@ static void view_map(struct wl_listener *l, void *data)
 
 	/* evaluate rules before placement */
 	const char *app_id = view_app_id(v), *title = view_title(v);
-	wlr_log(WLR_INFO, "map: app_id=\"%s\" title=\"%s\"",
-	        app_id ? app_id : "", title ? title : "");
+	wlr_log(WLR_INFO, "map: app_id=\"%s\" title=\"%s\" type=%s",
+	        app_id ? app_id : "", title ? title : "", view_type(v));
 
 	struct q_rule_result r;
-	config_rules_eval(&s->cfg, app_id, title, &r);
+	config_rules_eval(&s->cfg, app_id, title, view_type(v), &r);
 	v->rule_last = r;
 
 	const int ws = r.workspace != Q_RULE_UNSET ? r.workspace : o->cur_ws;
@@ -1520,6 +1605,8 @@ static void view_map(struct wl_listener *l, void *data)
 	anim_box_set(&v->geo, small);
 
 	ui_frame_clip_content(v);
+	ftl_create(v);
+	mru_add(s, v);
 
 	/* don't focus hidden windows */
 	view_set_visible(v, here);
@@ -1539,6 +1626,8 @@ static void view_unmap(struct wl_listener *l, void *data)
 	v->mapped = false;
 	view_set_visible(v, false);
 	grab_forget(s, v);
+	ftl_destroy(v);
+	mru_remove(s, v);
 
 	/* drop tiled resize grab if windows close */
 	if (s->cursor_mode == ARO_CURSOR_RESIZE_TILE)
@@ -1596,6 +1685,7 @@ static void view_set_title(struct wl_listener *l, void *data)
 
 	/* reapply rules on title change */
 	view_rules_reapply(v);
+	ftl_update_ids(v);
 
 	if (v->fullscreen || !v->output)
 		return;
@@ -1604,10 +1694,24 @@ static void view_set_title(struct wl_listener *l, void *data)
 		bar_update(&v->output->bar, v->output);
 }
 
+/* app_id (WM_CLASS on X11) changed after map: rules and taskbars follow */
+static void view_set_app_id(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, set_app_id);
+	(void)data;
+	if (!v->mapped || !v->output)
+		return;
+	view_rules_reapply(v);
+	ftl_update_ids(v);
+}
+
 static void view_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, destroy);
 	(void)data;
+
+	ftl_destroy(v);
+	mru_remove(v->server, v);
 
 	if (v->server->focused == v)
 		v->server->focused = NULL;
@@ -1623,6 +1727,7 @@ static void view_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&v->unmap.link);
 	wl_list_remove(&v->commit.link);
 	wl_list_remove(&v->set_title.link);
+	wl_list_remove(&v->set_app_id.link);
 	wl_list_remove(&v->request_fullscreen.link);
 	wl_list_remove(&v->request_move.link);
 	wl_list_remove(&v->request_resize.link);
@@ -1719,6 +1824,7 @@ static void new_xdg_toplevel(struct wl_listener *l, void *data)
 	v->impl = &xdg_impl;
 	v->csd = true;      /* until a decoration says otherwise */
 	v->toplevel = toplevel;
+	wl_list_init(&v->mru_link);
 
 	if (!ui_frame_create(v, s->l_tiled)) {
 		free(v);
@@ -1738,6 +1844,8 @@ static void new_xdg_toplevel(struct wl_listener *l, void *data)
 	wl_signal_add(&toplevel->base->surface->events.commit, &v->commit);
 	v->set_title.notify = view_set_title;
 	wl_signal_add(&toplevel->events.set_title, &v->set_title);
+	v->set_app_id.notify = view_set_app_id;
+	wl_signal_add(&toplevel->events.set_app_id, &v->set_app_id);
 	v->request_fullscreen.notify = view_request_fullscreen;
 	wl_signal_add(&toplevel->events.request_fullscreen, &v->request_fullscreen);
 	v->request_move.notify = view_request_move;
@@ -1783,6 +1891,9 @@ static void layer_focus(struct aro_server *s, struct aro_layer *l)
 	} else {
 		wlr_seat_keyboard_notify_clear_focus(s->seat);
 	}
+
+	/* a launcher taking the keyboard releases a game's pointer lock */
+	keyboard_focus_changed(s);
 }
 
 static void layer_map(struct wl_listener *listener, void *data)
@@ -2042,6 +2153,13 @@ static void output_destroy(struct wl_listener *l, void *data)
 		dest = output_evacuate(s, o);
 		bar_finish(&o->bar);
 	}
+
+	/* toplevel handles drop a destroyed output themselves; forget it too,
+	 * so a new output at the same address is not taken for this one */
+	struct aro_view *fv;
+	wl_list_for_each(fv, &s->views, link)
+		if (fv->ftl_output == o->wlr_output)
+			fv->ftl_output = NULL;
 	free(o);
 
 	if (dest) {
@@ -2208,6 +2326,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 {
 	/* dismiss prompt on output loss */
 	prompt_output_gone(s, o);
+	switcher_output_gone(s, o);
 
 	/* clear grabs on output loss */
 	if (s->grabbed && s->grabbed->output == o)
@@ -2842,6 +2961,9 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		if (f)
 			view_set_fullscreen(s, f, !f->fullscreen);
 		return;
+	case Q_SWITCH:
+		switcher_step(s, b->num);
+		return;
 	case Q_SPLIT:
 		/* one-shot split */
 		s->pending_split = (ly_dir)b->num;
@@ -2926,6 +3048,23 @@ static bool handle_bind(struct aro_server *s, uint32_t mods, xkb_keysym_t sym)
 	return false;
 }
 
+/* while the switcher is open only its own bind acts */
+static bool handle_switch_bind(struct aro_server *s, uint32_t mods,
+                               xkb_keysym_t sym)
+{
+	const uint32_t care = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
+	                      WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO;
+	mods &= care;
+	for (int i = 0; i < s->cfg.nbinds; i++) {
+		const struct q_bind *b = &s->cfg.binds[i];
+		if (b->action == Q_SWITCH && b->sym == sym && b->mods == mods) {
+			switcher_step(s, b->num);
+			return true;
+		}
+	}
+	return false;
+}
+
 static void keyboard_key(struct wl_listener *l, void *data)
 {
 	struct aro_keyboard *kb = wl_container_of(l, kb, key);
@@ -2960,9 +3099,32 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		return;
 	}
 
+	/*
+	 * The switcher owns key presses while it is open, so mod+q on the way
+	 * to a window cannot close another. Releases still reach the client:
+	 * it saw mod go down before the switcher opened.
+	 */
+	if (!handled && !aro_locked(s) && switcher_active(s) &&
+	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		bool stepped = false;
+		for (int i = 0; i < nraw && !stepped; i++)
+			stepped = handle_switch_bind(s, mods, raw[i]);
+		for (int i = 0; i < nraw && !stepped && switcher_active(s); i++)
+			switcher_key(s, raw[i]);
+		return;
+	}
+
 	if (!handled && ev->state == WL_KEYBOARD_KEY_STATE_PRESSED)
 		for (int i = 0; i < nraw; i++)
 			handled |= handle_bind(s, mods, raw[i]);
+
+	/* typing into a window makes it the most recent one at once */
+	if (!handled && ev->state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		mru_touch(s);
+
+	/* bindings first, then an input method's grab, then the client */
+	if (!handled && ime_key(s, kb, ev))
+		return;
 
 	if (!handled) {
 		wlr_seat_set_keyboard(s->seat, kb->wlr_keyboard);
@@ -2975,6 +3137,12 @@ static void keyboard_modifiers(struct wl_listener *l, void *data)
 {
 	struct aro_keyboard *kb = wl_container_of(l, kb, modifiers);
 	(void)data;
+
+	/* letting go of mod picks the selected window */
+	switcher_modifiers(kb->server, wlr_keyboard_get_modifiers(kb->wlr_keyboard));
+
+	if (ime_modifiers(kb->server, kb))
+		return;
 
 	wlr_seat_set_keyboard(kb->server->seat, kb->wlr_keyboard);
 	wlr_seat_keyboard_notify_modifiers(kb->server->seat,
@@ -3018,7 +3186,17 @@ static void apply_keymap(struct aro_server *s, struct wlr_keyboard *wlr_kb)
 	wlr_keyboard_set_repeat_info(wlr_kb, 25, 600);
 }
 
-static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev)
+static void seat_update_caps(struct aro_server *s)
+{
+	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
+	if (!wl_list_empty(&s->keyboards))
+		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	wlr_seat_set_capabilities(s->seat, caps);
+}
+
+/* virtual keyboards (wtype, remote input) send their own keymap */
+static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev,
+                         bool is_virtual)
 {
 	struct wlr_keyboard *wlr_kb = wlr_keyboard_from_input_device(dev);
 
@@ -3027,8 +3205,10 @@ static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev)
 		return;
 	kb->server = s;
 	kb->wlr_keyboard = wlr_kb;
+	kb->is_virtual = is_virtual;
 
-	apply_keymap(s, wlr_kb);
+	if (!is_virtual)
+		apply_keymap(s, wlr_kb);
 
 	kb->modifiers.notify = keyboard_modifiers;
 	wl_signal_add(&wlr_kb->events.modifiers, &kb->modifiers);
@@ -3047,7 +3227,7 @@ static void new_input(struct wl_listener *l, void *data)
 	struct wlr_input_device *dev = data;
 
 	if (dev->type == WLR_INPUT_DEVICE_KEYBOARD) {
-		new_keyboard(s, dev);
+		new_keyboard(s, dev, false);
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
 
@@ -3066,10 +3246,26 @@ static void new_input(struct wl_listener *l, void *data)
 		}
 	}
 
-	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
-	if (!wl_list_empty(&s->keyboards))
-		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
-	wlr_seat_set_capabilities(s->seat, caps);
+	seat_update_caps(s);
+}
+
+static void new_virtual_keyboard(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, new_virtual_keyboard);
+	struct wlr_virtual_keyboard_v1 *vk = data;
+	new_keyboard(s, &vk->keyboard.base, true);
+	seat_update_caps(s);
+}
+
+static void new_virtual_pointer(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, new_virtual_pointer);
+	struct wlr_virtual_pointer_v1_new_pointer_event *ev = data;
+	struct wlr_input_device *dev = &ev->new_pointer->pointer.base;
+
+	wlr_cursor_attach_input_device(s->cursor, dev);
+	if (ev->suggested_output)
+		wlr_cursor_map_input_to_output(s->cursor, dev, ev->suggested_output);
 }
 
 /* pointer hit testing */
@@ -3155,12 +3351,147 @@ static void pointer_motion_common(struct aro_server *s, uint32_t time)
 	}
 }
 
+/* ── pointer constraints ───────────────────────────────────────────────── */
+/*
+ * Games lock or confine the pointer to their window. A constraint is only
+ * active for the surface with keyboard focus, and only binds while the
+ * pointer is over that surface. ptr_lx/ptr_ly is the focused surface's
+ * origin, valid exactly when it has pointer focus.
+ */
+
+/* a released lock puts the cursor where the game last showed it */
+static void constraint_warp_to_hint(struct aro_server *s,
+                                    struct wlr_pointer_constraint_v1 *c,
+                                    bool tell_client)
+{
+	if (c->type != WLR_POINTER_CONSTRAINT_V1_LOCKED)
+		return;
+	if (!(c->current.committed & WLR_POINTER_CONSTRAINT_V1_STATE_CURSOR_HINT))
+		return;
+	if (s->seat->pointer_state.focused_surface != c->surface)
+		return;
+
+	double sx = c->current.cursor_hint.x, sy = c->current.cursor_hint.y;
+	wlr_cursor_warp(s->cursor, NULL, s->ptr_lx + sx, s->ptr_ly + sy);
+	if (tell_client)
+		wlr_seat_pointer_warp(s->seat, sx, sy);
+}
+
+static void constraint_set_active(struct aro_server *s,
+                                  struct wlr_pointer_constraint_v1 *c)
+{
+	struct wlr_pointer_constraint_v1 *old = s->active_constraint;
+	if (old == c)
+		return;
+	s->active_constraint = c;
+	if (old) {
+		constraint_warp_to_hint(s, old, true);
+		wlr_pointer_constraint_v1_send_deactivated(old);
+	}
+	if (c)
+		wlr_pointer_constraint_v1_send_activated(c);
+}
+
+/*
+ * Called on focus changes, new constraints and every motion event. The
+ * lock screen and the exit prompt release any constraint: both need the
+ * pointer free.
+ */
+static void constraint_sync(struct aro_server *s)
+{
+	if (!s->pointer_constraints)
+		return;
+
+	struct wlr_pointer_constraint_v1 *c = NULL;
+	struct wlr_surface *kf = s->seat->keyboard_state.focused_surface;
+	if (kf && !aro_locked(s) && !prompt_active(s))
+		c = wlr_pointer_constraints_v1_constraint_for_surface(
+			s->pointer_constraints, kf, s->seat);
+	constraint_set_active(s, c);
+}
+
+static void constraint_destroy(struct wl_listener *l, void *data)
+{
+	struct aro_constraint *ac = wl_container_of(l, ac, destroy);
+	struct aro_server *s = ac->server;
+	(void)data;
+
+	/* destroying a lock is how a client releases it. The surface may be
+	 * going away too, so move the cursor but send the client nothing. */
+	if (s->active_constraint == ac->constraint) {
+		constraint_warp_to_hint(s, ac->constraint, false);
+		s->active_constraint = NULL;
+	}
+
+	wl_list_remove(&ac->destroy.link);
+	free(ac);
+}
+
+static void new_constraint(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, new_constraint);
+	struct wlr_pointer_constraint_v1 *c = data;
+
+	struct aro_constraint *ac = calloc(1, sizeof *ac);
+	if (!ac)
+		return;
+	ac->server = s;
+	ac->constraint = c;
+	ac->destroy.notify = constraint_destroy;
+	wl_signal_add(&c->events.destroy, &ac->destroy);
+
+	constraint_sync(s);
+}
+
+/*
+ * Clip a motion delta to the active constraint. Returns false when the
+ * pointer is locked and must not move at all. Grabs (our own move and
+ * resize) are never constrained.
+ */
+static bool constrain_motion(struct aro_server *s, double *dx, double *dy)
+{
+	struct wlr_pointer_constraint_v1 *c = s->active_constraint;
+	if (!c || s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
+		return true;
+	if (s->seat->pointer_state.focused_surface != c->surface)
+		return true;
+	if (c->type == WLR_POINTER_CONSTRAINT_V1_LOCKED)
+		return false;
+
+	double sx = s->cursor->x - s->ptr_lx, sy = s->cursor->y - s->ptr_ly;
+	double cx, cy;
+	if (wlr_region_confine(&c->region, sx, sy, sx + *dx, sy + *dy, &cx, &cy)) {
+		*dx = cx - sx;
+		*dy = cy - sy;
+	}
+	return true;
+}
+
+/* raw deltas for games, sent even while the pointer is locked */
+static void send_relative_motion(struct aro_server *s, uint32_t time_msec,
+                                 double dx, double dy,
+                                 double udx, double udy)
+{
+	if (s->relative_pointer_mgr)
+		wlr_relative_pointer_manager_v1_send_relative_motion(
+			s->relative_pointer_mgr, s->seat,
+			(uint64_t)time_msec * 1000, dx, dy, udx, udy);
+}
+
 static void cursor_motion(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, cursor_motion);
 	idle_activity(s);
 	struct wlr_pointer_motion_event *ev = data;
-	wlr_cursor_move(s->cursor, &ev->pointer->base, ev->delta_x, ev->delta_y);
+
+	constraint_sync(s);
+	send_relative_motion(s, ev->time_msec, ev->delta_x, ev->delta_y,
+	                     ev->unaccel_dx, ev->unaccel_dy);
+
+	double dx = ev->delta_x, dy = ev->delta_y;
+	if (!constrain_motion(s, &dx, &dy))
+		return;
+	wlr_cursor_move(s->cursor, &ev->pointer->base, dx, dy);
 	if (!aro_locked(s) && prompt_active(s)) {
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -3176,7 +3507,19 @@ static void cursor_motion_abs(struct wl_listener *l, void *data)
 	struct aro_server *s = wl_container_of(l, s, cursor_motion_abs);
 	idle_activity(s);
 	struct wlr_pointer_motion_absolute_event *ev = data;
-	wlr_cursor_warp_absolute(s->cursor, &ev->pointer->base, ev->x, ev->y);
+
+	/* as a delta, so constraints and relative motion work the same way
+	 * for tablets and nested sessions */
+	double lx, ly;
+	wlr_cursor_absolute_to_layout_coords(s->cursor, &ev->pointer->base,
+	                                     ev->x, ev->y, &lx, &ly);
+	double dx = lx - s->cursor->x, dy = ly - s->cursor->y;
+
+	constraint_sync(s);
+	send_relative_motion(s, ev->time_msec, dx, dy, dx, dy);
+	if (!constrain_motion(s, &dx, &dy))
+		return;
+	wlr_cursor_move(s->cursor, &ev->pointer->base, dx, dy);
 	if (!aro_locked(s) && prompt_active(s)) {
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -3293,6 +3636,203 @@ static void request_cursor(struct wl_listener *l, void *data)
 		                       ev->hotspot_x, ev->hotspot_y);
 }
 
+/* cursor-shape-v1: a named cursor instead of a client-drawn surface */
+static void request_set_shape(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, request_set_shape);
+	const struct wlr_cursor_shape_manager_v1_request_set_shape_event *ev = data;
+
+	if (ev->device_type != WLR_CURSOR_SHAPE_MANAGER_V1_DEVICE_TYPE_POINTER)
+		return;
+	if (s->seat->pointer_state.focused_client != ev->seat_client)
+		return;
+	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr,
+	                       wlr_cursor_shape_v1_name(ev->shape));
+}
+
+/*
+ * Show a window and focus it, switching its output's workspace if needed.
+ * With focus-follows-mouse the cursor goes too, or the next twitch of the
+ * mouse would hand focus back to whatever it was resting on.
+ */
+void view_raise_and_focus(struct aro_server *s, struct aro_view *v)
+{
+	if (!v || !v->mapped || !v->output)
+		return;             /* parked: no screen to show it on */
+
+	s->focused_output = v->output;
+	if (v->workspace != v->output->cur_ws)
+		workspace_show(s, v->workspace);
+	aro_focus(s, v);
+	if (s->cfg.focus_follows_mouse)
+		cursor_warp_to_view(s, v);
+}
+
+/*
+ * xdg-activation: a window asks for focus, e.g. Firefox after a link is
+ * clicked in a terminal. Only tokens born from real input are honoured;
+ * one with no seat came from nothing the user did.
+ */
+static void request_activate(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, request_activate);
+	const struct wlr_xdg_activation_v1_request_activate_event *ev = data;
+
+	if (aro_locked(s) || prompt_active(s))
+		return;
+
+	struct aro_view *v = NULL, *it;
+	wl_list_for_each(it, &s->views, link) {
+		if (it->mapped && view_surface(it) == ev->surface) {
+			v = it;
+			break;
+		}
+	}
+	if (!v)
+		return;
+
+	if (!ev->token->seat) {
+		wlr_log(WLR_DEBUG, "activation for \"%s\" ignored: no input behind it",
+		        view_app_id(v) ? view_app_id(v) : "");
+		return;
+	}
+	view_raise_and_focus(s, v);
+}
+
+/* ── foreign toplevel ──────────────────────────────────────────────────── */
+/*
+ * Two protocols: wlr-foreign-toplevel-management (waybar's taskbar; can
+ * activate, close, fullscreen) and ext-foreign-toplevel-list (read-only).
+ * Handles exist while a window is mapped. Minimize and maximize requests
+ * are ignored: a tiling layout has neither.
+ */
+
+static void ftl_on_activate(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, ftl_activate);
+	(void)data;
+	if (aro_locked(v->server) || prompt_active(v->server))
+		return;
+	view_raise_and_focus(v->server, v);
+}
+
+static void ftl_on_close(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, ftl_close);
+	(void)data;
+	view_close(v);
+}
+
+static void ftl_on_fullscreen(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, ftl_fullscreen_req);
+	const struct wlr_foreign_toplevel_handle_v1_fullscreen_event *ev = data;
+	view_set_fullscreen(v->server, v, ev->fullscreen);
+}
+
+/* wlroots copies these; NULL is not accepted everywhere, "" is */
+static void ftl_update_ids(struct aro_view *v)
+{
+	const char *title = view_title(v), *app_id = view_app_id(v);
+	title = title ? title : "";
+	app_id = app_id ? app_id : "";
+
+	if (v->ftl) {
+		wlr_foreign_toplevel_handle_v1_set_title(v->ftl, title);
+		wlr_foreign_toplevel_handle_v1_set_app_id(v->ftl, app_id);
+	}
+	if (v->ext_ftl) {
+		struct wlr_ext_foreign_toplevel_handle_v1_state st = {
+			.title = title, .app_id = app_id,
+		};
+		wlr_ext_foreign_toplevel_handle_v1_update_state(v->ext_ftl, &st);
+	}
+}
+
+static void ftl_create(struct aro_view *v)
+{
+	struct aro_server *s = v->server;
+	const char *title = view_title(v), *app_id = view_app_id(v);
+
+	if (s->ext_ftl_list && !v->ext_ftl) {
+		struct wlr_ext_foreign_toplevel_handle_v1_state st = {
+			.title = title ? title : "", .app_id = app_id ? app_id : "",
+		};
+		v->ext_ftl = wlr_ext_foreign_toplevel_handle_v1_create(s->ext_ftl_list, &st);
+	}
+
+	if (s->ftl_mgr && !v->ftl) {
+		v->ftl = wlr_foreign_toplevel_handle_v1_create(s->ftl_mgr);
+		if (v->ftl) {
+			v->ftl_output = NULL;
+			v->ftl_fullscreen = false;
+			v->ftl_activate.notify = ftl_on_activate;
+			wl_signal_add(&v->ftl->events.request_activate, &v->ftl_activate);
+			v->ftl_close.notify = ftl_on_close;
+			wl_signal_add(&v->ftl->events.request_close, &v->ftl_close);
+			v->ftl_fullscreen_req.notify = ftl_on_fullscreen;
+			wl_signal_add(&v->ftl->events.request_fullscreen,
+			              &v->ftl_fullscreen_req);
+		}
+	}
+
+	ftl_update_ids(v);
+	ftl_sync_view(v);
+}
+
+static void ftl_destroy(struct aro_view *v)
+{
+	struct aro_server *s = v->server;
+	if (s->ftl_activated == v)
+		s->ftl_activated = NULL;
+
+	if (v->ftl) {
+		wl_list_remove(&v->ftl_activate.link);
+		wl_list_remove(&v->ftl_close.link);
+		wl_list_remove(&v->ftl_fullscreen_req.link);
+		wlr_foreign_toplevel_handle_v1_destroy(v->ftl);
+		v->ftl = NULL;
+	}
+	v->ftl_output = NULL;
+	if (v->ext_ftl) {
+		wlr_ext_foreign_toplevel_handle_v1_destroy(v->ext_ftl);
+		v->ext_ftl = NULL;
+	}
+}
+
+/* the output a window is on, and whether it is fullscreen */
+static void ftl_sync_view(struct aro_view *v)
+{
+	if (!v->ftl)
+		return;
+
+	struct wlr_output *wo = v->output && v->output->enabled
+	                      ? v->output->wlr_output : NULL;
+	if (wo != v->ftl_output) {
+		if (v->ftl_output)
+			wlr_foreign_toplevel_handle_v1_output_leave(v->ftl, v->ftl_output);
+		if (wo)
+			wlr_foreign_toplevel_handle_v1_output_enter(v->ftl, wo);
+		v->ftl_output = wo;
+	}
+	if (v->fullscreen != v->ftl_fullscreen) {
+		wlr_foreign_toplevel_handle_v1_set_fullscreen(v->ftl, v->fullscreen);
+		v->ftl_fullscreen = v->fullscreen;
+	}
+}
+
+static void ftl_sync_activated(struct aro_server *s)
+{
+	struct aro_view *want = s->focused && s->focused->ftl ? s->focused : NULL;
+	if (want == s->ftl_activated)
+		return;
+	if (s->ftl_activated && s->ftl_activated->ftl)
+		wlr_foreign_toplevel_handle_v1_set_activated(s->ftl_activated->ftl, false);
+	if (want)
+		wlr_foreign_toplevel_handle_v1_set_activated(want->ftl, true);
+	s->ftl_activated = want;
+}
+
 static int clock_tick(void *data)
 {
 	struct aro_server *s = data;
@@ -3347,6 +3887,38 @@ static const char *xwl_app_id(struct aro_view *v)
 	return v->xsurface ? v->xsurface->class : NULL;
 }
 
+/* _NET_WM_WINDOW_TYPE, most specific first; the names `type:` rules match */
+static const struct {
+	enum wlr_xwayland_net_wm_window_type type;
+	const char *name;
+} xwl_types[] = {
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH,        "splash" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG,        "dialog" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_UTILITY,       "utility" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLBAR,       "toolbar" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_MENU,          "menu" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DROPDOWN_MENU, "dropdown-menu" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_POPUP_MENU,    "popup-menu" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLTIP,       "tooltip" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_NOTIFICATION,  "notification" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_COMBO,         "combo" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DND,           "dnd" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DOCK,          "dock" },
+	{ WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DESKTOP,       "desktop" },
+};
+
+static const char *xwl_type(struct aro_view *v)
+{
+	struct wlr_xwayland_surface *x = v->xsurface;
+	if (!x)
+		return "normal";
+	for (size_t i = 0; i < sizeof xwl_types / sizeof xwl_types[0]; i++)
+		if (wlr_xwayland_surface_has_window_type(x, xwl_types[i].type))
+			return xwl_types[i].name;
+	/* untyped but transient or modal: as good as a dialog */
+	return x->modal || x->parent ? "dialog" : "normal";
+}
+
 /* X11 float heuristics */
 static bool xwl_wants_float(struct aro_view *v)
 {
@@ -3354,6 +3926,13 @@ static bool xwl_wants_float(struct aro_view *v)
 	if (!x)
 		return false;
 	if (x->modal || x->parent)
+		return true;
+
+	/* the types that are never a main window */
+	if (wlr_xwayland_surface_has_window_type(x, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG) ||
+	    wlr_xwayland_surface_has_window_type(x, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_UTILITY) ||
+	    wlr_xwayland_surface_has_window_type(x, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLBAR) ||
+	    wlr_xwayland_surface_has_window_type(x, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH))
 		return true;
 
 	if (x->size_hints) {
@@ -3397,6 +3976,7 @@ static const struct view_impl xwl_impl = {
 	.set_fullscreen   = xwl_set_fullscreen,
 	.title            = xwl_title,
 	.app_id           = xwl_app_id,
+	.type             = xwl_type,
 	.geometry         = xwl_geometry,
 	.wants_float      = xwl_wants_float,
 	.wants_fullscreen = xwl_wants_fullscreen,
@@ -3585,6 +4165,8 @@ static void xwl_destroy(struct wl_listener *l, void *data)
 		v->server->focused = NULL;
 	grab_forget(v->server, v);
 
+	ftl_destroy(v);
+	mru_remove(v->server, v);
 	qtext_finish(&v->title);
 	if (v->frame_tree)
 		wlr_scene_node_destroy(&v->frame_tree->node);
@@ -3597,6 +4179,7 @@ static void xwl_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&v->dissociate.link);
 	wl_list_remove(&v->request_configure.link);
 	wl_list_remove(&v->set_title.link);
+	wl_list_remove(&v->set_app_id.link);
 	wl_list_remove(&v->request_fullscreen.link);
 	wl_list_remove(&v->request_move.link);
 	wl_list_remove(&v->request_resize.link);
@@ -3622,6 +4205,7 @@ static void new_xwayland_surface(struct wl_listener *l, void *data)
 	v->impl = &xwl_impl;
 	v->csd = false;     /* X11 clients expect us to decorate them */
 	v->xsurface = xsurface;
+	wl_list_init(&v->mru_link);
 
 	if (!ui_frame_create(v, s->l_tiled)) {
 		wlr_log(WLR_ERROR, "could not build a frame for an X11 window");
@@ -3642,6 +4226,8 @@ static void new_xwayland_surface(struct wl_listener *l, void *data)
 	wl_signal_add(&xsurface->events.dissociate, &v->dissociate);
 	v->set_title.notify = view_set_title;
 	wl_signal_add(&xsurface->events.set_title, &v->set_title);
+	v->set_app_id.notify = view_set_app_id;
+	wl_signal_add(&xsurface->events.set_class, &v->set_app_id);
 	v->request_fullscreen.notify = view_request_fullscreen;
 	wl_signal_add(&xsurface->events.request_fullscreen, &v->request_fullscreen);
 	v->request_move.notify = view_request_move;
@@ -3762,7 +4348,8 @@ static void config_reload(struct aro_server *s)
 	/* reload keymaps */
 	struct aro_keyboard *kb;
 	wl_list_for_each(kb, &s->keyboards, link)
-		apply_keymap(s, kb->wlr_keyboard);
+		if (!kb->is_virtual)
+			apply_keymap(s, kb->wlr_keyboard);
 
 	/* update background color */
 	if (s->root_bg) {
@@ -3792,6 +4379,7 @@ static void config_reload(struct aro_server *s)
 
 	notify_retheme(s);
 	prompt_retheme(s);
+	switcher_retheme(s);
 	notify_config_errors(s);
 
 	/* reapply monitor blocks after errors */
@@ -4034,6 +4622,8 @@ int main(int argc, char *argv[])
 
 	/* bars are per-output */
 
+	switcher_init(&s);
+
 	if (!ui_preview_create(&s.preview, &s)) {
 		wlr_log(WLR_ERROR, "could not build the drop indicator");
 		return 1;
@@ -4117,6 +4707,54 @@ int main(int argc, char *argv[])
 	/* presentation needs backend */
 	wlr_presentation_create(s.display, s.backend, 2);
 
+	/* clipboard managers: wl-paste --watch, cliphist, clipman */
+	wlr_data_control_manager_v1_create(s.display);
+
+	/* games: raw motion and pointer lock/confine */
+	s.relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(s.display);
+	s.pointer_constraints = wlr_pointer_constraints_v1_create(s.display);
+	s.new_constraint.notify = new_constraint;
+	wl_signal_add(&s.pointer_constraints->events.new_constraint,
+	              &s.new_constraint);
+
+	s.cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(s.display, 1);
+	s.request_set_shape.notify = request_set_shape;
+	wl_signal_add(&s.cursor_shape_mgr->events.request_set_shape,
+	              &s.request_set_shape);
+
+	s.xdg_activation = wlr_xdg_activation_v1_create(s.display);
+	s.request_activate.notify = request_activate;
+	wl_signal_add(&s.xdg_activation->events.request_activate,
+	              &s.request_activate);
+
+	/*
+	 * Night light: wlsunset, gammastep. The scene owns gamma: it folds the
+	 * table into every frame's color transform, so a table applied by hand
+	 * lasts exactly one frame before the next commit replaces it. Where the
+	 * hardware has no gamma LUT (nested sessions), the scene applies it
+	 * while rendering instead.
+	 */
+	s.gamma_mgr = wlr_gamma_control_manager_v1_create(s.display);
+	if (s.gamma_mgr)
+		wlr_scene_set_gamma_control_manager_v1(s.scene, s.gamma_mgr);
+
+	/* input methods: fcitx5, ibus */
+	ime_init(&s);
+
+	/* window lists: waybar's taskbar, and ext-foreign-toplevel readers */
+	s.ftl_mgr = wlr_foreign_toplevel_manager_v1_create(s.display);
+	s.ext_ftl_list = wlr_ext_foreign_toplevel_list_v1_create(s.display, 1);
+
+	/* synthetic input: wtype, ydotool-style tools, remote desktop */
+	s.virtual_kbd_mgr = wlr_virtual_keyboard_manager_v1_create(s.display);
+	s.new_virtual_keyboard.notify = new_virtual_keyboard;
+	wl_signal_add(&s.virtual_kbd_mgr->events.new_virtual_keyboard,
+	              &s.new_virtual_keyboard);
+	s.virtual_ptr_mgr = wlr_virtual_pointer_manager_v1_create(s.display);
+	s.new_virtual_pointer.notify = new_virtual_pointer;
+	wl_signal_add(&s.virtual_ptr_mgr->events.new_virtual_pointer,
+	              &s.new_virtual_pointer);
+
 	const char *socket = wl_display_add_socket_auto(s.display);
 	if (!socket || !wlr_backend_start(s.backend)) {
 		wlr_log(WLR_ERROR, "could not start");
@@ -4148,11 +4786,13 @@ int main(int argc, char *argv[])
 
 	/* teardown order matters */
 	wl_display_destroy_clients(s.display);
+	ime_finish(&s);
 
 	/* finish UI state */
 	ui_preview_finish(&s.preview);
 	notify_finish(&s);
 	prompt_finish(&s);
+	switcher_finish(&s);
 	config_watch_stop(&s);
 	config_finish(&s.cfg);
 	/* outputs free their trees */
@@ -4192,6 +4832,13 @@ int main(int argc, char *argv[])
 	wl_list_remove(&s.cursor_button.link);
 	wl_list_remove(&s.cursor_axis.link);
 	wl_list_remove(&s.cursor_frame.link);
+	wl_list_remove(&s.new_constraint.link);
+	wl_list_remove(&s.request_set_shape.link);
+	wl_list_remove(&s.request_activate.link);
+	wl_list_remove(&s.new_virtual_keyboard.link);
+	wl_list_remove(&s.new_virtual_pointer.link);
+	s.pointer_constraints = NULL;
+	s.active_constraint = NULL;
 
 	wlr_scene_node_destroy(&s.scene->tree.node);
 	wlr_xcursor_manager_destroy(s.xcursor_mgr);
