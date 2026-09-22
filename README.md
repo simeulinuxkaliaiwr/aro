@@ -39,6 +39,12 @@ wlroots0.20 libxkbcommon pixman pango cairo
 ```
 
 ```sh
+# Installing it globally
+meson setup build --prefix=/usr --buildtype=release
+ninja -C build
+sudo ninja -C build install
+
+# Just building it normally
 meson setup build
 ninja -C build
 ```
@@ -108,12 +114,5 @@ replaces this table entirely.
 | `mod+drag` | move; a tiled window tears out of the tree |
 | `mod+right-drag` | resize |
 | drag a header / a border | move / resize, no modifier |
-
-## Not there yet
-Pointer constraints and relative pointer (so no FPS games), foreign
-toplevel management (so no window list in waybar), `_NET_WM_WINDOW_TYPE`
-for X11 splash and utility windows, IPC, blur and shadows, and focus that
-crosses between tiled and floating windows.
-
 ## License
 MIT — see [LICENSE](LICENSE).
