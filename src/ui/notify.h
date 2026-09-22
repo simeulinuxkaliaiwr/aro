@@ -1,17 +1,4 @@
-/*
- * aro — notify.h
- *
- * The compositor's own on-screen messages.
- *
- * NOT a notification daemon: this does not implement the freedesktop
- * notification protocol and applications cannot post to it. It exists so
- * that aro can tell you something about aro — a config file that did
- * not parse, an output that vanished — without the message going only to a
- * log nobody is reading.
- *
- * Toasts stack down the top-right corner of the focused output, spring in
- * like every other frame, and expire on their own.
- */
+/* notify.h: compositor toasts */
 #ifndef ARO_NOTIFY_H
 #define ARO_NOTIFY_H
 
@@ -44,27 +31,17 @@ struct aro_notification {
 	enum notify_level level;
 };
 
-/*
- * Post a message. Formats like printf. Safe to call before any output
- * exists — the toast is simply dropped, since there is nowhere to draw it.
- *
- * An INFO message expires on its own. An ERROR does NOT: it describes the
- * state of something that is still wrong, not an event that happened, and
- * six seconds is less than the time it takes to look back at your editor.
- * Errors stay until notify_clear_errors() says the problem is gone.
- */
+/* post toast; errors persist until cleared */
 void notify(struct aro_server *s, enum notify_level level,
             const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 
-/* Drop every error currently on screen. Called before posting a fresh set,
- * so the toasts always reflect the state of the file rather than a history
- * of everything that has ever been wrong with it. */
+/* clear error toasts */
 void notify_clear_errors(struct aro_server *s);
 
-/* Advance every toast's animation; returns true while any is still moving. */
+/* tick toast animations */
 bool notify_tick(struct aro_server *s, uint32_t now);
 
-/* Re-apply colours and fonts after a config reload. */
+/* retheme toasts */
 void notify_retheme(struct aro_server *s);
 
 void notify_finish(struct aro_server *s);

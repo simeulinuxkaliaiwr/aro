@@ -1,12 +1,5 @@
-/*
- * aro — notify.c
- *
- * Built from the same pieces as a frame: a rect, an inset rect, and a
- * qtext. A message that looks like a frame that arrived by itself reads as
- * part of the compositor rather than as something bolted on.
- */
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* notify.c: compositor toasts */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "notify.h"
@@ -19,11 +12,7 @@
 
 #include <wlr/types/wlr_output.h>
 
-/*
- * Toasts are laid out from the top-right down, in the order they were
- * posted. Recomputed whenever one appears or expires, so the stack closes
- * up rather than leaving a hole.
- */
+/* stack toasts from top-right */
 static void notify_layout(struct aro_server *s)
 {
 	const struct q_theme *th = &s->cfg.theme;
@@ -84,9 +73,7 @@ void notify(struct aro_server *s, enum notify_level level,
 {
 	const struct q_theme *th = &s->cfg.theme;
 
-	/* Nowhere to draw it yet. Losing a message posted before the first
-	 * output exists is better than queuing messages that may never be
-	 * shown — the log still has it either way. */
+	/* drop toast if no output exists */
 	if (!s->l_notify || !aro_focused_output(s))
 		return;
 
@@ -128,17 +115,10 @@ void notify(struct aro_server *s, enum notify_level level,
 
 	wl_list_insert(s->notifications.prev, &n->link);
 
-	/*
-	 * Start it small and let the spring bring it in, the way a new frame
-	 * grows from open_scale. Without this it appears at full size in one
-	 * frame, which next to everything else that springs looks like a bug.
-	 */
+	/* animate toast in */
 	anim_box_set(&n->geo, (ly_box){ 0, 0, 1, 1 });
 
-	/*
-	 * Only info messages expire. An error stays until the thing it
-	 * describes is fixed — see notify_clear_errors().
-	 */
+	/* errors stay until cleared */
 	if (level != NOTIFY_ERROR) {
 		n->timer = wl_event_loop_add_timer(s->loop, notification_expire, n);
 		if (n->timer)
@@ -154,7 +134,7 @@ void notify_clear_errors(struct aro_server *s)
 	wl_list_for_each_safe(n, tmp, &s->notifications, link) {
 		if (n->level != NOTIFY_ERROR)
 			continue;
-		/* destroy() relays out the survivors, so the stack closes up */
+		/* restack after removing errors */
 		notification_destroy(n);
 	}
 }

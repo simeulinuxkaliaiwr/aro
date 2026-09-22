@@ -1,11 +1,9 @@
-/*
- * aro — layout.c
- */
+/* layout.c: tiling tree */
 #include "layout.h"
 
 #include <stdlib.h>
 
-/* ── lifecycle ─────────────────────────────────────────────────────────── */
+/* lifecycle */
 
 static ly_node *node_new(ly_kind k)
 {
@@ -34,7 +32,7 @@ void ly_free(ly_node *n)
 	free(n);
 }
 
-/* ── structure ─────────────────────────────────────────────────────────── */
+/* structure */
 
 static void replace_child(ly_node **root, ly_node *old, ly_node *fresh)
 {
@@ -65,7 +63,7 @@ ly_node *ly_split(ly_node **root, ly_node *target, ly_dir dir, void *user)
 	sp->dir = dir;
 	sp->ratio = 0.5;
 
-	/* target keeps its identity and payload; it just gains a parent */
+	/* target stays valid; new leaf is returned */
 	replace_child(root, target, sp);
 	sp->a = target;
 	sp->b = fresh;
@@ -103,7 +101,7 @@ void ly_swap(ly_node *x, ly_node *y)
 	y->user = t;
 }
 
-/* ── geometry ──────────────────────────────────────────────────────────── */
+/* geometry */
 
 static int clampi(int v, int lo, int hi)
 {
@@ -123,7 +121,7 @@ static void arrange(ly_node *n, ly_box b, const ly_metrics *m)
 		if (avail < 0)
 			avail = 0;
 		int aw = (int)(avail * n->ratio + 0.5);
-		/* keep both sides usable even at extreme ratios */
+		/* clamp split ratio */
 		aw = clampi(aw, (avail < m->min * 2) ? avail / 2 : m->min,
 		            (avail < m->min * 2) ? avail / 2 : avail - m->min);
 		arrange(n->a, (ly_box){ b.x, b.y, aw, b.h }, m);
@@ -153,7 +151,7 @@ void ly_arrange(ly_node *root, ly_box area, const ly_metrics *m)
 	arrange(root, b, m);
 }
 
-/* ── queries ───────────────────────────────────────────────────────────── */
+/* queries */
 
 ly_node *ly_first_leaf(ly_node *n)
 {
@@ -223,8 +221,7 @@ ly_node *ly_focus(ly_node *root, ly_node *from, ly_edge e)
 		double along = horiz ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
 		double off   = horiz ? (dy < 0 ? -dy : dy) : (dx < 0 ? -dx : dx);
 
-		/* distance along the axis, with drift across it punished hard —
-		 * otherwise focus skips diagonally and feels random */
+		/* spatial focus scoring */
 		double score = along + off * 2.0;
 		if (!best || score < best_score) {
 			best = c;

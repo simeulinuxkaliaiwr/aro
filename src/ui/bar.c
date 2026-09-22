@@ -1,11 +1,8 @@
-/*
- * aro — bar.c
- */
+/* bar.c: status bar */
 /* localtime_r */
 #define _POSIX_C_SOURCE 200809L
 
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "bar.h"
@@ -29,9 +26,7 @@ bool bar_create(struct aro_bar *b, struct aro_output *o)
 	memset(b, 0, sizeof *b);
 	b->output = o;
 
-	/* Every pill is built up front and enabled as workspaces come and go.
-	 * Creating them lazily would mean allocating scene nodes and running
-	 * pango from inside bar_update, which runs on the clock tick. */
+	/* create all workspace pills up front */
 	b->nws = ARO_MAX_WS;
 	b->scale = 1.0f;
 
@@ -69,9 +64,7 @@ void bar_place(struct aro_bar *b, int x, int y, int w, float scale)
 	wlr_scene_rect_set_size(b->bg, w, th->bar_h);
 }
 
-/* A workspace holding nothing but a floating window has a NULL tree, so the
- * tree alone can no longer answer "is anything on it". Scoped to one output:
- * workspace 2 on this screen is not workspace 2 on the other one. */
+/* occupied = tree exists or mapped view exists */
 static bool ws_occupied(struct aro_output *o, int ws)
 {
 	if (o->ws[ws])
@@ -85,8 +78,7 @@ static bool ws_occupied(struct aro_output *o, int ws)
 	return false;
 }
 
-/* Everything is positioned relative to the bar's own tree, so nothing here
- * needs to know where the bar sits on screen. */
+/* bar contents are positioned relative to the bar tree */
 void bar_update(struct aro_bar *b, struct aro_output *o)
 {
 	struct aro_server *s = o->server;
@@ -98,14 +90,7 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	const int mid = th->bar_h / 2;
 	int cursor = th->bar_pad;
 
-	/*
-	 * ── workspaces ──────────────────────────────────────────────────
-	 *
-	 * Workspaces exist on demand rather than being declared: a pill is
-	 * drawn for one that has windows on it, for the one you are on, and
-	 * for the first `workspaces` of them so the bar is not empty on a
-	 * fresh session. Everything past that is hidden until it is used.
-	 */
+	/* workspace pills */
 	int last = s->cfg.workspaces - 1;
 	for (int i = 0; i < b->nws; i++)
 		if (ws_occupied(o, i) || i == o->cur_ws)
@@ -144,7 +129,7 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	}
 	b->shown = last + 1;
 
-	/* ── clock, right-aligned ───────────────────────────────────────── */
+	/* clock */
 	char when[16] = "--:--";
 	time_t now = time(NULL);
 	struct tm tm;
@@ -155,9 +140,8 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	           b->w - th->bar_pad - b->clock.w,
 	           mid - b->clock.h / 2);
 
-	/* ── focused window title, filling what is left ─────────────────── */
-	/* Only the output the focused window is actually on shows its title —
-	 * otherwise every bar claims the same window. */
+	/* focused title */
+	/* only show title on its own output */
 	const char *title = NULL;
 	if (s->focused && s->focused->output == o)
 		title = view_title(s->focused);
@@ -182,8 +166,7 @@ void bar_finish(struct aro_bar *b)
 	b->tree = NULL;
 }
 
-/* Colours, fonts and the bar's own height, after a config reload. Positions
- * follow from the next bar_place(). */
+/* retheme bar */
 void bar_retheme(struct aro_bar *b)
 {
 	const struct q_theme *th = &b->output->server->cfg.theme;

@@ -1,15 +1,8 @@
-/*
- * aro — anim.c
- */
+/* anim.c: easing and animated boxes */
 #include "anim.h"
 
 /* ── cubic bezier ──────────────────────────────────────────────────────── */
-/*
- * Same maths the browser runs for cubic-bezier(). The curve is parametric,
- * so finding y for a given x means solving for the parameter first. Newton
- * converges in a handful of steps; bisection catches the flat regions where
- * the derivative is near zero.
- */
+/* cubic-bezier evaluation */
 
 static double bez(double a, double b, double t)
 {
@@ -90,7 +83,7 @@ void anim_box_to(anim_box *a, ly_box to, uint32_t now, uint32_t dur,
 		return;
 	}
 
-	/* start from where we actually are, not from the last target */
+	/* retarget from current position */
 	a->from = a->cur;
 	a->to = to;
 	a->start_ms = now;
@@ -120,7 +113,7 @@ bool anim_box_tick(anim_box *a, uint32_t now)
 	a->cur.w = lerp(a->from.w, a->to.w, t);
 	a->cur.h = lerp(a->from.h, a->to.h, t);
 
-	/* overshoot may push a dimension negative on small frames */
+	/* clamp tiny sizes */
 	if (a->cur.w < 1)
 		a->cur.w = 1;
 	if (a->cur.h < 1)

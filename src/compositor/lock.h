@@ -1,14 +1,4 @@
-/*
- * aro — lock.h
- *
- * ext-session-lock-v1: the protocol behind swaylock, gtklock and friends.
- *
- * The compositor's side of this is mostly about what must NOT happen. While
- * locked, nothing below the lock may be drawn, focused, or receive input,
- * and that has to hold even when the lock client crashes — which is the
- * whole point of the protocol existing rather than clients just opening a
- * fullscreen window.
- */
+/* lock.h: session lock state */
 #ifndef ARO_LOCK_H
 #define ARO_LOCK_H
 
@@ -30,11 +20,7 @@ struct aro_lock {
 	struct wlr_scene_rect *blank;   /* solid black, under them, always */
 	struct wl_list surfaces;
 
-	/*
-	 * The client died without unlocking. The session stays locked and the
-	 * blank stays up: falling back to the desktop because the locker
-	 * crashed would make crashing the locker the way in.
-	 */
+	/* abandoned lock: stay locked */
 	bool abandoned;
 
 	struct wl_listener new_surface;
@@ -55,10 +41,10 @@ struct aro_lock_surface {
 void lock_init(struct aro_server *s);
 void lock_finish(struct aro_server *s);
 
-/* True while the session is locked, including after an abandoned lock. */
+/* locked? */
 bool aro_locked(struct aro_server *s);
 
-/* Re-size the lock's surfaces and blank after an output change. */
+/* arrange lock surfaces */
 void lock_arrange(struct aro_server *s);
 
 #endif

@@ -1,11 +1,8 @@
-/*
- * aro — text.c
- */
+/* text.c: pango/cairo text rendering */
 /* strdup */
 #define _POSIX_C_SOURCE 200809L
 
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "text.h"
@@ -17,18 +14,12 @@
 #include <drm_fourcc.h>
 #include <pango/pangocairo.h>
 #include <wayland-server-core.h>
-/* Implementing a buffer needs the interfaces header; the types header only
- * covers using one. wlr_buffer_impl and wlr_buffer_init live here. */
+/* buffer implementation header */
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/types/wlr_buffer.h>
 
 /* ── a wlr_buffer backed by a cairo image surface ──────────────────────── */
-/*
- * wlroots reads this through the data-pointer path, so the surface format
- * has to match what we claim: cairo's ARGB32 is premultiplied, native-endian
- * 32-bit, which is DRM_FORMAT_ARGB8888 on little-endian. Do not hand this
- * out for writing — cairo owns the pixels.
- */
+/* cairo surface as wlr_buffer */
 struct cairo_buffer {
 	struct wlr_buffer base;
 	cairo_surface_t *surface;
@@ -90,7 +81,7 @@ static struct wlr_buffer *render(const char *text, const char *font,
 	if (scale <= 0.0f)
 		scale = 1.0f;
 
-	/* measure first: the surface has to be the right size before we draw */
+	/* measure text before creating surface */
 	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
 	cairo_t *pcr = cairo_create(probe);
 	PangoLayout *probe_layout = layout_for(pcr, font, text, max_w);
@@ -121,7 +112,7 @@ static struct wlr_buffer *render(const char *text, const char *font,
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-	/* cairo takes straight alpha and premultiplies on its own */
+	/* cairo expects straight alpha */
 	cairo_set_source_rgba(cr,
 	                      ((color >> 24) & 0xff) / 255.0,
 	                      ((color >> 16) & 0xff) / 255.0,
@@ -159,13 +150,7 @@ bool qtext_init(struct qtext *t, struct wlr_scene_tree *parent, const char *font
 	return t->node != NULL;
 }
 
-/*
- * Change the font and force the next qtext_set() to re-render.
- *
- * The cache below compares text, colour, scale and width — not the font,
- * because until the config file existed the font could not change. Clearing
- * the cached string is what makes the comparison miss.
- */
+/* changing font forces re-render */
 void qtext_set_font(struct qtext *t, const char *font)
 {
 	if (!font || (t->font && strcmp(t->font, font) == 0))
@@ -187,9 +172,7 @@ void qtext_set(struct qtext *t, const char *text, uint32_t color,
 	    t->color == color && t->scale == scale && t->max_w == max_w)
 		return;                 /* nothing that affects pixels has changed */
 
-	/* `text` may BE t->text — callers legitimately re-render with the
-	 * current string to change its colour. Copy before freeing, or the
-	 * strdup reads memory we just handed back to the allocator. */
+	/* copy text before freeing old string */
 	char *copy = strdup(text);
 	if (!copy)
 		return;

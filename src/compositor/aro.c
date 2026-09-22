@@ -1,37 +1,15 @@
-/*
- * _GNU_SOURCE before anything else: inotify_init1() is behind __USE_GNU, and
- * with -std=c11 glibc does not expose it by default. Must precede every
- * include, scene.h included.
- */
+/* keep _GNU_SOURCE first; inotify_init1 needs it */
 #define _GNU_SOURCE
 
 /*
- * aro — aro.c
+ * aro.c: main compositor code.
  *
- * The compositor. Backend, outputs, xdg-shell, input, and the loop that ties
- * the layout tree to real surfaces.
- *
- * The shape of the thing:
- *
- *   a window maps    -> ly_split() the focused leaf, leaf->user = view
- *   anything changes -> aro_arrange(): ly_arrange() writes boxes, each
- *                       view retargets its animation toward its box
- *   every frame      -> anim_box_tick() per view, geometry applied, commit;
- *                       schedule another frame while anything is moving
- *
- * BUILD STATUS: written against wlroots 0.19 without a compiler to hand.
- * The calls most likely to have drifted, in rough order of risk:
- *   - wlr_backend_autocreate(loop, session)      signature changed in 0.18
- *   - xdg_shell.events.new_toplevel              0.17 used new_surface
- *   - wlr_output_state_* / wlr_output_commit_state
- *   - wlr_scene_output_layout_add_output
- * Compare against the tinywl.c shipped with your wlroots before debugging
- * anything else.
+ * backend, outputs, shell, input, and the bridge between the layout
+ * tree and real surfaces.
  */
 #define _POSIX_C_SOURCE 200809L
 
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "bar.h"
@@ -50,7 +28,7 @@
 #include <time.h>
 #include <unistd.h>
 
-/* BTN_LEFT / BTN_RIGHT — evdev codes, which is what the pointer reports */
+/* BTN_LEFT/BTN_RIGHT are evdev codes */
 #include <linux/input-event-codes.h>
 
 #include <wlr/backend.h>
@@ -68,8 +46,7 @@
 #include <wlr/types/wlr_xdg_foreign_v1.h>
 #include <wlr/types/wlr_xdg_foreign_v2.h>
 #include <wlr/types/wlr_presentation_time.h>
-/* two headers, near-identical names: wlr_primary_selection.h declares the
- * seat calls, wlr_primary_selection_v1.h declares the protocol manager */
+/* primary selection: seat helpers vs v1 protocol manager */
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
 #include <wlr/types/wlr_screencopy_v1.h>
@@ -95,15 +72,10 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 
-/* Super by default. Nested inside another compositor it never reaches us —
- * the host grabs it first — so -Dmodkey=alt switches the whole keymap. */
-/* The modifier is config, not a build option. `mod = alt` in the config
- * file, or -m alt on the command line for a one-off nested session. */
 
 static const anim_ease SPRING = { TH_EASE_X1, TH_EASE_Y1, TH_EASE_X2, TH_EASE_Y2 };
 
-/* No overshoot. Used for anything that animates to the edges of the screen,
- * where springing past the target means springing off it. */
+/* flat easing, no overshoot; used for screen-edge/fullscreen animations */
 static const anim_ease FLAT = { TH_EASE_FLAT_X1, TH_EASE_FLAT_Y1,
                                 TH_EASE_FLAT_X2, TH_EASE_FLAT_Y2 };
 
@@ -123,10 +95,9 @@ uint32_t aro_now_ms(void)
 }
 
 
-/* ── layout → screen ───────────────────────────────────────────────────── */
+/* layout -> screen */
 
-/* The output the keyboard is on. Never NULL while any output exists: new
- * windows, workspace switches and spawned clients all land here. */
+/* focused output; falls back to first output */
 struct aro_output *aro_focused_output(struct aro_server *s)
 {
 	if (s->focused_output)
@@ -138,9 +109,7 @@ struct aro_output *aro_focused_output(struct aro_server *s)
 	return o;
 }
 
-/* Which output contains a point, for deciding where the pointer is working.
- * Falls back to the focused one rather than NULL: a cursor between two
- * outputs in an odd layout should still be able to drop a window. */
+/* output containing a point */
 static struct aro_output *output_at(struct aro_server *s, double x, double y)
 {
 	struct aro_output *o;
@@ -152,8 +121,7 @@ static struct aro_output *output_at(struct aro_server *s, double x, double y)
 	return aro_focused_output(s);
 }
 
-/* Cache an output's box in layout coordinates. Everything downstream reads
- * o->box rather than asking the layout, so a single source per output. */
+/* cache output box in layout coordinates */
 static void output_refresh_box(struct aro_output *o)
 {
 	struct wlr_box box = { 0 };
@@ -161,10 +129,7 @@ static void output_refresh_box(struct aro_output *o)
 	o->box = (ly_box){ box.x, box.y, box.width, box.height };
 }
 
-/* The backdrop covers the whole layout — every output at once — since it is
- * what shows through the gaps everywhere. It has to track resizes: nested,
- * the host window can change at any moment, and a stale backdrop leaves a
- * strip of nothing along two edges. */
+/* resize root backdrop to cover the layout */
 static void update_backdrop(struct aro_server *s)
 {
 	if (!s->root_bg)
@@ -187,14 +152,11 @@ static void update_backdrop(struct aro_server *s)
 	}
 	arrange_layers(s);
 
-	/* after the boxes are refreshed: the lock is sized against them */
+	/* lock uses refreshed boxes too */
 	lock_arrange(s);
 }
 
-/* What the tiling tree on one output gets: that output, minus any exclusive
- * zones claimed by layer-shell clients on it, minus its bar. o->usable is
- * recomputed by arrange_layers() and is the output box when nothing has
- * claimed anything. */
+/* tiling area after exclusive zones and bar */
 static ly_box usable_area(struct aro_output *o)
 {
 	ly_box u = o->usable;
@@ -204,10 +166,7 @@ static ly_box usable_area(struct aro_output *o)
 	return u;
 }
 
-/* Where a view is headed, whoever decides it: the tree for tiled windows,
- * fbox for floating ones, its own output for fullscreen. Everything that
- * used to read v->node->box should read this instead — floating views have
- * no node, and a fullscreen window means one screen, not all of them. */
+/* final target geometry */
 static ly_box view_target(struct aro_view *v)
 {
 	if (v->fullscreen)
@@ -219,13 +178,7 @@ static ly_box view_target(struct aro_view *v)
 	return (ly_box){ 0, 0, 1, 1 };
 }
 
-/*
- * The root of the workspace a view's leaf hangs from.
- *
- * Its output's, normally; the server's while parked. A client can unmap at
- * any moment, including while we are on another TTY with no outputs at all,
- * and &v->output->ws[...] is a null deref there.
- */
+/* workspace root; parked views use orphan root */
 static ly_node **view_ws_root(struct aro_view *v)
 {
 	if (v->output)
@@ -233,12 +186,7 @@ static ly_node **view_ws_root(struct aro_view *v)
 	return &v->server->orphan_ws[v->workspace];
 }
 
-/*
- * Hand every mapped layer surface the full output and the shrinking usable
- * box; wlr_scene_layer_surface_v1_configure() applies anchors, margins and
- * size for us and subtracts whatever exclusive zone the client asked for.
- * Whatever survives is what our windows may use.
- */
+/* configure layer surfaces and update usable area */
 static void arrange_layers(struct aro_server *s)
 {
 	struct aro_output *o;
@@ -257,18 +205,10 @@ static void arrange_layers_output(struct aro_output *o)
 
 	struct aro_layer *l;
 	wl_list_for_each(l, &s->layers, link) {
-		/*
-		 * Configure everything that has had its initial commit, NOT just
-		 * what is mapped. A layer surface cannot map until it has been
-		 * told its size, so gating this on `mapped` deadlocks the client:
-		 * it waits for a configure that only arrives once it has mapped.
-		 * That deadlock is silent — the client blocks without an error.
-		 */
+		/* configure initialized layer surfaces, not just mapped ones */
 		if (!l->layer_surface->initialized || !l->scene)
 			continue;
-		/* A layer surface belongs to one output. Configuring it from
-		 * every output's pass would subtract its exclusive zone from
-		 * screens it is not even on. */
+		/* skip surfaces bound to another output */
 		if (l->layer_surface->output &&
 		    l->layer_surface->output != o->wlr_output)
 			continue;
@@ -283,18 +223,7 @@ static bool box_eq(ly_box a, ly_box b)
 	return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
-/*
- * Retarget only when the target actually changed.
- *
- * anim_box_to() restarts from wherever the box currently is, which is what
- * keeps interrupted moves continuous — but it also means calling it every
- * time arrange runs re-starts an in-flight animation from a partway point,
- * with a fresh 340ms and a fresh overshoot. Arrange runs on map, unmap,
- * focus, workspace switch, layer commit and output change, so a window can
- * easily be re-sprung several times toward a target it was already heading
- * for. That reads as a wobble. Comparing against the target it is already
- * chasing costs four int compares and removes the whole class.
- */
+/* retarget only when the target changed */
 static void view_retarget(anim_box *g, ly_box t, uint32_t now, uint32_t dur,
                           const anim_ease *ease)
 {
@@ -303,7 +232,7 @@ static void view_retarget(anim_box *g, ly_box t, uint32_t now, uint32_t dur,
 	anim_box_to(g, t, now, dur, ease);
 }
 
-/* Is this view on screen right now: right output, right workspace on it. */
+/* mapped, on an output, and on its current workspace */
 static bool view_visible(struct aro_view *v)
 {
 	return v->mapped && v->output && v->workspace == v->output->cur_ws;
@@ -311,16 +240,13 @@ static bool view_visible(struct aro_view *v)
 
 void aro_arrange(struct aro_server *s)
 {
-	/* not static: the gaps come from the config now */
 	const ly_metrics m = {
 		.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min,
 	};
 
 	uint32_t now = aro_now_ms();
 
-	/* Arrange every output's current workspace. The tree may be empty —
-	 * a workspace holding nothing but floating windows is legal — and
-	 * everything after this still has to run either way. */
+	/* arrange each output's current workspace */
 	struct aro_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
 		ly_node *root = o->ws[o->cur_ws];
@@ -328,26 +254,19 @@ void aro_arrange(struct aro_server *s)
 			ly_arrange(root, usable_area(o), &m);
 	}
 
-	/*
-	 * Retarget every visible view from its own source of truth. Walking
-	 * s->views rather than each tree's leaves is what lets floating
-	 * windows animate through the same path as tiled ones.
-	 */
+	/* retarget visible views */
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
 		if (!view_visible(v))
 			continue;
 
-		/* A window being dragged is following the cursor, not the tree.
-		 * Retargeting it here would fight the pointer every frame. */
+		/* don't fight an active drag */
 		if (s->grabbed == v && s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 			continue;
 
 		ly_box t = view_target(v);
 
-		/* Fullscreen animates flat. The spring overshoots ~8%, which on a
-		 * box the size of the screen lands off every edge and snaps back —
-		 * it reads as the window shaking rather than settling. */
+		/* fullscreen uses flat easing */
 		if (v->fullscreen)
 			view_retarget(&v->geo, t, now, s->cfg.theme.anim_fs_ms, &FLAT);
 		else
@@ -363,13 +282,7 @@ void aro_arrange(struct aro_server *s)
 		wlr_output_schedule_frame(o->wlr_output);
 	}
 
-	/*
-	 * Whether an idle inhibitor counts depends on what is on screen, and
-	 * arrange is already the one call every such change goes through:
-	 * workspace switch, send-to-workspace, map, unmap, fullscreen, output
-	 * added or adopted. Hooking it here means a new path that changes the
-	 * screen cannot forget to re-check — it has to arrange anyway.
-	 */
+	/* recheck idle inhibitors */
 	idle_update(s);
 }
 
@@ -378,11 +291,7 @@ static void view_set_visible(struct aro_view *v, bool visible)
 	wlr_scene_node_set_enabled(&v->frame_tree->node, visible);
 }
 
-/*
- * Switch the focused output to one of its own workspaces. The other outputs
- * are untouched — that is the whole point of the sway model, and it is why
- * "workspace 2" is only meaningful alongside an output.
- */
+/* show a workspace on the focused output */
 static void workspace_show(struct aro_server *s, int ws)
 {
 	struct aro_output *o = aro_focused_output(s);
@@ -399,9 +308,7 @@ static void workspace_show(struct aro_server *s, int ws)
 
 	ly_node *root = o->ws[ws];
 
-	/* Place the incoming windows before anything is drawn. Without this
-	 * they animate in from wherever they sat on the old workspace, which
-	 * reads as the layout breaking rather than as a switch. */
+	/* place incoming windows before drawing */
 	if (root) {
 		ly_arrange(root, usable_area(o), &(ly_metrics){
 			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
@@ -414,7 +321,7 @@ static void workspace_show(struct aro_server *s, int ws)
 		}
 	}
 
-	/* same for the floating ones, which the tree above knows nothing about */
+	/* snap floating windows too */
 	struct aro_view *fv;
 	wl_list_for_each(fv, &s->views, link) {
 		if (fv->mapped && fv->output == o && fv->workspace == ws &&
@@ -428,8 +335,7 @@ static void workspace_show(struct aro_server *s, int ws)
 		next = first ? first->user : NULL;
 	}
 	if (!next) {
-		/* a workspace with only floating windows would otherwise come up
-		 * with nothing focused and the keyboard going nowhere */
+		/* fallback focus for floating-only workspace */
 		struct aro_view *cand;
 		wl_list_for_each(cand, &s->views, link) {
 			if (cand->mapped && cand->output == o && cand->workspace == ws) {
@@ -450,7 +356,7 @@ static void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 	ly_node *next = NULL;
 
 	if (v->floating) {
-		/* nothing to re-parent: it was never in a tree */
+		/* floating views are not in the tree */
 		v->workspace = ws;
 	} else {
 		if (!v->node)
@@ -482,8 +388,7 @@ static void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 
 void aro_focus(struct aro_server *s, struct aro_view *v)
 {
-	/* The lock owns the keyboard. Remember the intended focus so it can
-	 * be restored on unlock, but do not act on it. */
+	/* while locked, remember focus but don't apply it */
 	if (aro_locked(s)) {
 		s->focused = v;
 		return;
@@ -503,12 +408,7 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 		return;
 	}
 
-	/*
-	 * The keyboard's output follows the focused window. Without this,
-	 * clicking a window on the second screen leaves focused_output on the
-	 * first, so the next window you open — and the next mod+1..4 — lands
-	 * on the screen you are not looking at.
-	 */
+	/* focus moves keyboard output */
 	if (v->output)
 		s->focused_output = v->output;
 
@@ -519,7 +419,7 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 	if (v->output && v->output->bar.tree)
 		bar_update(&v->output->bar, v->output);
 
-	/* a launcher or lock screen holds the keyboard until it goes away */
+	/* layer surface may keep keyboard */
 	if (s->focused_layer)
 		return;
 
@@ -530,9 +430,7 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 		                               &kb->modifiers);
 }
 
-/* ly_swap() exchanges the payloads of two leaves, so each view's back
- * pointer has to follow. Getting this backwards leaves node->user and
- * view->node disagreeing, which shows up much later as a wrong-frame move. */
+/* keep view/node pointers in sync after swap */
 static void view_swap(struct aro_view *a, struct aro_view *b)
 {
 	ly_node *na = a->node, *nb = b->node;
@@ -543,11 +441,7 @@ static void view_swap(struct aro_view *a, struct aro_view *b)
 
 /* ── shells ────────────────────────────────────────────────────────────── */
 
-/*
- * xdg-shell's answers to view_impl. Everything below this point in the file
- * goes through the wrappers instead of touching v->toplevel, so a second
- * shell only has to fill in another one of these.
- */
+/* xdg-shell implementation */
 static void xdg_configure(struct aro_view *v, int x, int y, int w, int h)
 {
 	(void)x; (void)y;       /* a Wayland client does not know where it is */
@@ -583,21 +477,7 @@ static const char *xdg_app_id(struct aro_view *v)
 	return v->toplevel ? v->toplevel->app_id : NULL;
 }
 
-/*
- * What arrives already wanting to float. Two signals, both cheap:
- *
- *   parent != NULL     a dialog, a file picker, an about box. The client has
- *                      told us it belongs to another window.
- *   min == max size    the client cannot be resized, so tiling it means
- *                      either a stretched surface or a frame full of gap.
- *
- * Deliberately no app_id list: per-app quirks are `rule` lines in the config
- * now, and a rule that says float or tile overrides this guess entirely.
- *
- * API RISK: min_width/max_width are read from toplevel->current here. In some
- * wlroots versions these live on ->pending until the first commit, in which
- * case a non-resizable client tiles on its first map and floats on the next.
- */
+/* float heuristics */
 static bool xdg_wants_float(struct aro_view *v)
 {
 	struct wlr_xdg_toplevel *t = v->toplevel;
@@ -619,20 +499,7 @@ static void xdg_preferred_size(struct aro_view *v, int *w, int *h)
 	if (!v->toplevel)
 		return;
 
-	/*
-	 * base->geometry is the EFFECTIVE window geometry in wlroots 0.18+:
-	 * what the client set with set_window_geometry, clamped to its
-	 * surface, or the surface bounds if it never set one. (0.17 and older
-	 * spelled this wlr_xdg_surface_get_geometry(); 0.20 has only the
-	 * field. current.geometry is the raw client value — not this.)
-	 *
-	 * It may still be empty when float_box_for() runs at map — CONTEXT's
-	 * standing theory for floats coming up at half the screen — so fall
-	 * back to the size of the buffer the client committed, which is
-	 * populated the moment one is attached, whatever order wlroots
-	 * computes geometry in. For a GTK window the extents include its CSD
-	 * shadow, but GTK always sets a geometry, so it never gets this far.
-	 */
+	/* effective geometry; fall back to buffer size */
 	struct wlr_xdg_surface *base = v->toplevel->base;
 	*w = base->geometry.width;
 	*h = base->geometry.height;
@@ -676,8 +543,7 @@ static const struct view_impl xdg_impl = {
 	.surface         = xdg_surface,
 };
 
-/* Wrappers. Every one tolerates a view whose shell object is already gone,
- * which happens between destroy and teardown more often than you would like. */
+/* shell wrappers */
 void view_configure(struct aro_view *v, int x, int y, int w, int h)
 {
 	if (v && v->impl && v->impl->configure)
@@ -696,8 +562,7 @@ void view_activate(struct aro_view *v, bool activated)
 		v->impl->activate(v, activated);
 }
 
-/* Zero size means "no geometry yet"; callers lay out from the surface
- * origin in that case, which is right for a surface that has not committed. */
+/* zero size means no geometry yet */
 void view_geometry(struct aro_view *v, struct wlr_box *out)
 {
 	*out = (struct wlr_box){ 0, 0, 0, 0 };
@@ -720,26 +585,7 @@ struct wlr_surface *view_surface(struct aro_view *v)
 	return (v && v->impl && v->impl->surface) ? v->impl->surface(v) : NULL;
 }
 
-/*
- * Does this surface count as on screen, for idle inhibition (idle.h)?
- *
- * The inhibitor may sit on a subsurface (a video widget inside a browser
- * window) or on a popup; either way the question is really about the
- * window it belongs to, so climb to that first. Subsurfaces lead to their
- * root; a popup's root is itself, so it is followed to its parent, which
- * may be another popup — hence the loop, capped against a cycle a buggy
- * client should not be able to build but could.
- *
- * A window counts when view_visible() says so: mapped, on an output, on
- * that output's current workspace. Anything that is not a window — a layer
- * surface, an override-redirect X11 window, the lock screen — counts
- * whenever it is mapped, as in sway: there is no workspace to be on.
- *
- * Deliberately NOT considered (see the handoff notes):
- *   - a tiled window covered by a fullscreen one on the same workspace
- *     still counts;
- *   - while locked, windows behind the lock still count.
- */
+/* surface visibility for idle inhibit */
 bool aro_surface_visible(struct aro_server *s, struct wlr_surface *surface)
 {
 	if (!surface)
@@ -769,14 +615,8 @@ bool aro_surface_visible(struct aro_server *s, struct wlr_surface *surface)
 /* ── floating ──────────────────────────────────────────────────────────── */
 
 
-/* A sensible first box for a window that never gets one from the tree: the
- * size the client asked for, clamped to the usable area, centred. */
-/*
- * How much of a frame is not the client: borders, plus the header when there
- * is one. Asked of ui.c rather than recomputed, because whether there IS a
- * header depends on csd and header = auto, and a second copy of that rule
- * here got it wrong — CSD floats were configured one header too tall.
- */
+/* initial floating box */
+/* frame chrome size */
 static void frame_chrome(struct aro_view *v, int *cw, int *ch)
 {
 	const ly_box big = { 0, 0, 10000, 10000 };
@@ -791,8 +631,7 @@ static ly_box float_box_for(struct aro_view *v)
 	const struct q_theme *th = &v->server->cfg.theme;
 	ly_box u = usable_area(v->output);
 
-	/* float_scale is now the fallback for a client that has genuinely
-	 * committed nothing, not the normal path — see xdg_preferred_size */
+	/* preferred size first, float_scale fallback */
 	int w = 0, h = 0;
 	if (v->impl->preferred_size)
 		v->impl->preferred_size(v, &w, &h);
@@ -801,7 +640,7 @@ static ly_box float_box_for(struct aro_view *v)
 		h = (int)(u.h * th->float_scale);
 	}
 
-	/* the frame is chrome around the client, so ask for room for both */
+	/* add frame chrome */
 	int cw, ch;
 	frame_chrome(v, &cw, &ch);
 	w += cw;
@@ -820,16 +659,7 @@ static ly_box float_box_for(struct aro_view *v)
 	return (ly_box){ u.x + (u.w - w) / 2, u.y + (u.h - h) / 2, w, h };
 }
 
-/*
- * Hybrid float sizing, first half: tell the client its size exactly once.
- *
- * Called whenever a window starts floating with a box we chose — on map, on
- * mod+space, on leaving fullscreen — and never per frame. For an xdg client
- * this then hands the size over to it (float_follow). X11 keeps being
- * configured by ui_frame_geometry, because X11 is told where it is and
- * believes it: stop telling it and a moved window's menus open where the
- * window used to be.
- */
+/* configure a new floating window once */
 static void view_float_configure_once(struct aro_view *v)
 {
 	if (!v->floating || v->fullscreen)
@@ -837,16 +667,7 @@ static void view_float_configure_once(struct aro_view *v)
 
 	v->float_follow = v->toplevel != NULL;
 
-	/*
-	 * If we do not know the client's size, fbox came from the float_scale
-	 * fallback — a guess, not a size — and configuring it would turn that
-	 * guess into a demand the client obeys: the half-screen bug again,
-	 * one step removed. An xdg client was already told "0x0, you decide"
-	 * on its initial commit, so say nothing more; its first real commit
-	 * sizes the frame through view_float_follow().
-	 *
-	 * X11 has no "you decide", and always reports a size anyway.
-	 */
+	/* don't force a guessed size */
 	int w = 0, h = 0;
 	if (v->impl->preferred_size)
 		v->impl->preferred_size(v, &w, &h);
@@ -858,15 +679,7 @@ static void view_float_configure_once(struct aro_view *v)
 	view_configure(v, c.x, c.y, c.w, c.h);
 }
 
-/*
- * Hybrid float sizing, second half: the client changed its own size, so the
- * frame follows. Called from the commit handler.
- *
- * The top-left stays put — a dialog that grows should grow away from where
- * you put it, not re-centre itself under you. And it snaps rather than
- * springs: this is not a layout change we made, and springing towards a size
- * we did not choose reads as a glitch.
- */
+/* follow client-requested float size */
 static void view_float_follow(struct aro_view *v)
 {
 	struct aro_server *s = v->server;
@@ -875,7 +688,7 @@ static void view_float_follow(struct aro_view *v)
 	if (!v->float_follow || !v->floating || v->fullscreen || !v->mapped ||
 	    !v->output)
 		return;
-	/* mid-drag the pointer owns the box; a commit must not fight it */
+	/* don't fight mid-drag commits */
 	if (s->grabbed == v)
 		return;
 
@@ -908,21 +721,12 @@ static void view_float_follow(struct aro_view *v)
 	v->fbox.h = h;
 	anim_box_set(&v->geo, view_target(v));
 
-	/* rule 6: the title re-renders when its width changes, and it just
-	 * did — once, here, not on every frame */
+	/* update title when width changes */
 	ui_frame_title(v, v->fbox.w, v->output->scale);
 	wlr_output_schedule_frame(v->output->wlr_output);
 }
 
-/*
- * Move a view between the tree and the floating layer.
- *
- * Going out: ly_close() drops the leaf, and the position it held is gone for
- * good — coming back in re-splits against whatever is focused, the way i3
- * behaves. Keeping the slot would mean floating leaves the tree skips during
- * arrange, which buys exact restoration at the cost of layout.c learning a
- * concept it has no business knowing.
- */
+/* toggle floating */
 static void view_set_floating(struct aro_server *s, struct aro_view *v,
                               bool floating)
 {
@@ -955,7 +759,7 @@ static void view_set_floating(struct aro_server *s, struct aro_view *v,
 			v->node = ly_split(root, target, LY_ROW, v);
 		}
 		if (!v->node) {
-			/* out of memory: stay floating rather than vanish */
+			/* OOM: stay floating */
 			v->floating = true;
 			return;
 		}
@@ -966,12 +770,7 @@ static void view_set_floating(struct aro_server *s, struct aro_view *v,
 	aro_arrange(s);
 }
 
-/*
- * Fullscreen sits on top of whatever the view already is. The tree is never
- * told: a tiled window keeps its leaf and its box, we simply stop using them
- * until it comes back. That is rule 2 — the tree states where things belong,
- * the compositor decides what to do about it.
- */
+/* fullscreen state */
 static void view_set_fullscreen(struct aro_server *s, struct aro_view *v,
                                 bool fullscreen)
 {
@@ -993,9 +792,7 @@ static void view_set_fullscreen(struct aro_server *s, struct aro_view *v,
 	if (v->impl->set_fullscreen)
 		v->impl->set_fullscreen(v, fullscreen);
 
-	/* Coming back from fullscreen a following float is still at screen
-	 * size, and its next commit would make that the new fbox. Tell it the
-	 * box it had before, once, and let it follow from there. */
+	/* restore float size after fullscreen */
 	if (!fullscreen)
 		view_float_configure_once(v);
 	aro_arrange(s);
@@ -1006,14 +803,7 @@ static void view_request_fullscreen(struct wl_listener *l, void *data)
 	struct aro_view *v = wl_container_of(l, v, request_fullscreen);
 	(void)data;
 
-	/*
-	 * The protocol requires an ack even when we say no, and a client that
-	 * asks before mapping must still be answered — wlr_xdg_surface_schedule_configure
-	 * is what tinywl does for the unmapped case.
-	 *
-	 * API RISK: requested.fullscreen is the field in 0.18+; older trees put
-	 * it on client_pending.
-	 */
+	/* answer fullscreen requests even when unmapped */
 	if (!v->mapped) {
 		wlr_xdg_surface_schedule_configure(v->toplevel->base);
 		return;
@@ -1023,18 +813,7 @@ static void view_request_fullscreen(struct wl_listener *l, void *data)
 
 /* ── window rules ──────────────────────────────────────────────────────── */
 
-/*
- * Ask the rules about a window that is already mapped, and apply only what
- * changed since the last answer (see rule_last in aro.h). Called on a
- * title change and on a config reload; view_map asks once itself, because
- * a window being placed for the first time has to be placed right, not
- * placed and then moved.
- *
- * A field that goes from set to unset — the rule was deleted, or the title
- * stopped matching — does nothing. The window stays as it is rather than
- * being put back to whatever the map-time heuristics guessed, which is an
- * answer you can no longer see and would not know to expect.
- */
+/* reapply rules only on change */
 static void view_rules_reapply(struct aro_view *v)
 {
 	struct aro_server *s = v->server;
@@ -1046,8 +825,7 @@ static void view_rules_reapply(struct aro_view *v)
 	v->rule_last = r;       /* before acting: nothing below re-enters, but
 	                           a stale answer must never be compared twice */
 
-	/* float first: view_send_to only re-inserts into the destination
-	 * tree what is tiled at the moment it runs */
+	/* apply float before workspace move */
 	if (r.floating != Q_RULE_UNSET && r.floating != last.floating)
 		view_set_floating(s, v, r.floating == 1);
 	if (r.workspace != Q_RULE_UNSET && r.workspace != last.workspace)
@@ -1058,12 +836,7 @@ static void view_rules_reapply(struct aro_view *v)
 
 /* ── across outputs ────────────────────────────────────────────────────── */
 
-/*
- * The output next to `from` in a direction, by box centres — the same
- * spatial rule ly_focus uses inside a tree, applied one level up between
- * them. Only outputs genuinely on that side are considered, so moving right
- * from the rightmost screen finds nothing rather than wrapping.
- */
+/* nearest output in a direction */
 static struct aro_output *output_toward(struct aro_server *s,
                                            struct aro_output *from,
                                            ly_edge e)
@@ -1088,7 +861,7 @@ static struct aro_output *output_toward(struct aro_server *s,
 		if (!right_way)
 			continue;
 
-		/* punish drift across the axis, exactly as ly_focus does */
+		/* penalize cross-axis drift */
 		double along = (e == LY_LEFT || e == LY_RIGHT) ? dx : dy;
 		double cross = (e == LY_LEFT || e == LY_RIGHT) ? dy : dx;
 		if (along < 0)
@@ -1105,8 +878,7 @@ static struct aro_output *output_toward(struct aro_server *s,
 	return best;
 }
 
-/* Something to focus on an output: its current workspace's first leaf, or
- * any floating window there if the tree is empty. */
+/* pick a view on an output */
 static struct aro_view *output_pick_view(struct aro_server *s,
                                             struct aro_output *o)
 {
@@ -1124,12 +896,7 @@ static struct aro_view *output_pick_view(struct aro_server *s,
 	return NULL;
 }
 
-/*
- * Hand a window to another output, onto whatever workspace that output is
- * currently showing. Floating windows keep their size but are nudged inside
- * the destination, since their box is in layout coordinates and would
- * otherwise stay on the old screen.
- */
+/* move view to another output */
 static void view_move_to_output(struct aro_server *s, struct aro_view *v,
                                 struct aro_output *dest)
 {
@@ -1146,7 +913,7 @@ static void view_move_to_output(struct aro_server *s, struct aro_view *v,
 	v->workspace = dest->cur_ws;
 
 	if (v->floating) {
-		/* carry it over by the offset between the two outputs */
+		/* shift floating box to destination */
 		v->fbox.x += dest->box.x - src->box.x;
 		v->fbox.y += dest->box.y - src->box.y;
 	} else {
@@ -1171,27 +938,9 @@ static void view_move_to_output(struct aro_server *s, struct aro_view *v,
 
 /* ── dragging ──────────────────────────────────────────────────────────── */
 
-/*
- * Drag-and-drop tiling, the part you actually see.
- *
- * Pick up a tiled window and nothing happens until you have moved
- * s->cfg.theme.drag_tear pixels — click-to-focus with a twitchy hand should not
- * rearrange your screen. Past that the window tears out of the tree and
- * becomes floating under the cursor, keeping the size it had so the lift
- * reads as continuous rather than as a jump.
- *
- * While it is loose, whatever tiled window is under the cursor shows a
- * preview of the slot the drop would create: the half of that window nearest
- * the pointer. Let go over a preview and the window tiles there; let go over
- * the gaps and it simply stays floating.
- *
- * There is deliberately no centre "swap" zone. Four edges means the drop is
- * always one of four answers and the preview never flickers between two
- * meanings near the middle of a window.
- */
+/* drag-and-drop tiling */
 
-/* The slot a drop would create: half of the target, on the side you are
- * pointing at. */
+/* drop slot preview */
 static ly_box drop_slot_box(ly_box t, ly_edge e)
 {
 	switch (e) {
@@ -1208,9 +957,7 @@ static bool box_contains(ly_box b, double x, double y)
 	return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
 }
 
-/* The tiled window under a point, ignoring the one being dragged. Asks the
- * layout for boxes rather than the scene graph, because the dragged window is
- * sitting on top of the answer. */
+/* tiled view under cursor */
 static struct aro_view *tiled_view_at(struct aro_server *s,
                                          double x, double y)
 {
@@ -1220,7 +967,7 @@ static struct aro_view *tiled_view_at(struct aro_server *s,
 			continue;
 		if (v->floating || v->fullscreen || !v->node || v == s->grabbed)
 			continue;
-		/* only consider windows on the output the cursor is over */
+		/* only views on cursor output */
 		if (v->output != output_at(s, x, y))
 			continue;
 		if (box_contains(v->node->box, x, y))
@@ -1229,8 +976,7 @@ static struct aro_view *tiled_view_at(struct aro_server *s,
 	return NULL;
 }
 
-/* Which side of a box a point is nearest, normalised so that a wide window
- * and a tall one behave the same. */
+/* nearest edge */
 static ly_edge nearest_edge(ly_box b, double x, double y)
 {
 	double fx = b.w > 0 ? (x - b.x) / (double)b.w : 0.5;
@@ -1252,7 +998,7 @@ static void drop_clear(struct aro_server *s)
 	ui_preview_show(&s->preview, false);
 }
 
-/* Recompute the indicator from where the cursor is now. */
+/* update drop indicator */
 static void drop_update(struct aro_server *s)
 {
 	struct aro_view *target = tiled_view_at(s, s->cursor->x, s->cursor->y);
@@ -1269,25 +1015,17 @@ static void drop_update(struct aro_server *s)
 	s->drop_edge = e;
 
 	if (fresh) {
-		/* appear where it belongs rather than flying in from the origin */
+		/* place preview instantly first time */
 		anim_box_set(&s->preview.geo, slot);
 		ui_preview_geometry(&s->preview, slot);
 		ui_preview_show(&s->preview, true);
 	} else {
-		/* it chases the cursor between slots, so it moves flat and fast:
-		 * an overshooting indicator points at the wrong window. */
+		/* preview moves flat/fast */
 		anim_box_to(&s->preview.geo, slot, aro_now_ms(), s->cfg.theme.drop_ms, &FLAT);
 	}
 }
 
-/*
- * Put a floating view back into the tree beside `target`, on the given side.
- *
- * ly_split() does not promise which side the new leaf lands on, so rather
- * than assume, this arranges and then looks at where the two boxes actually
- * ended up, swapping payloads if the drop was meant for the other side. One
- * extra arrange, no guess about the tree's internals.
- */
+/* drop floating view into tree */
 static void view_tile_into(struct aro_server *s, struct aro_view *v,
                            struct aro_view *target, ly_edge e)
 {
@@ -1295,8 +1033,7 @@ static void view_tile_into(struct aro_server *s, struct aro_view *v,
 		return;
 
 	ly_dir dir = (e == LY_LEFT || e == LY_RIGHT) ? LY_ROW : LY_COL;
-	/* the drop target's output wins: dragging across a screen boundary
-	 * moves the window to that screen */
+	/* drop moves view to target output */
 	v->output = target->output;
 	v->workspace = target->workspace;
 	ly_node **root = &v->output->ws[v->workspace];
@@ -1325,16 +1062,9 @@ static void view_tile_into(struct aro_server *s, struct aro_view *v,
 
 static void grab_end(struct aro_server *s);
 
-/*
- * Mouse-resizing a tiled window does not resize that window. It moves a
- * boundary the window shares with whatever is on the other side, and both
- * sides have to follow the cursor at once — which is why this has its own
- * arrange path. Springing here would mean the boundary lags the pointer, and
- * a boundary that lags is worse than one that does not move.
- */
+/* tiled resize moves a shared boundary */
 
-/* Which edges of a box the cursor is within `zone` pixels of, as a WLR_EDGE
- * mask so that corners come out naturally as two bits. */
+/* edge mask near cursor */
 static uint32_t edge_zone(ly_box b, double x, double y, int zone)
 {
 	uint32_t m = 0;
@@ -1371,16 +1101,7 @@ static uint32_t mask_from_ly_edge(ly_edge e)
 	return 0;
 }
 
-/*
- * The split node that owns the boundary on a given side of a leaf.
- *
- * Walking up until the axis matches is not enough: an ancestor splitting the
- * right way might put this leaf on the far side, in which case its boundary
- * is the one on the *opposite* edge. So the side matters too — for a right
- * edge the subtree has to be the first child, for a left edge the second.
- *
- * NULL means there is nothing to move: that edge is the edge of the screen.
- */
+/* find split owning this boundary */
 static ly_node *boundary_for(ly_node *leaf, ly_edge e)
 {
 	ly_dir want = (e == LY_LEFT || e == LY_RIGHT) ? LY_ROW : LY_COL;
@@ -1395,17 +1116,7 @@ static ly_node *boundary_for(ly_node *leaf, ly_edge e)
 	return NULL;
 }
 
-/*
- * The boundary to drag, given the edge the pointer asked for.
- *
- * Away from the borders there is no meaningful "nearest" edge — every
- * distance is about the same — so the asked-for edge is close to arbitrary,
- * and insisting on it means a centre grab on a leftmost window asks for the
- * screen edge and gets refused. Try what was asked for, then anything that
- * exists. Which edge we end up moving does not change the gesture: the
- * boundary follows the pointer either way, because the ratio belongs to the
- * split, not to the window that was grabbed.
- */
+/* pick a boundary to resize */
 static ly_node *boundary_pick(ly_node *leaf, ly_edge want)
 {
 	ly_node *split = boundary_for(leaf, want);
@@ -1423,21 +1134,10 @@ static ly_node *boundary_pick(ly_node *leaf, ly_edge want)
 	return NULL;           /* the only window on the workspace */
 }
 
-/*
- * Arrange and apply immediately, with no animation at all. The spring exists
- * so that windows appear to settle into place; during a live resize there is
- * nothing to settle into, because the target is wherever the pointer is this
- * millisecond.
- *
- * Titles are deliberately NOT refreshed here. ui_frame_title runs a pango
- * pass whenever max width changes, and max width changes on every motion
- * event — rule 6 exists precisely to keep that off this path. grab_end()
- * refreshes them once when the drag stops.
- */
+/* live resize: no animation */
 static void arrange_live(struct aro_server *s)
 {
-	/* Only the output being resized on: a boundary drag cannot affect any
-	 * other screen's tree. */
+	/* only resize current output */
 	struct aro_output *o = s->grabbed ? s->grabbed->output
 	                                     : aro_focused_output(s);
 	if (!o)
@@ -1472,17 +1172,7 @@ static void grab_motion_resize_tile(struct aro_server *s)
 	if (span <= 0)
 		return;
 
-	/*
-	 * Offset from where the boundary already was, not from where the
-	 * cursor is. Reading the ratio straight off the pointer would snap the
-	 * boundary to the cursor the instant you press — grab a window
-	 * anywhere but exactly on its edge and the layout jumps before you
-	 * have moved. You grab the edge, wherever your pointer happens to be.
-	 *
-	 * Still computed from the total delta since mousedown rather than
-	 * accumulated per event, so it does not drift and it retraces exactly
-	 * when you drag back out of a clamp.
-	 */
+	/* resize relative to grab start */
 	double delta = horiz ? s->cursor->x - s->grab_x : s->cursor->y - s->grab_y;
 	double r = s->grab_ratio + delta / span;
 
@@ -1499,8 +1189,7 @@ static void grab_motion_resize_tile(struct aro_server *s)
 	arrange_live(s);
 }
 
-/* The tiled window nearest a point, by centre distance. Used when a drop
- * lands on the gaps, where there is nothing directly underneath. */
+/* nearest tiled view */
 static struct aro_view *nearest_tiled_view(struct aro_server *s,
                                               double x, double y,
                                               struct aro_view *except)
@@ -1528,17 +1217,7 @@ static struct aro_view *nearest_tiled_view(struct aro_server *s,
 	return best;
 }
 
-/*
- * Put a torn-out window back into the tree when it is dropped.
- *
- * A window that was tiled before the drag always returns to tiling: the lift
- * is a way of moving it, not a way of turning it into a floating window.
- * Dropping on a preview uses that slot; dropping on the gaps falls back to
- * the nearest tiled window, so the gesture cannot silently do nothing.
- *
- * A window that was ALREADY floating — a dialog, or one toggled with
- * mod+space — is left alone. Dragging it is just moving it.
- */
+/* retile dropped window */
 static void view_retile(struct aro_server *s, struct aro_view *v)
 {
 	struct aro_view *target = NULL;
@@ -1559,7 +1238,7 @@ static void view_retile(struct aro_server *s, struct aro_view *v)
 		return;
 	}
 
-	/* nothing else is tiled here: it becomes the whole workspace */
+	/* become root if workspace empty */
 	ly_node **root = &v->output->ws[v->workspace];
 	if (*root)
 		return;                 /* a tree with no visible leaves; leave it */
@@ -1589,8 +1268,7 @@ static void grab_end(struct aro_server *s)
 
 	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "default");
 
-	/* arrange refreshes every title against its settled target width —
-	 * the pango pass that arrange_live() deliberately skipped */
+	/* update titles after drag */
 	aro_arrange(s);
 }
 
@@ -1600,11 +1278,7 @@ static void grab_begin(struct aro_server *s, struct aro_view *v,
 	if (!v || !v->mapped || v->fullscreen)
 		return;
 
-	/*
-	 * Resizing a tiled window means moving a boundary it shares with a
-	 * sibling. Find that boundary now: if there isn't one, the cursor is on
-	 * an outer edge of the screen and there is nothing to drag.
-	 */
+	/* begin tiled resize */
 	if (mode == ARO_CURSOR_RESIZE && !v->floating) {
 		if (!v->node)
 			return;
@@ -1618,9 +1292,7 @@ static void grab_begin(struct aro_server *s, struct aro_view *v,
 
 	aro_focus(s, v);
 
-	/* Dragging a float's edge pins its size: from now on we decide, and
-	 * ui_frame_geometry configures it live as the edge moves. Never
-	 * re-armed by a client commit, only by the window floating afresh. */
+	/* edge drag overrides float_follow */
 	if (mode == ARO_CURSOR_RESIZE && v->floating)
 		v->float_follow = false;
 
@@ -1656,9 +1328,7 @@ static void grab_motion_move(struct aro_server *s)
 		s->grab_tore_out = true;
 		view_set_floating(s, v, true);
 
-		/* view_set_floating centres a newly floating window, which is the
-		 * right answer for mod+space and the wrong one here: a window
-		 * being dragged should come loose exactly where it already was. */
+		/* keep drag position when tearing out */
 		v->fbox = s->grab_box;
 	}
 
@@ -1668,8 +1338,7 @@ static void grab_motion_move(struct aro_server *s)
 	v->fbox = (ly_box){ s->grab_box.x + (int)dx, s->grab_box.y + (int)dy,
 	                    s->grab_box.w, s->grab_box.h };
 
-	/* No spring while dragging. The window is attached to the cursor and a
-	 * window that lags the pointer feels broken rather than smooth. */
+	/* no animation while dragging */
 	anim_box_set(&v->geo, v->fbox);
 
 	if (s->grab_from_tree)
@@ -1696,8 +1365,7 @@ static void grab_motion_resize(struct aro_server *s)
 		b.h += dy;
 	}
 
-	/* Clamp by moving the edge back, not by letting the box invert: a
-	 * negative width reaches wlr_scene_rect_set_size and asserts. */
+	/* clamp to minimum float size */
 	if (b.w < s->cfg.theme.float_min_w) {
 		if (s->grab_edges & WLR_EDGE_LEFT)
 			b.x = s->grab_box.x + s->grab_box.w - s->cfg.theme.float_min_w;
@@ -1734,7 +1402,7 @@ static void grab_motion(struct aro_server *s)
 		wlr_output_schedule_frame(o->wlr_output);
 }
 
-/* A window can vanish mid-drag — the client exits, the dialog closes. */
+/* drop grab if view disappears */
 static void grab_forget(struct aro_server *s, struct aro_view *v)
 {
 	if (s->grabbed != v)
@@ -1746,10 +1414,7 @@ static void grab_forget(struct aro_server *s, struct aro_view *v)
 	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "default");
 }
 
-/*
- * Clients ask for these when you drag their own title bar — which for a GTK
- * app drawing its own decorations is the only way we hear about it at all.
- */
+/* client move/resize requests */
 static void view_request_move(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, request_move);
@@ -1772,9 +1437,7 @@ static void view_map(struct wl_listener *l, void *data)
 	struct aro_server *s = v->server;
 	(void)data;
 
-	/* New windows land on the output the keyboard is on. The cursor's
-	 * output would be the other defensible answer; focus is the one that
-	 * matches a keyboard-first WM. */
+	/* new windows open on focused output */
 	struct aro_output *o = aro_focused_output(s);
 	if (!o) {
 		wlr_log(WLR_ERROR, "a window mapped with no output to put it on");
@@ -1784,13 +1447,7 @@ static void view_map(struct wl_listener *l, void *data)
 	v->mapped = true;
 	v->float_follow = false;        /* a remap starts from scratch */
 
-	/*
-	 * Window rules, asked once, before anything is placed: a window a
-	 * rule sends elsewhere must never appear here first and then jump.
-	 *
-	 * The log line is for writing rules — there is no other way to find
-	 * out what app_id a program uses until foreign-toplevel exists.
-	 */
+	/* evaluate rules before placement */
 	const char *app_id = view_app_id(v), *title = view_title(v);
 	wlr_log(WLR_INFO, "map: app_id=\"%s\" title=\"%s\"",
 	        app_id ? app_id : "", title ? title : "");
@@ -1803,17 +1460,13 @@ static void view_map(struct wl_listener *l, void *data)
 	const bool here = ws == o->cur_ws;
 	v->workspace = ws;
 
-	/* a rule that says float or tile replaces the heuristic outright */
+	/* rule overrides float heuristic */
 	bool floating = r.floating != Q_RULE_UNSET
 	              ? r.floating == 1
 	              : v->impl->wants_float && v->impl->wants_float(v);
 
 	if (floating) {
-		/*
-		 * Never enters the tree at all. Note this leaves pending_split
-		 * alone: a dialog opening between mod+v and the window you meant
-		 * it for should not eat the one-shot.
-		 */
+		/* floating windows skip the tree */
 		v->floating = true;
 		v->fbox = float_box_for(v);
 		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
@@ -1830,12 +1483,7 @@ static void view_map(struct wl_listener *l, void *data)
 			                  s->focused->node
 			                ? s->focused->node
 			                : ly_first_leaf(*root);
-			/*
-			 * Dwindle splits along the longer axis of the frame
-			 * being split, so the layout spirals on its own. A
-			 * one-shot mod+v / mod+s still wins: asking explicitly
-			 * should never be overruled by the automatic choice.
-			 */
+			/* dwindle split direction */
 			ly_dir dir = s->pending_split;
 			if (s->cfg.layout == Q_LAYOUT_DWINDLE && !s->split_forced)
 				dir = target->box.w > target->box.h ? LY_ROW : LY_COL;
@@ -1846,24 +1494,18 @@ static void view_map(struct wl_listener *l, void *data)
 			wlr_log(WLR_ERROR, "out of memory inserting a window");
 			return;
 		}
-		/* The one-shot mod+v / mod+s was meant for the window opening
-		 * where you are looking. One a rule sends elsewhere must not
-		 * use it up — the same courtesy a dialog gets. */
+		/* consume one-shot split only if placed here */
 		if (here) {
 			s->pending_split = LY_ROW;      /* one-shot, like i3 */
 			s->split_forced = false;
 		}
 
-		/* grow into place from slightly small, the way panes appear in splits */
+		/* animate open */
 		ly_arrange(*root, usable_area(o),
 		           &(ly_metrics){ .gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
 	}
 
-	/*
-	 * A client may ask for fullscreen before it ever maps — video players
-	 * started with --fs do exactly this — and the request arrives while
-	 * v->mapped is still false, so it is answered here instead.
-	 */
+	/* handle pre-map fullscreen request */
 	if (r.fullscreen == 1 ||
 	    (v->impl->wants_fullscreen && v->impl->wants_fullscreen(v)))
 		view_set_fullscreen(s, v, true);
@@ -1879,9 +1521,7 @@ static void view_map(struct wl_listener *l, void *data)
 
 	ui_frame_clip_content(v);
 
-	/* Sent to another workspace: there, hidden, and not focused — taking
-	 * focus into a window you cannot see is how keystrokes go missing.
-	 * Its pill shows it arrived. */
+	/* don't focus hidden windows */
 	view_set_visible(v, here);
 	if (here)
 		aro_focus(s, v);
@@ -1900,15 +1540,11 @@ static void view_unmap(struct wl_listener *l, void *data)
 	view_set_visible(v, false);
 	grab_forget(s, v);
 
-	/* Any tiled window closing can free the split node a live resize is
-	 * holding — not just the one being dragged. Drop the grab rather than
-	 * dereference a freed node on the next motion event. */
+	/* drop tiled resize grab if windows close */
 	if (s->cursor_mode == ARO_CURSOR_RESIZE_TILE)
 		grab_forget(s, s->grabbed);
 
-	/* A floating view has no leaf to close. Passing NULL into ly_close()
-	 * would be a null deref inside the tree, which is the last place you
-	 * want to be debugging from. */
+	/* only close tree leaf if present */
 	ly_node *next = NULL;
 	if (v->node) {
 		next = ly_close(view_ws_root(v), v->node);
@@ -1940,14 +1576,14 @@ static void view_commit(struct wl_listener *l, void *data)
 	(void)data;
 
 	if (v->toplevel->base->initial_commit) {
-		/* 0 x 0 lets the client pick, then we override on map */
+		/* let client choose initial size */
 		wlr_xdg_toplevel_set_size(v->toplevel, 0, 0);
 	}
 
-	/* a float that sizes itself: the frame follows what it committed */
+	/* follow client float commits */
 	view_float_follow(v);
 
-	/* new buffers arrive square; round them as they come */
+	/* clip rounded corners */
 	ui_frame_clip_content(v);
 }
 
@@ -1958,9 +1594,7 @@ static void view_set_title(struct wl_listener *l, void *data)
 	if (!v->mapped || !v->output)
 		return;
 
-	/* Rules can match on title, and titles change after map — Firefox
-	 * only renames a window "Picture-in-Picture" once it is up. Before
-	 * the fullscreen check below, so a rule can still act on one. */
+	/* reapply rules on title change */
 	view_rules_reapply(v);
 
 	if (v->fullscreen || !v->output)
@@ -1981,8 +1615,7 @@ static void view_destroy(struct wl_listener *l, void *data)
 
 	qtext_finish(&v->title);
 
-	/* the frame tree is ours, so we destroy it — the client only owns the
-	 * surface node inside v->content */
+	/* destroy our frame tree */
 	if (v->frame_tree)
 		wlr_scene_node_destroy(&v->frame_tree->node);
 
@@ -1998,16 +1631,7 @@ static void view_destroy(struct wl_listener *l, void *data)
 	free(v);
 }
 
-/*
- * A popup: a menu, a dropdown, a tooltip. The client creates it and expects
- * the compositor to put it on screen — nothing appears unless we build a
- * scene node for it here, which is why right-click menus were silently doing
- * nothing at all.
- *
- * The parent's xdg_surface carries the tree its children hang from in ->data:
- * a toplevel's is the view's popup tree, a popup's is its own, so submenus
- * nest correctly without this needing to know how deep it is.
- */
+/* popups */
 struct aro_popup {
 	struct wlr_xdg_popup *popup;
 	struct aro_server *server;
@@ -2017,15 +1641,7 @@ struct aro_popup {
 	struct wl_listener destroy;
 };
 
-/*
- * Unconstraining has to wait for the first commit.
- *
- * wlr_xdg_popup_unconstrain_from_box() schedules a configure, and an xdg
- * surface is not `initialized` until it has committed once — scheduling one
- * before that asserts and takes the compositor with it. This is the same
- * rule as the layer-shell one in the bug log, seen from the other side:
- * there the mistake was configuring too late, here too early.
- */
+/* unconstrain popup after first commit */
 static void popup_commit(struct wl_listener *l, void *data)
 {
 	struct aro_popup *p = wl_container_of(l, p, commit);
@@ -2034,12 +1650,7 @@ static void popup_commit(struct wl_listener *l, void *data)
 	if (!p->popup->base->initial_commit)
 		return;
 
-	/*
-	 * Keep it on screen. A menu opened near the bottom of an output would
-	 * otherwise run off it — the client picks a position and relies on us
-	 * to flip or slide it. The box wants to be in the parent surface's
-	 * coordinate space, hence subtracting the tree's layout position.
-	 */
+	/* keep popup on screen */
 	int lx = 0, ly = 0;
 	wlr_scene_node_coords(&p->parent_tree->node, &lx, &ly);
 
@@ -2185,7 +1796,7 @@ static void layer_map(struct wl_listener *listener, void *data)
 	arrange_layers(l->server);
 	aro_arrange(l->server);
 
-	/* fuzzel and friends are useless without this */
+	/* focus interactive layer surfaces */
 	if (l->layer_surface->current.keyboard_interactive)
 		layer_focus(l->server, l);
 }
@@ -2208,7 +1819,7 @@ static void layer_commit(struct wl_listener *listener, void *data)
 	struct wlr_layer_surface_v1 *ls = l->layer_surface;
 	(void)data;
 
-	/* the client may move itself between layers at any time */
+	/* handle layer change */
 	if (ls->current.committed & WLR_LAYER_SURFACE_V1_STATE_LAYER) {
 		struct wlr_scene_tree *tree =
 			layer_tree_for(l->server, ls->current.layer);
@@ -2247,7 +1858,7 @@ static void new_layer_surface(struct wl_listener *listener, void *data)
 	struct aro_server *s = wl_container_of(listener, s, new_layer_surface);
 	struct wlr_layer_surface_v1 *ls = data;
 
-	/* a client may leave the output up to us */
+	/* pick default output for layer */
 	if (!ls->output) {
 		struct aro_output *o;
 		if (wl_list_empty(&s->outputs)) {
@@ -2286,15 +1897,7 @@ static void new_layer_surface(struct wl_listener *listener, void *data)
 }
 
 /* ── decorations ───────────────────────────────────────────────────────── */
-/*
- * Without xdg-decoration a client assumes it owns its own chrome, which is
- * why terminals arrive already wearing a title bar. We draw the frame, so we
- * ask for server-side mode on every toplevel.
- *
- * Note this is a request, not a command: GTK applications ignore it and draw
- * client-side decorations regardless. Nothing to be done about that short of
- * per-application quirks.
- */
+/* request server-side decorations */
 struct aro_decoration {
 	struct aro_server *server;
 	struct wlr_xdg_toplevel_decoration_v1 *deco;
@@ -2302,7 +1905,7 @@ struct aro_decoration {
 	struct wl_listener destroy;
 };
 
-/* The view a decoration belongs to, or NULL if it has not mapped yet. */
+/* find view for toplevel */
 static struct aro_view *view_for_toplevel(struct aro_server *s,
                                              struct wlr_xdg_toplevel *t)
 {
@@ -2315,19 +1918,14 @@ static struct aro_view *view_for_toplevel(struct aro_server *s,
 
 static void decoration_set_mode(struct aro_decoration *d)
 {
-	/* setting a mode before the surface's initial commit is a protocol
-	 * error, so wait until it is initialised */
+	/* wait for initialized surface */
 	if (!d->deco->toplevel->base->initialized)
 		return;
 
 	wlr_xdg_toplevel_decoration_v1_set_mode(d->deco,
 		WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 
-	/*
-	 * It asked, and it accepted server-side: we draw the title bar, so
-	 * the header comes back. A client that never creates a decoration
-	 * object never reaches this and keeps csd = true.
-	 */
+	/* enable our header when server-side */
 	struct aro_view *v = view_for_toplevel(d->server, d->deco->toplevel);
 	if (v && v->csd) {
 		v->csd = false;
@@ -2395,7 +1993,7 @@ static void output_frame(struct wl_listener *l, void *data)
 	if (prompt_tick(s, now))
 		moving = true;
 
-	/* the drop indicator animates between slots like everything else */
+	/* animate drop preview */
 	if (s->preview.active) {
 		if (anim_box_tick(&s->preview.geo, now))
 			moving = true;
@@ -2427,12 +2025,7 @@ static void output_request_state(struct wl_listener *l, void *data)
 	output_mgr_update(o->server);
 }
 
-/*
- * An output going away takes its workspaces with it, so every window on it
- * has to be rehomed before the trees are freed — output_evacuate() does
- * that, and parks them if this was the last one. A disabled output was
- * already evacuated when it went off, and never had a bar since.
- */
+/* evacuate output on destroy */
 static void output_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_output *o = wl_container_of(l, o, destroy);
@@ -2458,19 +2051,14 @@ static void output_destroy(struct wl_listener *l, void *data)
 	output_mgr_update(s);
 }
 
-/*
- * Take back whatever was parked when the last output went away — a VT switch,
- * or the only monitor being unplugged. Called once the output's box and the
- * layer-shell exclusive zones are settled, so the boxes it computes are final
- * and nothing springs afterwards.
- */
+/* adopt parked workspaces */
 static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 {
 	if (!s->parked)
 		return;
 	s->parked = false;
 
-	/* o was calloc'd moments ago: nothing is being dropped here */
+	/* output starts empty */
 	for (int i = 0; i < ARO_MAX_WS; i++) {
 		o->ws[i] = s->orphan_ws[i];
 		s->orphan_ws[i] = NULL;
@@ -2479,11 +2067,7 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		/*
-		 * Parked means mapped with no output. A view that has never
-		 * mapped also has no output and must NOT be adopted: view_map
-		 * has not picked a workspace or a box for it yet.
-		 */
+		/* only adopt mapped views */
 		if (v->output || !v->mapped)
 			continue;
 		v->output = o;
@@ -2496,9 +2080,7 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 		view_set_visible(v, v->workspace == o->cur_ws);
 	}
 
-	/* Place them before anything is drawn, as a workspace switch does:
-	 * animating in from where they sat on a screen that no longer exists
-	 * reads as the layout breaking, not as coming back. */
+	/* place adopted views before drawing */
 	ly_node *root = o->ws[o->cur_ws];
 	if (root)
 		ly_arrange(root, usable_area(o), &(ly_metrics){
@@ -2514,19 +2096,9 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 }
 
 /* ── output configuration ──────────────────────────────────────────────── */
-/*
- * Two ways in, one way through. Monitor blocks in the config and
- * wlr-output-management clients (wlr-randr, kanshi, wdisplays) both end up
- * as an out_req handed to output_configure(), so turning a screen on, off,
- * moving or rescaling it behaves the same whoever asked.
- *
- * Neither remembers the other. A monitor block applies when the output
- * appears and, on reload, only where the block itself changed; a protocol
- * client's change is applied and forgotten. So kanshi can move a screen
- * and saving the config for an unrelated reason will not move it back.
- */
+/* output config paths */
 
-/* Every field "leave it as it is"; callers fill in what they want. */
+/* output request defaults */
 struct out_req {
 	int enabled;                    /* -1 leave, 0, 1 */
 	struct wlr_output_mode *mode;   /* an exact mode (protocol) */
@@ -2542,10 +2114,7 @@ struct out_req {
 
 #define OUT_REQ_NONE { .enabled = -1, .transform = -1, .adaptive_sync = -1 }
 
-/*
- * Tell wlr-output-management clients what the outputs look like now. Called
- * after anything that can change it; each call replaces the last answer.
- */
+/* notify output management clients */
 static void output_mgr_update(struct aro_server *s)
 {
 	if (!s->output_mgr)
@@ -2563,9 +2132,7 @@ static void output_mgr_update(struct aro_server *s)
 				wlr_output_configuration_head_v1_create(cfg, o->wlr_output);
 			if (!h)
 				continue;
-			/* A screen blanked by DPMS has wlr_output->enabled false,
-			 * and kanshi would read that as "someone turned it off".
-			 * Report the layout's idea instead. */
+			/* report layout-enabled state */
 			h->state.enabled = o->enabled;
 			if (o->enabled) {
 				h->state.x = o->box.x;
@@ -2590,11 +2157,7 @@ static struct aro_output *output_from_wlr(struct aro_server *s,
 	return NULL;
 }
 
-/*
- * A mode of this size, closest to the asked-for refresh — within 1 Hz, so
- * `@60` finds the 59.951 Hz mode panels actually report. With no refresh
- * asked for, the fastest one, preferring the preferred mode on a tie.
- */
+/* find output mode */
 static struct wlr_output_mode *output_find_mode(struct wlr_output *wo,
                                                 int w, int h, int mhz)
 {
@@ -2617,17 +2180,7 @@ static struct wlr_output_mode *output_find_mode(struct wlr_output *wo,
 	return best;
 }
 
-/*
- * `scale = auto`: 2 on a panel dense enough that 1 is unreadable, 1
- * otherwise. The threshold is the usual one — 192 DPI, twice the 96 DPI
- * everything not told otherwise assumes.
- *
- * Deliberately not a fractional guess. A wrong 1.25 looks like a rendering
- * bug rather than a decision, and anyone who wants 1.25 can say so; this is
- * only here so a HiDPI screen is usable before you have typed anything.
- * With no physical size reported — projectors, virtual outputs, nested —
- * there is nothing to guess from, so 1.
- */
+/* automatic scale */
 static float output_auto_scale(struct wlr_output *wo)
 {
 	int w = wo->width, h = wo->height;
@@ -2649,22 +2202,14 @@ static float output_auto_scale(struct wlr_output *wo)
 	return dpi >= 192 ? 2.0f : 1.0f;
 }
 
-/*
- * Move everything off an output that is leaving — destroyed, or disabled —
- * before its trees go. The windows land on the surviving output's current
- * workspace; with no survivor they are parked, exactly as for a VT switch,
- * and the next output to come up adopts them whole.
- *
- * `o` must already be off s->outputs, or it would pick itself as the place
- * to send its own windows. Returns where they went, NULL if parked.
- */
+/* evacuate output */
 static struct aro_output *output_evacuate(struct aro_server *s,
                                           struct aro_output *o)
 {
-	/* a prompt centred on this output has nowhere left to be drawn */
+	/* dismiss prompt on output loss */
 	prompt_output_gone(s, o);
 
-	/* anything grabbed on this output stops being grabbed */
+	/* clear grabs on output loss */
 	if (s->grabbed && s->grabbed->output == o)
 		grab_forget(s, s->grabbed);
 
@@ -2679,12 +2224,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 			continue;
 
 		if (!dest) {
-			/*
-			 * Nowhere to send it: park it. The leaf stays valid
-			 * because the trees below are handed over rather than
-			 * freed. Boxes go output-relative so they can be
-			 * replayed onto whatever output comes back.
-			 */
+			/* park views if no destination */
 			v->output = NULL;
 			v->fbox.x -= o->box.x;
 			v->fbox.y -= o->box.y;
@@ -2694,7 +2234,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 			continue;
 		}
 
-		/* drop the leaf first: the tree it points into is about to go */
+		/* remove leaf before tree is freed */
 		v->node = NULL;
 		v->output = dest;
 		v->workspace = dest->cur_ws;
@@ -2735,11 +2275,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 	return dest;
 }
 
-/*
- * Take an output out of the layout: its windows move to another screen,
- * its bar and layer surfaces go, and the wlr_output stops scanning out.
- * The aro_output itself stays, on outputs_off, so it can come back.
- */
+/* disable output */
 static void output_disable(struct aro_output *o)
 {
 	struct aro_server *s = o->server;
@@ -2751,12 +2287,7 @@ static void output_disable(struct aro_output *o)
 
 	struct aro_output *dest = output_evacuate(s, o);
 
-	/*
-	 * Layer surfaces belong to one output, and this one is leaving the
-	 * layout. Closing them is what sway does; waybar and friends see the
-	 * wl_output go and put themselves back when it returns. Safe
-	 * iteration: destroying one runs layer_destroy, which unlinks it.
-	 */
+	/* destroy layer surfaces on disabled output */
 	struct aro_layer *l, *ltmp;
 	wl_list_for_each_safe(l, ltmp, &s->layers, link) {
 		if (l->layer_surface->output == wo)
@@ -2766,11 +2297,7 @@ static void output_disable(struct aro_output *o)
 	bar_finish(&o->bar);
 	memset(&o->bar, 0, sizeof o->bar);
 
-	/*
-	 * The scene output first, so its tie to the layout goes with it, then
-	 * the layout entry — which also withdraws the wl_output global, so
-	 * clients see the screen leave. Re-enabling creates both afresh.
-	 */
+	/* remove scene/layout entries */
 	struct wlr_scene_output *so = wlr_scene_get_scene_output(s->scene, wo);
 	if (so)
 		wlr_scene_output_destroy(so);
@@ -2789,11 +2316,7 @@ static void output_disable(struct aro_output *o)
 	wlr_log(WLR_INFO, "output %s disabled", wo->name);
 }
 
-/*
- * Apply a request to one output. With `test`, only ask whether it would
- * work — nothing changes. On failure `why` says what went wrong, in words
- * fit for a toast.
- */
+/* apply output config */
 static bool output_configure(struct aro_output *o, const struct out_req *r,
                              bool test, char *why, size_t why_len)
 {
@@ -2808,8 +2331,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 		if (o->enabled) {
 			output_disable(o);
 		} else {
-			/* never on as far as we are concerned — make sure it is
-			 * not still showing whatever it booted with */
+			/* ensure disabled output is off */
 			struct wlr_output_state st;
 			wlr_output_state_init(&st);
 			wlr_output_state_set_enabled(&st, false);
@@ -2834,7 +2356,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 		if (m) {
 			wlr_output_state_set_mode(&st, m);
 		} else if (wl_list_empty(&wo->modes)) {
-			/* nested, or a headless output: any size is a size */
+			/* headless outputs accept custom mode */
 			wlr_output_state_set_custom_mode(&st, r->mode_w, r->mode_h,
 			                                 r->mode_mhz);
 		} else {
@@ -2848,7 +2370,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 			return false;
 		}
 	} else if (r->mode_w < 0 || !o->enabled) {
-		/* asked for, or coming on with no opinion: the preferred mode */
+		/* use preferred mode */
 		struct wlr_output_mode *m = wlr_output_preferred_mode(wo);
 		if (m)
 			wlr_output_state_set_mode(&st, m);
@@ -2899,12 +2421,10 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 		wl_list_insert(&s->outputs, &o->link);
 		o->enabled = true;
 
-		/* the box has to exist before the bar can be placed against it */
+		/* refresh box before bar */
 		output_refresh_box(o);
 
-		/* One bar per output. It lives in the shared l_bar layer — the
-		 * scene clips each output's render to its own box, so a bar
-		 * positioned over this output only appears on it. */
+		/* create bar */
 		if (!bar_create(&o->bar, o))
 			wlr_log(WLR_ERROR, "could not build a bar for %s", wo->name);
 
@@ -2917,8 +2437,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 	if (!was_on) {
 		output_adopt_parked(s, o);      /* after the boxes and layers are final */
 	} else if (before.x != o->box.x || before.y != o->box.y) {
-		/* Floating boxes are in layout coordinates; the screen moved
-		 * under them, so they move with it. */
+		/* shift floating views when output moves */
 		int dx = o->box.x - before.x, dy = o->box.y - before.y;
 		struct aro_view *v;
 		wl_list_for_each(v, &s->views, link) {
@@ -2933,9 +2452,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 
 	aro_arrange(s);
 
-	/* The screen itself changed shape or place. Springing every window
-	 * from where it sat on the old one reads as the layout breaking, the
-	 * same reason a workspace switch places rather than animates. */
+	/* snap views after output geometry change */
 	if (was_on && !box_eq(before, o->box)) {
 		struct aro_view *v;
 		wl_list_for_each(v, &s->views, link)
@@ -2949,11 +2466,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 	return true;
 }
 
-/*
- * A request from what the monitor blocks say. With `last`, only the fields
- * that differ from it — the changed-only rule. Returns whether it asks for
- * anything at all.
- */
+/* diff monitor block against last applied */
 static bool monitor_req(const struct q_monitor_set *m,
                         const struct q_monitor_set *last, struct out_req *r)
 {
@@ -2985,7 +2498,7 @@ static bool monitor_req(const struct q_monitor_set *m,
 		any = true;
 	}
 	if (m->scale != 0 && (!last || last->scale != m->scale)) {
-		/* Q_MON_AUTO is negative, which out_req reads as "from DPI" */
+		/* auto scale */
 		r->scale = (float)m->scale;
 		any = true;
 	}
@@ -3012,11 +2525,7 @@ static void monitor_eval(struct aro_output *o, struct q_monitor_set *out)
 	config_monitor_eval(&o->server->cfg, wo->name, desc, out);
 }
 
-/*
- * Apply the monitor blocks to one output. `initial` is the output
- * appearing: every field a block sets applies, and the output comes on
- * unless a block says otherwise. Otherwise (a reload) only what changed.
- */
+/* apply monitor block */
 static void monitor_apply(struct aro_output *o, bool initial)
 {
 	struct aro_server *s = o->server;
@@ -3031,12 +2540,7 @@ static void monitor_apply(struct aro_output *o, bool initial)
 	if (initial && r.enabled < 0)
 		r.enabled = 1;
 
-	/*
-	 * Never turn off the last screen that is on. A config that did would
-	 * leave you editing it blind, since this file is applied as you save
-	 * — and the fix would be a TTY. The block is kept for when another
-	 * screen is on (mon_last is not updated, so the next save retries).
-	 */
+	/* never disable last active output */
 	bool refused = false;
 	if (r.enabled == 0) {
 		int lit = wl_list_length(&s->outputs) - (o->enabled ? 1 : 0);
@@ -3072,12 +2576,7 @@ static void monitor_apply(struct aro_output *o, bool initial)
 		if (o->enabled) {
 			o->mon_last = m;
 		} else {
-			/*
-			 * Off: only `enabled` was applied, so only it is
-			 * recorded. A scale edited while the screen is off has
-			 * to still read as a change once it comes back on, or
-			 * it would never be applied at all.
-			 */
+			/* remember only enabled while off */
 			if (fresh)
 				config_monitor_unset(&o->mon_last);
 			o->mon_last.enabled = m.enabled;
@@ -3086,12 +2585,7 @@ static void monitor_apply(struct aro_output *o, bool initial)
 	}
 }
 
-/*
- * On reload, every output — on or off — against the new blocks. Anything
- * being turned on goes first, so a config that swaps one screen for
- * another never passes through a moment with neither: that would trip the
- * last-screen guard, or park every window for nothing.
- */
+/* reapply monitor blocks */
 static void monitors_reapply(struct aro_server *s)
 {
 	int n = wl_list_length(&s->outputs) + wl_list_length(&s->outputs_off);
@@ -3101,7 +2595,7 @@ static void monitors_reapply(struct aro_server *s)
 	if (!all)
 		return;
 
-	/* a snapshot: applying moves outputs between the two lists */
+	/* snapshot outputs before reapplying */
 	int i = 0;
 	struct aro_output *o;
 	wl_list_for_each(o, &s->outputs, link)
@@ -3121,12 +2615,7 @@ static void monitors_reapply(struct aro_server *s)
 	free(all);
 }
 
-/*
- * wlr-output-management: a client sent a whole configuration, every head
- * either on (with its full state) or off. Applied output by output — not
- * atomically across outputs; if the third of three fails, the first two
- * stay changed and the client is told it failed.
- */
+/* apply output management config */
 static void output_mgr_apply_or_test(struct aro_server *s,
                                      struct wlr_output_configuration_v1 *cfg,
                                      bool test)
@@ -3144,7 +2633,7 @@ static void output_mgr_apply_or_test(struct aro_server *s,
 		ok = false;
 	}
 
-	/* ons before offs, for the same reason as monitors_reapply() */
+	/* enable before disable */
 	for (int pass = 0; ok && pass < 2; pass++) {
 		wl_list_for_each(h, &cfg->heads, link) {
 			if (h->state.enabled != (pass == 0))
@@ -3190,7 +2679,7 @@ static void output_mgr_apply_or_test(struct aro_server *s,
 		wlr_output_configuration_v1_send_failed(cfg);
 	wlr_output_configuration_v1_destroy(cfg);
 
-	/* on failure too: the client should see where things really stand */
+	/* update client state even on failure */
 	output_mgr_update(s);
 }
 
@@ -3206,12 +2695,7 @@ static void output_mgr_test(struct wl_listener *l, void *data)
 	output_mgr_apply_or_test(s, data, true);
 }
 
-/*
- * A new output starts OFF, on outputs_off, and the monitor blocks decide
- * how it comes on — or whether it does. Everything that turns an output on
- * goes through output_configure(), so hotplug, a reload and wlr-randr all
- * take the same path.
- */
+/* new outputs start off until monitor blocks apply */
 static void new_output(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_output);
@@ -3235,8 +2719,7 @@ static void new_output(struct wl_listener *l, void *data)
 	wl_signal_add(&wlr_output->events.destroy, &o->destroy);
 	wl_list_insert(&s->outputs_off, &o->link);
 
-	/* For writing monitor blocks, like map: for window rules — the name
-	 * and the "make model serial" a pattern can match. */
+	/* log output identifiers */
 	wlr_log(WLR_INFO, "output: name=\"%s\" desc=\"%s %s %s\"",
 	        wlr_output->name,
 	        wlr_output->make ? wlr_output->make : "",
@@ -3249,10 +2732,7 @@ static void new_output(struct wl_listener *l, void *data)
 
 /* ── input ─────────────────────────────────────────────────────────────── */
 
-/* Ctrl+Alt+F1..F12. The keymap only produces these keysyms with both
- * modifiers down, so this is checked against the TRANSLATED syms, unlike
- * every other binding below. Without it a TTY session has no way out except
- * killing the compositor from another machine. */
+/* VT switching */
 static bool handle_vt(struct aro_server *s, xkb_keysym_t sym)
 {
 	if (!s->session)
@@ -3263,29 +2743,8 @@ static bool handle_vt(struct aro_server *s, xkb_keysym_t sym)
 	return true;
 }
 
-/*
- * Bindings. `sym` here is the UNSHIFTED keysym (see keyboard_key), so
- * shift is read from `mods` and never changes which case matches.
- *
- *   mod+Return      terminal          mod+d           launcher
- *   mod+v / mod+s   next window opens right / below
- *   mod+q           close             mod+shift+e     quit aro
- *   mod+hjkl        move focus        mod+shift+hjkl  move the window
- *   mod+ctrl+hjkl   resize            mod+1..4        workspace
- *   mod+shift+1..4  send window to workspace
- *   ctrl+alt+F1..12 switch TTY
- */
-/*
- * Put the cursor on a window the keyboard just moved to.
- *
- * Only for keyboard-driven focus changes. Clicking already puts the cursor
- * where it belongs, and warping on every focus change would fight the mouse
- * — a window opening or closing must not move the pointer under your hand.
- *
- * The pointer focus has to be re-sent afterwards: the cursor has moved
- * without a motion event, so nothing else would tell the client underneath
- * that it is now being hovered.
- */
+/* key bindings */
+/* warp cursor on keyboard focus */
 static void cursor_warp_to_view(struct aro_server *s, struct aro_view *v)
 {
 	if (!v)
@@ -3300,11 +2759,7 @@ static void cursor_warp_to_view(struct aro_server *s, struct aro_view *v)
 	pointer_motion_common(s, aro_now_ms());
 }
 
-/*
- * Run one bound action. Everything a binding can do lives here, so the
- * config parser only has to name it — and the built-in bindings and a
- * user's config go down the same path.
- */
+/* run binding action */
 /* ── quitting ──────────────────────────────────────────────────────────── */
 
 static void quit_now(struct aro_server *s)
@@ -3312,11 +2767,7 @@ static void quit_now(struct aro_server *s)
 	wl_display_terminate(s->display);
 }
 
-/*
- * The quit bind, when confirm_quit is on. The detail line states the real
- * stakes — how many windows go with it — because "Are you sure?" on its own
- * trains you to press y without reading.
- */
+/* ask before quitting */
 static void quit_ask(struct aro_server *s)
 {
 	if (prompt_active(s))
@@ -3328,7 +2779,7 @@ static void quit_ask(struct aro_server *s)
 		return;
 	}
 
-	/* a drag in flight would keep the pointer grabbed under the card */
+	/* end drag before prompt */
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_end(s);
 
@@ -3345,10 +2796,7 @@ static void quit_ask(struct aro_server *s)
 		snprintf(detail, sizeof detail, "%d open window%s will close.",
 		         n, n == 1 ? "" : "s");
 
-	/*
-	 * If the card cannot be built, do NOT quit. The prompt is the safety
-	 * net; failing to put the net up is not permission to jump.
-	 */
+	/* don't quit if prompt fails */
 	if (!prompt_open(s, o, "Exit aro?", detail, "Exit", "Cancel",
 	                 quit_now)) {
 		notify(s, NOTIFY_INFO, "could not show the exit prompt; "
@@ -3356,17 +2804,12 @@ static void quit_ask(struct aro_server *s)
 		return;
 	}
 
-	/* the window under the pointer gets a leave now, not whatever the
-	 * pointer does next while the card holds it */
+	/* clear pointer focus under prompt */
 	wlr_seat_pointer_clear_focus(s->seat);
 	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "default");
 }
 
-/*
- * After routing input to the prompt: if that input closed it, give the
- * pointer back to whatever is under it, so the window you return to gets
- * an enter rather than waiting for the mouse to move.
- */
+/* restore pointer focus after prompt */
 static void prompt_after(struct aro_server *s, bool was_active)
 {
 	if (was_active && !prompt_active(s))
@@ -3400,7 +2843,7 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 			view_set_fullscreen(s, f, !f->fullscreen);
 		return;
 	case Q_SPLIT:
-		/* one-shot, i3 style — and it beats dwindle for this window */
+		/* one-shot split */
 		s->pending_split = (ly_dir)b->num;
 		s->split_forced = true;
 		return;
@@ -3437,7 +2880,7 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 			view_swap(f, target->user);
 			aro_arrange(s);
 		} else {
-			/* nothing that way on this screen: hand the window over */
+			/* move across outputs if possible */
 			struct aro_output *dest = output_toward(s, o, e);
 			if (dest)
 				view_move_to_output(s, f, dest);
@@ -3452,12 +2895,7 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	}
 
-	/*
-	 * Focus falls off the edge of one tree and onto the next screen.
-	 * ly_focus is spatial within a tree; this is the same idea one level
-	 * up, between them. An empty output is still somewhere to go, so the
-	 * output focus moves even with nothing to focus on it.
-	 */
+	/* focus across outputs */
 	struct aro_output *dest = output_toward(s, o, e);
 	if (dest) {
 		s->focused_output = dest;
@@ -3467,26 +2905,10 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 	}
 }
 
-/*
- * Bindings come from the config, or from the built-in set when there is no
- * config. Matching is on the LEVEL-0 keysym with the modifier mask compared
- * exactly: translated symbols turn `e` into `E` and `1` into `!`, which
- * silently killed every shifted binding once.
- */
+/* match bindings */
 static bool handle_bind(struct aro_server *s, uint32_t mods, xkb_keysym_t sym)
 {
-	/*
-	 * No bindings while locked — but FALSE, not true.
-	 *
-	 * Returning true means "handled", and the caller then does not forward
-	 * the key to the seat. That swallows everything the user types into
-	 * the lock screen, so the password never arrives and the only way out
-	 * is a TTY switch. False means no binding matched and the key goes to
-	 * the lock surface, which is exactly what should happen.
-	 *
-	 * VT switching is handled before this and still works: the other VT
-	 * has its own login, so it does not expose the session.
-	 */
+	/* let lock screen receive keys */
 	if (aro_locked(s))
 		return false;
 
@@ -3516,10 +2938,7 @@ static void keyboard_key(struct wl_listener *l, void *data)
 	struct xkb_state *state = kb->wlr_keyboard->xkb_state;
 	struct xkb_keymap *keymap = xkb_state_get_keymap(state);
 
-	/* Translated syms have modifiers applied: shift+e is E, shift+1 is !.
-	 * Matching bindings against those means every shifted bind silently
-	 * fails, so bindings use level-0 syms and read shift from `mods`.
-	 * VT switching is the exception — those keysyms only exist translated. */
+	/* use level-0 syms for bindings */
 	const xkb_keysym_t *trans, *raw;
 	int ntrans = xkb_state_key_get_syms(state, keycode, &trans);
 	xkb_layout_index_t layout = xkb_state_key_get_layout(state, keycode);
@@ -3532,12 +2951,7 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		for (int i = 0; i < ntrans; i++)
 			handled |= handle_vt(s, trans[i]);
 
-	/*
-	 * A prompt is modal: it takes every key, press AND release, so a
-	 * client never sees half a keystroke. VT switching still works above
-	 * it, and the lock still wins over it — keys go to the lock surface,
-	 * which is drawn over the card anyway.
-	 */
+	/* prompt consumes keys */
 	if (!handled && !aro_locked(s) && prompt_active(s)) {
 		if (ev->state == WL_KEYBOARD_KEY_STATE_PRESSED)
 			for (int i = 0; i < nraw && prompt_active(s); i++)
@@ -3578,11 +2992,7 @@ static void keyboard_destroy(struct wl_listener *l, void *data)
 	free(kb);
 }
 
-/*
- * NULL xkb fields fall back to the XKB_DEFAULT_* environment variables and
- * then to the system default, so an unset key in the config behaves exactly
- * as it did before there was a config.
- */
+/* unset xkb fields use system defaults */
 static void apply_keymap(struct aro_server *s, struct wlr_keyboard *wlr_kb)
 {
 	struct xkb_context *ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -3641,18 +3051,7 @@ static void new_input(struct wl_listener *l, void *data)
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
 
-		/*
-		 * Some pointers belong to one output rather than to the whole
-		 * layout. The nested wayland backend makes one per host window,
-		 * each reporting absolute positions relative to its own surface;
-		 * touchscreens and tablets are the same idea on real hardware.
-		 *
-		 * Without this mapping those positions are stretched across the
-		 * entire layout, so a click in the second window lands in the
-		 * first and the second output can never be reached. A pointer
-		 * with no output_name — an ordinary mouse — is left alone and
-		 * keeps the run of every screen.
-		 */
+		/* map absolute pointers to their output */
 		struct wlr_pointer *p = wlr_pointer_from_input_device(dev);
 		if (p->output_name) {
 			struct aro_output *o;
@@ -3673,28 +3072,14 @@ static void new_input(struct wl_listener *l, void *data)
 	wlr_seat_set_capabilities(s->seat, caps);
 }
 
-/*
- * Pointer handling. Motion and buttons are forwarded to the client under the
- * cursor unless we have taken the pointer for a drag.
- *
- * `surface` comes back NULL when the cursor is over our own chrome — the
- * border or the header strip — rather than over the client. That distinction
- * is what makes dragging a header work without a modifier: the scene node
- * under the cursor is one of our rects, not a buffer, so there is no client
- * to send the event to and we can take it ourselves.
- */
+/* pointer hit testing */
 static struct aro_view *view_at(struct aro_server *s, double lx, double ly,
                                    struct wlr_surface **surface,
                                    double *sx, double *sy)
 {
 	*surface = NULL;
 
-	/*
-	 * While locked the scene still contains every window, and they are
-	 * still hit-testable — the lock only covers them visually. Refusing
-	 * to report anything is what stops a click landing on a window behind
-	 * it. The lock's own surfaces are found by the normal path below.
-	 */
+	/* only lock surfaces are clickable while locked */
 	if (aro_locked(s) && !s->lock->abandoned) {
 		struct wlr_scene_node *node =
 			wlr_scene_node_at(&s->lock->tree->node, lx, ly, sx, sy);
@@ -3723,7 +3108,7 @@ static struct aro_view *view_at(struct aro_server *s, double lx, double ly,
 			*surface = scene_surface->surface;
 	}
 
-	/* walk up to whichever frame_tree carries a view, chrome or not */
+	/* find owning view */
 	struct wlr_scene_tree *tree = node->parent;
 	while (tree && !tree->node.data)
 		tree = tree->node.parent;
@@ -3739,15 +3124,7 @@ static void pointer_motion_common(struct aro_server *s, uint32_t time)
 	struct aro_view *v = view_at(s, s->cursor->x, s->cursor->y,
 	                                &surface, &sx, &sy);
 
-	/*
-	 * Hovering focuses, when the config asks for it. The output follows
-	 * too, so an empty screen can be reached without clicking.
-	 *
-	 * Only when the pointer is over a window: crossing the gaps between
-	 * frames would otherwise drop focus on the way past, and a focus that
-	 * flickers off mid-gesture is worse than one that lags. A layer
-	 * surface holding the keyboard (a launcher) keeps it.
-	 */
+	/* focus follows mouse */
 	if (s->cfg.focus_follows_mouse && !s->focused_layer) {
 		struct aro_output *po = output_at(s, s->cursor->x, s->cursor->y);
 		if (po)
@@ -3758,20 +3135,7 @@ static void pointer_motion_common(struct aro_server *s, uint32_t time)
 		(void)v;
 	}
 
-	/*
-	 * While a button is held the pointer focus must not move.
-	 *
-	 * The surface that received the press keeps receiving motion until the
-	 * button is released, even once the cursor has wandered off it — that
-	 * is the implicit grab, and it is what menus are built on. Re-running
-	 * view_at on every motion and entering whatever is underneath sends the
-	 * original surface a leave instead, which breaks the grab: an xterm
-	 * menu opens on press and closes the instant you move.
-	 *
-	 * Coordinates stay in the grabbed surface's space, computed from the
-	 * origin recorded at enter. They legitimately go negative or past the
-	 * surface's size while the cursor is outside it; clients expect that.
-	 */
+	/* keep pointer grab during button hold */
 	if (s->seat->pointer_state.button_count > 0 &&
 	    s->seat->pointer_state.focused_surface) {
 		wlr_seat_pointer_notify_motion(s->seat, time,
@@ -3829,7 +3193,7 @@ static void cursor_button(struct wl_listener *l, void *data)
 	idle_activity(s);
 	struct wlr_pointer_button_event *ev = data;
 
-	/* modal: the card answers every button, and nothing reaches a client */
+	/* prompt consumes pointer buttons */
 	if (!aro_locked(s) && prompt_active(s)) {
 		prompt_pointer_button(s, s->cursor->x, s->cursor->y,
 		                      ev->state == WL_POINTER_BUTTON_STATE_PRESSED);
@@ -3837,8 +3201,7 @@ static void cursor_button(struct wl_listener *l, void *data)
 		return;
 	}
 
-	/* A drag ends on any button release, whichever button it was. Missing
-	 * this leaves the pointer grabbed with no way to let go. */
+	/* end grab on release */
 	if (ev->state == WL_POINTER_BUTTON_STATE_RELEASED &&
 	    s->cursor_mode != ARO_CURSOR_PASSTHROUGH) {
 		grab_end(s);
@@ -3850,19 +3213,7 @@ static void cursor_button(struct wl_listener *l, void *data)
 	struct aro_view *v = view_at(s, s->cursor->x, s->cursor->y,
 	                                &surface, &sx, &sy);
 
-	/*
-	 * Clicking anywhere on an output focuses that output — including its
-	 * empty background, which is the only way a screen with nothing on it
-	 * can ever become the one new windows open on.
-	 *
-	 * On a click rather than on motion, deliberately. Tying this to the
-	 * pointer moving means a cursor left resting on one screen silently
-	 * redirects every new window there while you work by keyboard on the
-	 * other, and nested it is worse still: the host compositor decides
-	 * which of our windows gets the real keyboard, and nothing keeps that
-	 * in step with where our pointer happens to be. A click moves both at
-	 * once, so they cannot drift.
-	 */
+	/* click focuses output */
 	if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		struct aro_output *po = output_at(s, s->cursor->x, s->cursor->y);
 		if (po)
@@ -3882,20 +3233,14 @@ static void cursor_button(struct wl_listener *l, void *data)
 		uint32_t zone = edge_zone(box, s->cursor->x, s->cursor->y,
 		                          s->cfg.theme.resize_zone);
 
-		/*
-		 * mod+right resizes. So does a press on the frame's border, with
-		 * no modifier — that is what a border is for, and the zone is
-		 * wider than the 2px line so it is actually hittable. A press
-		 * anywhere else on our chrome (the header) moves.
-		 */
+		/* start move/resize */
 		bool want_resize = (ev->button == BTN_RIGHT && (mods & s->cfg.modkey)) ||
 		                   (on_chrome && zone != 0);
 
 		if ((mods & s->cfg.modkey) || on_chrome) {
 			uint32_t edges = zone;
 			if (want_resize && edges == 0) {
-				/* grabbed in the middle: pick the nearest edge so the
-				 * gesture still means something */
+				/* choose nearest edge */
 				edges = v->floating
 				      ? (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)
 				      : mask_from_ly_edge(nearest_edge(box, s->cursor->x,
@@ -3910,19 +3255,7 @@ static void cursor_button(struct wl_listener *l, void *data)
 		}
 	}
 
-	/*
-	 * Make sure the pointer focus is actually current before forwarding.
-	 *
-	 * Motion is what normally establishes it, and a click is normally
-	 * preceded by one — but not always. A surface can appear or vanish
-	 * under a stationary cursor, which is exactly what an X11 menu does:
-	 * it takes pointer focus while it is up, then unmaps. Without a motion
-	 * event in between, the next press is delivered to a surface that is
-	 * no longer there and the client sees nothing at all.
-	 *
-	 * notify_enter is a no-op when the surface is already focused, so this
-	 * costs nothing in the common case.
-	 */
+	/* refresh pointer focus before button */
 	if (surface) {
 		s->ptr_lx = s->cursor->x - sx;
 		s->ptr_ly = s->cursor->y - sy;
@@ -3977,25 +3310,7 @@ static int clock_tick(void *data)
 #ifdef ARO_XWAYLAND
 /* ── XWayland ──────────────────────────────────────────────────────────── */
 
-/*
- * X11 windows, through wlr_xwayland.
- *
- * Three things differ from xdg-shell and everything here follows from them:
- *
- *  - An X11 window is TOLD its position and believes it. There is no size
- *    negotiation: we configure it with an absolute box and it complies, so
- *    xwl_configure takes the whole rectangle where xdg ignores x and y.
- *
- *  - The surface arrives later than the window. An xwayland_surface exists
- *    as soon as the X client creates the window, but has no wl_surface until
- *    it is "associated" — so map, unmap and commit can only be listened for
- *    then, and have to be detached again on dissociate.
- *
- *  - Override-redirect windows — menus, tooltips, drag icons — must not be
- *    framed or tiled at all. X11 has already decided exactly where they go
- *    and the window manager is explicitly not consulted. They are a third
- *    category beside tiled and floating: not managed.
- */
+/* XWayland views */
 
 static void xwl_configure(struct aro_view *v, int x, int y, int w, int h)
 {
@@ -4026,23 +3341,13 @@ static const char *xwl_title(struct aro_view *v)
 	return v->xsurface ? v->xsurface->title : NULL;
 }
 
-/* The class half of WM_CLASS ("Gimp"), not the instance ("gimp") — the one
- * that names the application rather than this run of it. Rules match it
- * case-insensitively, so the difference is mostly cosmetic.
- * API RISK: xsurface->class, not compiled. */
+/* WM_CLASS class */
 static const char *xwl_app_id(struct aro_view *v)
 {
 	return v->xsurface ? v->xsurface->class : NULL;
 }
 
-/*
- * The X11 equivalents of the xdg float heuristics: a transient window (one
- * that names a parent) is a dialog, and equal min/max hints mean the client
- * cannot be resized. modal is the third, and is unambiguous.
- *
- * API RISK: size_hints is a pointer and may be NULL; the flags field naming
- * differs between xcb versions, so this checks the values rather than flags.
- */
+/* X11 float heuristics */
 static bool xwl_wants_float(struct aro_view *v)
 {
 	struct wlr_xwayland_surface *x = v->xsurface;
@@ -4074,7 +3379,7 @@ static void xwl_preferred_size(struct aro_view *v, int *w, int *h)
 
 static void xwl_geometry(struct aro_view *v, struct wlr_box *out)
 {
-	/* X11 windows have no invisible margins: the surface is the window */
+	/* X11 geometry is the surface */
 	*out = (struct wlr_box){ 0, 0,
 		v->xsurface ? v->xsurface->width : 0,
 		v->xsurface ? v->xsurface->height : 0 };
@@ -4101,12 +3406,7 @@ static const struct view_impl xwl_impl = {
 
 /* ── override-redirect ─────────────────────────────────────────────────── */
 
-/*
- * Not managed, not framed, not tiled. X11 menus and tooltips place
- * themselves; we put the surface exactly where it asks and otherwise stay
- * out of the way. Getting this wrong makes every X11 menu appear as a
- * titled, tiled window, which is unmistakable.
- */
+/* override-redirect X11 surfaces */
 struct aro_unmanaged {
 	struct wl_list link;
 	struct aro_server *server;
@@ -4147,7 +3447,7 @@ static void unmanaged_request_configure(struct wl_listener *l, void *data)
 	struct aro_unmanaged *u = wl_container_of(l, u, request_configure);
 	struct wlr_xwayland_surface_configure_event *ev = data;
 
-	/* it knows where it wants to be; say yes */
+	/* honor override-redirect configure */
 	wlr_xwayland_surface_configure(u->xsurface, ev->x, ev->y,
 	                               ev->width, ev->height);
 	if (u->tree)
@@ -4219,12 +3519,7 @@ static void xwl_commit(struct wl_listener *l, void *data)
 	ui_frame_clip_content(v);
 }
 
-/*
- * Before it is mapped an X11 window may ask to be moved or resized. We are
- * going to tile it and override this anyway, but it has to be answered or
- * the client waits — so acknowledge exactly what it asked for, and let the
- * first arrange put it where it really goes.
- */
+/* answer unmapped X11 configure */
 static void xwl_request_configure(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, request_configure);
@@ -4237,13 +3532,13 @@ static void xwl_request_configure(struct wl_listener *l, void *data)
 		return;
 	}
 
-	/* mapped and floating: honour the size, keep our position */
+	/* floating X11 resize */
 	if (v->floating && !v->fullscreen) {
 		v->fbox.w = ev->width + th->border * 2;
 		v->fbox.h = ev->height + th->border * 2 + th->header_h;
 		aro_arrange(v->server);
 	} else {
-		/* tiled: re-assert where it actually is */
+		/* tiled X11 configure */
 		ly_box b = view_target(v);
 		wlr_xwayland_surface_configure(v->xsurface,
 		                               b.x + th->border,
@@ -4294,8 +3589,7 @@ static void xwl_destroy(struct wl_listener *l, void *data)
 	if (v->frame_tree)
 		wlr_scene_node_destroy(&v->frame_tree->node);
 
-	/* map/unmap/commit were detached on dissociate, but wl_list_init left
-	 * them safe to remove again */
+	/* listeners are safe to remove */
 	wl_list_remove(&v->map.link);
 	wl_list_remove(&v->unmap.link);
 	wl_list_remove(&v->commit.link);
@@ -4337,7 +3631,7 @@ static void new_xwayland_surface(struct wl_listener *l, void *data)
 	v->frame_tree->node.data = v;   /* view_at() walks up looking for this */
 	wlr_scene_node_set_enabled(&v->frame_tree->node, false);
 
-	/* no surface yet: associate is what tells us it exists */
+	/* surface arrives on associate */
 	wl_list_init(&v->map.link);
 	wl_list_init(&v->unmap.link);
 	wl_list_init(&v->commit.link);
@@ -4373,18 +3667,7 @@ static void xwayland_ready(struct wl_listener *l, void *data)
 
 /* ── selections and drag-and-drop ──────────────────────────────────────── */
 
-/*
- * Creating the data-device manager is not enough: when a client copies, the
- * seat asks US whether that client may own the selection, and if nobody
- * answers the request is dropped and the clipboard silently never works.
- *
- * Accepting unconditionally is what every compositor does — the check exists
- * for policy nobody has, and refusing would mean no client could ever copy.
- *
- * This is also what XWayland bridges through: wlr_xwayland_set_seat() hooks
- * the X11 selection to this same seat, so answering here makes copy and
- * paste work between X11 and Wayland clients in both directions.
- */
+/* allow selection */
 static void request_set_selection(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, request_set_selection);
@@ -4392,7 +3675,7 @@ static void request_set_selection(struct wl_listener *l, void *data)
 	wlr_seat_set_selection(s->seat, ev->source, ev->serial);
 }
 
-/* the middle-click "primary" selection, which is a separate clipboard */
+/* primary selection */
 static void request_set_primary_selection(struct wl_listener *l, void *data)
 {
 	struct aro_server *s =
@@ -4406,17 +3689,14 @@ static void request_start_drag(struct wl_listener *l, void *data)
 	struct aro_server *s = wl_container_of(l, s, request_start_drag);
 	struct wlr_seat_request_start_drag_event *ev = data;
 
-	/* Only honour a drag the client can actually justify: the serial has
-	 * to match an input event the client received. Skipping this check is
-	 * how a client steals the pointer without the user having clicked. */
+	/* validate drag serial */
 	if (wlr_seat_validate_pointer_grab_serial(s->seat, ev->origin, ev->serial))
 		wlr_seat_start_pointer_drag(s->seat, ev->drag, ev->serial);
 	else
 		wlr_data_source_destroy(ev->drag->source);
 }
 
-/* Keep the drag icon under the cursor. Called from both pointer paths, since
- * a drag can be in flight while we are running a grab of our own. */
+/* drag icon follows cursor */
 static void drag_icon_update(struct aro_server *s)
 {
 	if (s->drag_icon)
@@ -4428,7 +3708,7 @@ static void drag_icon_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, drag_icon_destroy);
 	(void)data;
-	/* the scene node belongs to the icon and goes with it */
+	/* clear drag icon */
 	s->drag_icon = NULL;
 	wl_list_remove(&s->drag_icon_destroy.link);
 	wl_list_init(&s->drag_icon_destroy.link);
@@ -4442,8 +3722,7 @@ static void start_drag(struct wl_listener *l, void *data)
 	if (!drag->icon)
 		return;
 
-	/* Above everything the user can drop onto — including a fullscreen
-	 * window, since you can drag onto one. */
+	/* drag icon on overlay */
 	s->drag_icon = wlr_scene_drag_icon_create(s->l_overlay, drag->icon);
 	drag_icon_update(s);
 
@@ -4453,29 +3732,14 @@ static void start_drag(struct wl_listener *l, void *data)
 
 /* ── live config reload ────────────────────────────────────────────────── */
 
-/*
- * Re-read the config and apply it without restarting anything.
- *
- * The rule is that a reload must leave the session exactly as a fresh start
- * with that file would — so everything derived from config is recomputed,
- * not patched. Cheap enough to do wholesale: parsing is a few hundred lines
- * of text and the rest is setting colours.
- *
- * Bindings and the modifier come along for free, since handle_bind reads the
- * table on every keypress rather than caching anything.
- */
-/*
- * Put every parse problem on screen. Capped, because a file that is badly
- * wrong — the wrong file entirely, say — would otherwise bury the desktop
- * in toasts, and the log has all of them regardless.
- */
+/* live config reload */
+/* show config errors */
 static void notify_config_errors(struct aro_server *s)
 {
 	const int cap = 4;
 	int n = s->cfg.nerrors;
 
-	/* Whatever was wrong before has been re-judged by this parse: a fixed
-	 * line should take its toast away with it. */
+	/* clear old error toasts */
 	notify_clear_errors(s);
 
 	for (int i = 0; i < n && i < cap; i++)
@@ -4495,31 +3759,24 @@ static void config_reload(struct aro_server *s)
 
 	wlr_log(WLR_INFO, "config reloaded");
 
-	/* keymap: the layout may have changed under us */
+	/* reload keymaps */
 	struct aro_keyboard *kb;
 	wl_list_for_each(kb, &s->keyboards, link)
 		apply_keymap(s, kb->wlr_keyboard);
 
-	/* the backdrop seen through the gaps */
+	/* update background color */
 	if (s->root_bg) {
 		float bg[4];
 		ui_color(s->cfg.theme.bg, bg);
 		wlr_scene_rect_set_color(s->root_bg, bg);
 	}
 
-	/* colours, radii and fonts; sizes follow from the arrange below */
+	/* retheme views */
 	struct aro_view *v, *vtmp;
 	wl_list_for_each(v, &s->views, link)
 		ui_frame_retheme(v);
 
-	/*
-	 * Rules apply to windows that are already open, not only new ones —
-	 * but only where the answer changed. Saving the file to tweak a
-	 * colour must not yank a window you moved by hand back to where a
-	 * rule once put it. Safe iteration: nothing here destroys a view
-	 * today, but a rule action reshuffling the list would be the day
-	 * that stops being true.
-	 */
+	/* reapply rules */
 	wl_list_for_each_safe(v, vtmp, &s->views, link)
 		view_rules_reapply(v);
 
@@ -4529,7 +3786,7 @@ static void config_reload(struct aro_server *s)
 	wl_list_for_each(o, &s->outputs, link)
 		bar_retheme(&o->bar);
 
-	/* bar height feeds the usable area, so this has to come before arrange */
+	/* update backdrop before arrange */
 	update_backdrop(s);
 	aro_arrange(s);
 
@@ -4537,25 +3794,14 @@ static void config_reload(struct aro_server *s)
 	prompt_retheme(s);
 	notify_config_errors(s);
 
-	/*
-	 * After the error toasts, not before: posting them clears every error
-	 * on screen, and a monitor block that fails to apply posts its own.
-	 * Changed fields only — see monitor_apply().
-	 */
+	/* reapply monitor blocks after errors */
 	monitors_reapply(s);
 
 	for (int i = 0; i < s->cfg.nexec_always; i++)
 		config_spawn(s->cfg.exec_always[i]);
 }
 
-/*
- * The watch is on the config's DIRECTORY, not the file.
- *
- * Every editor worth using writes to a temporary file and renames it over
- * the original, which replaces the inode — a watch on the file itself sees
- * the first save and nothing after. Watching the directory and filtering by
- * name catches rename, create and plain writes alike.
- */
+/* watch config directory */
 static int config_fd_event(int fd, uint32_t mask, void *data)
 {
 	struct aro_server *s = data;
@@ -4595,7 +3841,7 @@ static void config_watch_start(struct aro_server *s)
 		return;
 	}
 
-	/* watch the directory the file lives in */
+	/* watch config directory */
 	char dir[512];
 	snprintf(dir, sizeof dir, "%s", s->cfg_path);
 	char *slash = strrchr(dir, '/');
@@ -4605,8 +3851,7 @@ static void config_watch_start(struct aro_server *s)
 	s->cfg_wd = inotify_add_watch(s->cfg_fd, dir,
 	                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
 	if (s->cfg_wd < 0) {
-		/* no config directory yet is not an error — there is just
-		 * nothing to watch until someone creates one */
+		/* missing config dir is fine */
 		wlr_log(WLR_INFO, "not watching %s for config changes", dir);
 		close(s->cfg_fd);
 		s->cfg_fd = -1;
@@ -4654,14 +3899,7 @@ int main(int argc, char *argv[])
 	config_defaults(&s.cfg);
 	config_load(&s.cfg, NULL);
 
-	/*
-	 * -m last, so it beats the config: it exists for testing nested inside
-	 * another compositor, where Super never reaches us, and having to edit
-	 * the config to do that would defeat the point.
-	 *
-	 * The bindings were already built against the old modifier, so they
-	 * have to be rebuilt — the same rebuild the `mod` key does mid-file.
-	 */
+	/* -m overrides config modkey */
 	if (modkey_override) {
 		uint32_t m = 0;
 		if (!strcmp(modkey_override, "alt"))
@@ -4693,14 +3931,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	/* SceneFX renders through its own GLES renderer; the scene graph will
-	 * not apply any effect without it.
-	 *
-	 * Both of these return NULL on failure and every line after them
-	 * dereferences the result, so an unchecked failure here is a segfault
-	 * during startup with nothing logged. fx_renderer_create() is the more
-	 * likely of the two to fail: it is GLES2-only and needs extensions the
-	 * generic renderer can do without. */
+	/* create renderer */
 #ifdef ARO_EFFECTS
 	s.renderer = fx_renderer_create(s.backend);
 	if (!s.renderer) {
@@ -4737,19 +3968,7 @@ int main(int argc, char *argv[])
 	wlr_subcompositor_create(s.display);
 	wlr_data_device_manager_create(s.display);
 
-	/*
-	 * Globals clients treat as mandatory. tinywl creates almost none of
-	 * these, so anything beyond a bare terminal refuses to start:
-	 *
-	 *   xdg-output        output names and logical geometry. Layer-shell
-	 *                     clients (fuzzel, waybar) need it to pick a screen.
-	 *   viewporter        surface scaling and cropping
-	 *   fractional-scale  non-integer scale factors
-	 *   single-pixel      cheap solid-colour surfaces
-	 *   primary-selection middle-click paste
-	 *   presentation-time accurate frame timing; video players want it
-	 *   screencopy        grim and friends — how screenshots happen
-	 */
+	/* required client globals */
 	s.output_layout = wlr_output_layout_create(s.display);
 	if (!s.output_layout) {
 		wlr_log(WLR_ERROR, "could not create the output layout");
@@ -4757,8 +3976,7 @@ int main(int argc, char *argv[])
 	}
 	wlr_xdg_output_manager_v1_create(s.display, s.output_layout);
 
-	/* wlr-output-management: wlr-randr, kanshi, wdisplays. Monitor
-	 * blocks in the config go through the same code (output_configure). */
+	/* output management */
 	s.output_mgr = wlr_output_manager_v1_create(s.display);
 	if (s.output_mgr) {
 		s.output_mgr_apply.notify = output_mgr_apply;
@@ -4774,19 +3992,7 @@ int main(int argc, char *argv[])
 	wlr_single_pixel_buffer_manager_v1_create(s.display);
 	wlr_primary_selection_v1_device_manager_create(s.display);
 
-	/*
-	 * xdg-foreign: one client exports a surface handle, another imports it
-	 * and says "my window belongs to that one".
-	 *
-	 * Needed because out-of-process dialogs are normal now — Firefox runs
-	 * its file picker in a separate process, and without this GTK refuses
-	 * to open the dialog at all rather than opening a parentless one. The
-	 * symptom is a warning about missing xdg_foreign support and no
-	 * window, which looks nothing like a missing protocol.
-	 *
-	 * v1 and v2 share one registry; both exist because clients have not
-	 * all moved to v2.
-	 */
+	/* xdg-foreign for out-of-process dialogs */
 	struct wlr_xdg_foreign_registry *foreign =
 		wlr_xdg_foreign_registry_create(s.display);
 	if (foreign) {
@@ -4804,7 +4010,7 @@ int main(int argc, char *argv[])
 	}
 	s.scene_layout = wlr_scene_attach_output_layout(s.scene, s.output_layout);
 
-	/* creation order IS stacking order */
+	/* stacking layers */
 	float bg[4];
 	ui_color(s.cfg.theme.bg, bg);
 	s.root_bg = wlr_scene_rect_create(&s.scene->tree, 1920, 1080, bg);
@@ -4826,7 +4032,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	/* Bars are created per output, in new_output(). */
+	/* bars are per-output */
 
 	if (!ui_preview_create(&s.preview, &s)) {
 		wlr_log(WLR_ERROR, "could not build the drop indicator");
@@ -4846,10 +4052,7 @@ int main(int argc, char *argv[])
 	wl_signal_add(&s.xdg_shell->events.new_popup, &s.new_xdg_popup);
 
 #ifdef ARO_XWAYLAND
-	/*
-	 * lazy = true: the Xwayland server is not started until an X client
-	 * actually connects, so a session with no X11 apps never pays for it.
-	 */
+	/* start XWayland lazily */
 	wl_list_init(&s.unmanaged);
 	s.xwayland = wlr_xwayland_create(s.display, s.compositor, true);
 	if (!s.xwayland) {
@@ -4860,13 +4063,7 @@ int main(int argc, char *argv[])
 		s.xwayland_ready.notify = xwayland_ready;
 		wl_signal_add(&s.xwayland->events.ready, &s.xwayland_ready);
 
-		/*
-		 * Set DISPLAY now, not on ready. The display name is decided
-		 * when the object is created; with lazy start the server does
-		 * not launch until an X client connects, so waiting for ready
-		 * means anything spawned before that — your first terminal —
-		 * inherits no DISPLAY at all.
-		 */
+		/* set DISPLAY early */
 		setenv("DISPLAY", s.xwayland->display_name, true);
 	}
 #endif
@@ -4917,7 +4114,7 @@ int main(int argc, char *argv[])
 	wl_signal_add(&s.seat->events.start_drag, &s.start_drag);
 	wl_list_init(&s.drag_icon_destroy.link);
 
-	/* needs the backend, so it comes after everything above */
+	/* presentation needs backend */
 	wlr_presentation_create(s.display, s.backend, 2);
 
 	const char *socket = wl_display_add_socket_auto(s.display);
@@ -4929,34 +4126,15 @@ int main(int argc, char *argv[])
 
 	setenv("WAYLAND_DISPLAY", socket, true);
 
-	/*
-	 * The portal picks its backend by desktop name. Without this it finds
-	 * nothing, and GTK's file chooser — which runs out of process — hangs
-	 * waiting for a backend that will never answer. The symptom is a
-	 * dialog that simply never appears, which looks like a compositor bug
-	 * and is not one.
-	 *
-	 * Setting it only if unset: a session manager that already decided
-	 * knows better than we do.
-	 */
+	/* set XDG_CURRENT_DESKTOP */
 	setenv("XDG_CURRENT_DESKTOP", "aro", false);
 	wlr_log(WLR_INFO, "aro running on %s", socket);
 
-	/*
-	 * Autostart last, so children inherit a usable environment: the
-	 * Wayland socket exists by now, and DISPLAY was set when XWayland
-	 * came up. Starting them any earlier means a bar that cannot connect.
-	 */
+	/* spawn after environment is ready */
 	config_watch_start(&s);
 	notify_config_errors(&s);
 
-	/*
-	 * The outputs came up inside wlr_backend_start(), and any monitor
-	 * block that failed then posted a toast which the line above has just
-	 * cleared. Failed blocks are never marked applied, so this retries
-	 * exactly those and puts their toasts back; everything that worked
-	 * has nothing new to apply and is left alone.
-	 */
+	/* retry failed monitor blocks */
 	monitors_reapply(&s);
 
 	for (int i = 0; i < s.cfg.nexec; i++)
@@ -4968,22 +4146,16 @@ int main(int argc, char *argv[])
 
 	wl_display_run(s.display);
 
-	/*
-	 * Teardown order is not cosmetic. The backend destroys outputs and
-	 * input devices as it goes, and anything still listening to those —
-	 * our listeners, the cursor — gets dragged through freed objects.
-	 * Detach first, destroy from the top of the scene down, and leave the
-	 * backend and display for last.
-	 */
+	/* teardown order matters */
 	wl_display_destroy_clients(s.display);
 
-	/* our own state, while the scene it lives in is still valid */
+	/* finish UI state */
 	ui_preview_finish(&s.preview);
 	notify_finish(&s);
 	prompt_finish(&s);
 	config_watch_stop(&s);
 	config_finish(&s.cfg);
-	/* outputs own the trees now; each frees its own in output_destroy() */
+	/* outputs free their trees */
 	if (s.clock_timer)
 		wl_event_source_remove(s.clock_timer);
 
@@ -4994,7 +4166,7 @@ int main(int argc, char *argv[])
 	if (s.xwayland) {
 		wl_list_remove(&s.new_xwayland_surface.link);
 		wl_list_remove(&s.xwayland_ready.link);
-		/* before the seat and the display it is attached to */
+		/* destroy XWayland before display */
 		wlr_xwayland_destroy(s.xwayland);
 		s.xwayland = NULL;
 	}

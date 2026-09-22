@@ -1,8 +1,5 @@
-/*
- * aro — lock.c
- */
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* lock.c: session lock */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "lock.h"
@@ -22,8 +19,7 @@ bool aro_locked(struct aro_server *s)
 	return s->lock != NULL;
 }
 
-/* The whole layout, so nothing shows through at any edge or on an output the
- * lock client has not drawn on yet. */
+/* fit black blank to whole layout */
 static void lock_blank_fit(struct aro_server *s, struct aro_lock *l)
 {
 	struct wlr_box box = { 0 };
@@ -59,12 +55,7 @@ void lock_arrange(struct aro_server *s)
 	}
 }
 
-/*
- * Hand the keyboard to a lock surface.
- *
- * Nothing else may have it while locked — a window that kept focus behind
- * the lock would keep receiving what you type, including the password.
- */
+/* lock gets keyboard focus */
 static void lock_focus(struct aro_server *s, struct wlr_surface *surface)
 {
 	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
@@ -129,8 +120,7 @@ static void lock_new_surface(struct wl_listener *listener, void *data)
 	}
 }
 
-/* Tear the lock down and give the desktop back. Only ever reached through
- * the client's own unlock request. */
+/* unlock */
 static void lock_release(struct aro_server *s, struct aro_lock *l)
 {
 	if (l->tree)
@@ -156,12 +146,7 @@ static void lock_handle_unlock(struct wl_listener *listener, void *data)
 	lock_release(l->server, l);
 }
 
-/*
- * The lock object went away. If it unlocked first this is just cleanup; if
- * it did not, the client crashed and the session stays locked forever —
- * there is deliberately no way back to the desktop from here except another
- * lock client taking over and unlocking properly.
- */
+/* lock client destroyed; stay locked if abandoned */
 static void lock_handle_destroy(struct wl_listener *listener, void *data)
 {
 	struct aro_lock *l = wl_container_of(listener, l, destroy);
@@ -200,11 +185,7 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 	struct aro_server *s = wl_container_of(listener, s, new_lock);
 	struct wlr_session_lock_v1 *lock = data;
 
-	/*
-	 * Already locked, or locked and abandoned. The protocol allows a
-	 * second client to take over — which is the only recovery path from a
-	 * crashed locker — so destroy the old bookkeeping and let it.
-	 */
+	/* allow takeover only after abandoned lock */
 	if (s->lock) {
 		if (!s->lock->abandoned) {
 			wlr_session_lock_v1_destroy(lock);
@@ -225,11 +206,7 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 	l->lock = lock;
 	wl_list_init(&l->surfaces);
 
-	/*
-	 * Everything lives in l_overlay, which is above the fullscreen layer
-	 * and above our own notifications: a lock that something can draw over
-	 * is not a lock.
-	 */
+	/* lock layer above everything */
 	l->tree = wlr_scene_tree_create(s->l_overlay);
 	if (!l->tree) {
 		free(l);
@@ -237,9 +214,7 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	/* Solid black underneath the client's surfaces, created FIRST so it
-	 * sits below them. It covers outputs the client has not drawn on yet,
-	 * and it is what remains if the client dies. */
+	/* black background under lock surfaces */
 	float black[4] = { 0, 0, 0, 1 };
 	l->blank = wlr_scene_rect_create(l->tree, 1, 1, black);
 	if (!l->blank) {
@@ -259,8 +234,7 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 	l->destroy.notify = lock_handle_destroy;
 	wl_signal_add(&lock->events.destroy, &l->destroy);
 
-	/* Nothing below may keep input. Drop focus before telling the client
-	 * it is locked, not after. */
+	/* clear input focus before locking */
 	wlr_seat_keyboard_notify_clear_focus(s->seat);
 	wlr_seat_pointer_clear_focus(s->seat);
 

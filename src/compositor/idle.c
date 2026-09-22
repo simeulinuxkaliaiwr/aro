@@ -1,8 +1,5 @@
-/*
- * aro — idle.c
- */
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* idle.c: idle tracking, inhibit, output power */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "idle.h"
@@ -23,23 +20,10 @@ void idle_activity(struct aro_server *s)
 		wlr_idle_notifier_v1_notify_activity(s->idle_notifier, s->seat);
 }
 
-/*
- * Last answer given to wlroots, so the log line fires on changes only.
- * -1 until the first update. File-static rather than a server field: there
- * is one server, and this is bookkeeping for a log line, not state anything
- * else reads.
- */
+/* cache last inhibited state for logging */
 static int last_inhibited = -1;
 
-/*
- * One VISIBLE inhibitor is enough to hold the whole seat awake, so this
- * stops at the first one that counts rather than counting.
- *
- * Visibility is the protocol's own rule ("only in effect while this surface
- * is visible") and sway's: a paused video on a workspace you are not
- * looking at must not keep the panel on. aro_surface_visible() decides;
- * see it in aro.c for exactly what counts.
- */
+/* one visible inhibitor is enough */
 void idle_update(struct aro_server *s)
 {
 	if (!s->idle_notifier)
@@ -86,9 +70,7 @@ static void inhibitor_free(struct aro_inhibitor *qi)
 	free(qi);
 }
 
-/* Fires on the client's destroy request and when its surface is destroyed
- * (wlroots destroys the inhibitor with the surface), so the surface
- * listeners are still attached to a live surface here. */
+/* inhibitor destroy */
 static void inhibitor_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_inhibitor *qi = wl_container_of(l, qi, destroy);
@@ -121,12 +103,7 @@ static void new_inhibitor(struct wl_listener *l, void *data)
 	idle_update(s);
 }
 
-/*
- * Turn an output on or off, which is what a blanked screen actually is: the
- * output stays in the layout, keeps its box and its windows, and simply
- * stops scanning out. Nothing is rearranged, so waking up puts everything
- * back exactly as it was.
- */
+/* output power switch */
 static void output_set_power(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, output_power_set_mode);

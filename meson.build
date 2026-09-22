@@ -8,10 +8,8 @@ project('aro', 'c',
   ],
 )
 
-# ── project-wide arguments ────────────────────────────────────────────────
-# Meson requires every add_project_arguments() call to happen before the
-# first target is declared, so all of them live here rather than next to the
-# code they affect.
+# === project-wide args ===
+# meson wants all add_project_arguments() calls before any target is declared.
 add_project_arguments('-DWLR_USE_UNSTABLE', language: 'c')
 
 cc = meson.get_compiler('c')
@@ -21,13 +19,9 @@ if get_option('compositor')
     add_project_arguments('-DARO_EFFECTS', language: 'c')
   endif
 
-  # XWayland is on unless wlroots cannot do it.
+  # XWayland is enabled unless wlroots lacks support.
   #
-  # Not really optional in practice — half the desktop is still X11 — but
-  # wlroots itself can be built without XWayland support, and making this a
-  # hard requirement would mean those people cannot build aro at all.
-  # So: auto by default, silently off when wlroots lacks it, and a loud
-  # error if someone asked for it explicitly and cannot have it.
+  # plenty of desktop apps are still X11, but wlroots can be built without it.
   xwl = get_option('xwayland')
   if not xwl.disabled()
     wlroots_pre = dependency('wlroots-0.20')
@@ -42,11 +36,6 @@ if get_option('compositor')
   endif
 endif
 
-# Every source directory is on the include path, so a header is included by
-# its own name — `#include "layout.h"`, not `#include "layout/layout.h"`.
-# That is what let the tree be split into directories without touching a
-# single #include line, and it costs one rule: header names are unique
-# across the whole project.
 inc = include_directories(
   'src',
   'src/layout',
@@ -54,13 +43,13 @@ inc = include_directories(
   'src/ui',
 )
 
-# ── the layout tree ───────────────────────────────────────────────────────
-# No dependencies by design. It is the part of the WM that can be wrong in
-# interesting ways, so it stays testable without a compositor.
+# === Layout tree ===
+# intentionally dependency-free.
 core = static_library('aro-core',
   ['src/layout/layout.c', 'src/layout/anim.c'],
   include_directories: inc,
 )
+
 core_dep = declare_dependency(link_with: core, include_directories: inc)
 
 executable('aro-layout', 'src/layout/layout_harness.c',
@@ -68,31 +57,17 @@ executable('aro-layout', 'src/layout/layout_harness.c',
   install: false,
 )
 
-# ── the compositor ────────────────────────────────────────────────────────
-#   meson setup build -Dcompositor=true -Deffects=true
-#
-# SceneFX 0.5 is a drop-in replacement for wlr_scene adding rounded corners,
-# shadows and blur, and it pins wlroots 0.20 — which is why the whole project
-# targets 0.20. src/scene.h picks which scene header the build uses, and
-# -Deffects=false falls back to plain wlr_scene with no other change.
+# === compositor ===
+# example: meson setup build -Dcompositor=true -Deffects=true
 if get_option('compositor')
-
-  # xdg-shell comes from wayland-protocols; wlr-layer-shell does not exist
-  # there, so its XML is vendored under protocols/ the way sway and dwl do.
-  # Only the server header is needed — wlroots links the implementation.
   wayland_protos = dependency('wayland-protocols')
   wl_protocol_dir = wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
-
   wayland_scanner_dep = dependency('wayland-scanner', native: true)
   wayland_scanner = find_program(
     wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'),
     native: true,
   )
 
-  # Neither wlr-* protocol is in wayland-protocols: they live in
-  # wlr-protocols, and their generated headers are not installed even
-  # though the wlroots headers that #include them are. So the XML is
-  # vendored under protocols/ and scanned here, the way sway and dwl do.
   proto_xml = [
     wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
     'protocols/wlr-layer-shell-unstable-v1.xml',
@@ -108,30 +83,19 @@ if get_option('compositor')
     )
   endforeach
 
-  # LINK ORDER MATTERS. SceneFX exports the same symbols as wlroots' scene
-  # API — that is what makes it a drop-in replacement — so whichever library
-  # comes first on the link line provides them.
-  #
-  # Get this backwards and it still builds and still runs: rects are then
-  # allocated by wlroots' wlr_scene_rect_create, which has no corners or
-  # clipped_region fields, while wlr_scene_rect_set_corner_radius (which only
-  # SceneFX has) writes into them anyway. That corrupts the heap and crashes
-  # somewhere else entirely, usually inside pixman or free().
   deps = [core_dep]
-
   if get_option('effects')
-    deps += dependency('scenefx-0.5')   # must precede wlroots
+    deps += dependency('scenefx-0.5')  # needs to come before wlroots
   endif
 
-  # wlroots must itself have been built with XWayland support; if it was not,
-
+  # wlroots itself must have XWayland support built in.
   deps += [
     dependency('wlroots-0.20'),
     dependency('wayland-server'),
     dependency('xkbcommon'),
     dependency('pixman-1'),
-    dependency('pangocairo'),   # text; wlroots has none of its own
-    cc.find_library('m', required: false),   # sqrt, for scale = auto
+    dependency('pangocairo'),  # text rendering; wlroots doesn't provide it
+    cc.find_library('m', required: false),  # sqrt for scale = auto
   ]
 
   install_data('data/portals.conf',
@@ -139,14 +103,12 @@ if get_option('compositor')
     rename: 'aro-portals.conf',
   )
 
-  # Without this no display manager can offer aro at all: greeters read
-  # this directory and nothing else to find out what sessions exist.
   install_data('data/aro.desktop',
     install_dir: get_option('datadir') / 'wayland-sessions',
   )
 
-  # Somewhere findable, since aro ships no config of its own: with no
-  # ~/.config/aro/config the defaults apply, and this is the file to copy.
+  # install the example config somewhere users can find and copy it,
+  # since aro doesn't ship a default config.
   install_data('data/config.example',
     install_dir: get_option('datadir') / 'doc' / 'aro',
   )

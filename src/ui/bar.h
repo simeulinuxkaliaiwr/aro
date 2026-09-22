@@ -1,10 +1,4 @@
-/*
- * aro — bar.h
- *
- * The strip along the bottom. Reading order, left to right: which workspace
- * you are on, what is focused, what time it is. Identity, context, time —
- * the same arrangement as the start page's footer.
- */
+/* bar.h: status bar */
 #ifndef ARO_BAR_H
 #define ARO_BAR_H
 
@@ -40,8 +34,7 @@ struct aro_bar {
 
 bool bar_create(struct aro_bar *b, struct aro_output *o);
 void bar_place(struct aro_bar *b, int x, int y, int w, float scale);
-/* Reads the output it belongs to: its workspaces, its current one, and
- * the server's focused window. */
+/* update bar from output state */
 void bar_update(struct aro_bar *b, struct aro_output *o);
 void bar_retheme(struct aro_bar *b);
 void bar_finish(struct aro_bar *b);

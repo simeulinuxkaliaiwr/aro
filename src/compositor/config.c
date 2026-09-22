@@ -1,11 +1,5 @@
-/*
- * aro — config.c
- */
-/*
- * _GNU_SOURCE, not _POSIX_C_SOURCE: strsep() is a BSD extension rather than
- * POSIX, so restricting glibc to the POSIX namespace actively hides it.
- * _GNU_SOURCE implies everything _POSIX_C_SOURCE 200809L would have given.
- */
+/* config.c: config parsing */
+/* strsep needs _GNU_SOURCE */
 #define _GNU_SOURCE
 
 #include "config.h"
@@ -25,7 +19,7 @@
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/util/log.h>
 
-/* ── small helpers ─────────────────────────────────────────────────────── */
+/* helpers */
 
 static char *trim(char *s)
 {
@@ -53,7 +47,7 @@ static bool parse_bool(const char *v, bool *out)
 	return false;
 }
 
-/* 0xRRGGBBAA, or #rrggbbaa, or bare rrggbbaa. Alpha may be omitted. */
+/* parse 0xRRGGBBAA / #rrggbbaa / rrggbbaa */
 static bool parse_color(const char *v, uint32_t *out)
 {
 	if (*v == '#')
@@ -93,7 +87,7 @@ static bool parse_int(const char *v, int *out)
 	return true;
 }
 
-/* ── bindings ──────────────────────────────────────────────────────────── */
+/* key bindings */
 
 static bool bind_add(struct aro_config *c, uint32_t mods, xkb_keysym_t sym,
                      enum q_action action, int num, const char *arg)
@@ -120,14 +114,7 @@ static bool bind_add(struct aro_config *c, uint32_t mods, xkb_keysym_t sym,
 	return true;
 }
 
-/*
- * "mod+shift+h" -> mods and a level-0 keysym.
- *
- * Level-0 matters: the key handler compares unshifted symbols and reads
- * shift from the modifier mask, because translated symbols turn `e` into `E`
- * and `1` into `!`. So "shift+1" stores XKB_KEY_1 with the shift bit, not
- * XKB_KEY_exclam.
- */
+/* parse "mod+shift+h" into mods + level-0 keysym */
 static bool parse_combo(struct aro_config *c, char *spec,
                         uint32_t *mods, xkb_keysym_t *sym)
 {
@@ -166,7 +153,7 @@ static bool parse_edge(const char *s, int *out)
 	return false;
 }
 
-/* "mod+h, focus, left" — combo, action, optional argument */
+/* bind line: combo, action, arg */
 static bool parse_bind(struct aro_config *c, char *value)
 {
 	char *combo = strsep(&value, ",");
@@ -232,7 +219,7 @@ static bool parse_bind(struct aro_config *c, char *value)
 	return false;
 }
 
-/* ── defaults ──────────────────────────────────────────────────────────── */
+/* defaults */
 
 static void install_default_binds(struct aro_config *c)
 {
@@ -326,7 +313,7 @@ void config_defaults(struct aro_config *c)
 	install_default_binds(c);
 }
 
-/* ── loading ───────────────────────────────────────────────────────────── */
+/* config loading */
 
 static void clear_binds(struct aro_config *c)
 {
@@ -335,8 +322,7 @@ static void clear_binds(struct aro_config *c)
 	c->nbinds = 0;
 }
 
-/* Record a parse problem AND log it. Never fatal: a typo in a config file
- * should cost you that line, not your session. */
+/* record and log a parse error; never fatal */
 static void config_err(struct aro_config *c, int line, const char *fmt, ...)
 {
 	char msg[256];
@@ -383,19 +369,9 @@ static bool list_add(char ***list, int *n, const char *cmd)
 	return true;
 }
 
-/* ── window rules ──────────────────────────────────────────────────────── */
+/* window rules */
 
-/*
- * Glob match: * is any run of characters, ? is exactly one, \ makes the next
- * character literal. Case-insensitive, because app_ids are not consistently
- * cased across toolkits ("firefox", "org.gnome.Nautilus", "Gimp-2.10") and
- * a rule that silently fails over a capital letter is a rule nobody trusts.
- *
- * Hand-rolled rather than fnmatch(): FNM_CASEFOLD is a GNU extension, and
- * fnmatch's [] classes and / handling are file-name semantics nobody writing
- * a window rule is thinking about. Bytes, not codepoints — ? matches one byte
- * of a multi-byte character, which only matters for ? next to non-ASCII.
- */
+/* case-insensitive glob: * and ?, with \\ escaping */
 static bool glob_match(const char *p, const char *s)
 {
 	const char *star = NULL, *resume = NULL;
@@ -431,12 +407,7 @@ static bool glob_match(const char *p, const char *s)
 	return *p == '\0';
 }
 
-/*
- * The next whitespace-separated word, in place. Double quotes group words
- * and are removed, anywhere in the word — so title:"Open File" and
- * "title:Open File" both give `title:Open File`. *bad is set by an
- * unterminated quote. Returns NULL at the end of the line.
- */
+/* next word; double quotes group spaces */
 static char *next_word(char **cur, bool *bad)
 {
 	char *p = *cur;
@@ -473,11 +444,7 @@ static void rule_free(struct q_rule *r)
 	r->app_id = r->title = NULL;
 }
 
-/*
- * "app_id:mpv title:*YouTube* workspace 3 float" — matchers and actions in
- * any order. Reports its own errors, because "bad value for 'rule'" says
- * nothing about which of six words was wrong.
- */
+/* parse one rule line */
 static void parse_rule(struct aro_config *c, int lineno, char *value)
 {
 	struct q_rule r = {
@@ -575,7 +542,7 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 	}
 }
 
-/* ── monitor blocks ────────────────────────────────────────────────────── */
+/* monitor blocks */
 
 void config_monitor_unset(struct q_monitor_set *m)
 {
@@ -621,7 +588,7 @@ void config_monitor_eval(const struct aro_config *c, const char *name,
 	}
 }
 
-/* "1920x1080", "1920x1080@60", "2560x1440@143.912Hz", "preferred"/"auto" */
+/* parse mode: WxH[@Hz], preferred/auto */
 static bool parse_mode(const char *v, struct q_monitor_set *m)
 {
 	if (!strcasecmp(v, "preferred") || !strcasecmp(v, "auto")) {
@@ -659,7 +626,7 @@ static bool parse_mode(const char *v, struct q_monitor_set *m)
 	return true;
 }
 
-/* "1920,0", "1920 0", "-1080,0", or "auto" — to the right of the others */
+/* parse position: x,y or auto */
 static bool parse_pos(const char *v, struct q_monitor_set *m)
 {
 	if (!strcasecmp(v, "auto")) {
@@ -712,7 +679,7 @@ static bool parse_transform(const char *v, int *out)
 	return false;
 }
 
-/* One `key = value` line inside a monitor block. Reports its own errors. */
+/* one key inside a monitor block */
 static void monitor_key(struct aro_config *c, int lineno,
                         struct q_monitor_set *m, const char *key,
                         const char *value)
@@ -762,13 +729,7 @@ static void monitor_key(struct aro_config *c, int lineno,
 		config_err(c, lineno, "monitor: bad value for '%s'", key);
 }
 
-/*
- * The line that opens a block: everything after the word `monitor`.
- * `rest` is `eDP-1 {` or `"Dell *" {`. Returns the new block's index,
- * or -1 after reporting what was wrong — the caller then swallows the
- * block's body — or -2 for the one-line `monitor = ...` form, which has
- * no body to swallow.
- */
+/* open a monitor block */
 static int monitor_open(struct aro_config *c, int lineno, char *rest)
 {
 	char *p = trim(rest);
@@ -818,11 +779,7 @@ static int monitor_open(struct aro_config *c, int lineno, char *rest)
 	return c->nmonitors++;
 }
 
-/*
- * The theme keys, as a table rather than thirty branches. Every one is a
- * name, a type and where in q_theme it lands — adding a setting is one line
- * here and one default in config_defaults().
- */
+/* theme keys table */
 enum key_type { K_INT, K_COLOR, K_DOUBLE, K_STR };
 
 struct theme_key {
@@ -879,8 +836,7 @@ static const struct theme_key theme_keys[] = {
 };
 #undef T
 
-/* Returns false when the key is not a theme key at all, so the caller can
- * carry on to the non-theme keys; *ok reports a bad VALUE for a known key. */
+/* set a theme key; false means not a theme key */
 static bool theme_set(struct q_theme *t, const char *key, const char *value,
                       bool *ok)
 {
@@ -919,8 +875,7 @@ static bool theme_set(struct q_theme *t, const char *key, const char *value,
 	return false;
 }
 
-/* The path we read, so the file watcher can watch the same one. NULL when
- * neither XDG_CONFIG_HOME nor HOME is set. Caller frees. */
+/* config file path */
 char *config_path(void)
 {
 	char buf[512];
@@ -961,12 +916,7 @@ bool config_load(struct aro_config *c, const char *path)
 	char line[1024];
 	int lineno = 0;
 
-	/*
-	 * Monitor blocks. `block` is the open one's index; `in_block` can be
-	 * true with block == -1 when the opening line was bad — its body is
-	 * then read into `scratch` and dropped, so one typo in a header is
-	 * one toast rather than one per line inside it.
-	 */
+	/* monitor block state while parsing */
 	bool in_block = false;
 	int block = -1, block_line = 0;
 	struct q_monitor_set scratch;
@@ -1020,12 +970,7 @@ bool config_load(struct aro_config *c, const char *path)
 		bool ok = true;
 
 		if (!strcasecmp(key, "mod")) {
-			/*
-			 * Remap what is already there. Bindings parsed above this
-			 * line resolved `mod` to the old modifier, and so did the
-			 * built-ins — leaving them on it would mean `mod` meaning
-			 * two different things in one file depending on line order.
-			 */
+			/* changing mod remaps existing bindings */
 			if (!strcasecmp(value, "alt"))
 				config_set_modkey(c, WLR_MODIFIER_ALT);
 			else if (!strcasecmp(value, "super") || !strcasecmp(value, "logo"))
@@ -1073,8 +1018,7 @@ bool config_load(struct aro_config *c, const char *path)
 			parse_rule(c, lineno, value);   /* reports its own errors */
 			continue;
 		} else if (!strcasecmp(key, "bind")) {
-			/* the first bind line clears the built-ins, so a config that
-			 * sets bindings starts clean instead of fighting them */
+			/* first bind line replaces defaults */
 			if (!binds_replaced) {
 				clear_binds(c);
 				binds_replaced = true;
@@ -1089,8 +1033,7 @@ bool config_load(struct aro_config *c, const char *path)
 			config_err(c, lineno, "bad value for '%s'", key);
 	}
 
-	/* keep what the unclosed block said; a missing brace is not a
-	 * reason to ignore the settings above it */
+	/* keep settings from an unclosed block */
 	if (in_block)
 		config_err(c, block_line, "monitor block has no '}'");
 
@@ -1128,11 +1071,7 @@ void config_finish(struct aro_config *c)
 	memset(c, 0, sizeof *c);
 }
 
-/*
- * Double fork so the child is reparented to init and we never have to reap
- * it. A compositor that collects zombies is a compositor that stalls when a
- * spawned program exits at an awkward moment.
- */
+/* double-fork so we don't reap zombies */
 void config_spawn(const char *cmd)
 {
 	pid_t pid = fork();

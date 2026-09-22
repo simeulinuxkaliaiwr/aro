@@ -1,13 +1,4 @@
-/*
- * aro — layout_harness.c
- *
- * Drives the layout tree with the same keys the compositor will bind, and
- * draws the result as ASCII. This is the fast loop: no wlroots, no session,
- * no reboot. If the layout feels wrong here, it will feel wrong on screen.
- *
- *   ninja -C build && ./build/aro-layout
- *   echo "v s l q" | ./build/aro-layout      # scriptable too
- */
+/* layout_harness.c: ASCII layout test harness */
 #include "layout.h"
 
 #include <stdio.h>
@@ -56,7 +47,7 @@ static void draw_frame(ly_node *n, bool focused, int idx)
 	put(b.x, b.y + b.h - 1, c);
 	put(b.x + b.w - 1, b.y + b.h - 1, c);
 
-	/* header strip: the label, like the pane titles in splits */
+	/* draw frame label */
 	char label[64];
 	snprintf(label, sizeof label, " %d:%s %dx%d ", idx,
 	         (const char *)n->user, b.w, b.h);

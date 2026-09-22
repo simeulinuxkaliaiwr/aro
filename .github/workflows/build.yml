@@ -1,14 +1,11 @@
 name: build
-
 on:
   push:
   pull_request:
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Arch, because wlroots 0.20 and scenefx 0.5 are too new for the
-    # distributions GitHub's runners ship.
+    # Using Arch because wlroots 0.20 and scenefx 0.5 are too new for standard GH runners.
     container: archlinux:base-devel
     steps:
       - name: dependencies
@@ -17,18 +14,13 @@ jobs:
             git meson ninja pkgconf \
             wayland wayland-protocols wlroots0.20 \
             libxkbcommon pixman pango cairo
-
       - uses: actions/checkout@v4
-
-      # -Deffects=false: scenefx is not packaged, so this builds against
-      # plain wlr_scene. It is the configuration least likely to rot
-      # silently, and the one that proves scene.h's fallback still works.
+      # scenefx isn't in the Arch repos, so we build without it.
+      # this also verifies that the plain wlr_scene fallback in scene.h still works.
       - name: build
         run: |
           meson setup build -Deffects=false
           ninja -C build
-
-      # The layout tree has no wlroots in it, so its behaviour can be
-      # checked here rather than only on a real screen.
+      # the layout tree is pure C (no wlroots deps), so we can run the test harness here.
       - name: layout harness
         run: ./build/aro-layout

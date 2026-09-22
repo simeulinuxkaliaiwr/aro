@@ -1,21 +1,8 @@
-/*
- * aro — prompt.c
- *
- * The card is built from a frame's own pieces — accent border, a 1px ring
- * just inside it, the focused frame background, the same radius — so it
- * reads as a frame that asked you something, not as a dialog from somewhere
- * else. The pills are the same construction again, smaller.
- *
- * API RISK: wlr_scene_* calls as used elsewhere in the project;
- * wlr_scene_node_raise_to_top is the only one not already used in notify.c
- * or ui.c.
- */
-/* strdup: build trap 7. Before any include, including scene.h — the macro
- * has to be seen before the first system header, which scene.h pulls in. */
+/* prompt.c: modal yes/no card */
+/* strdup needs _POSIX_C_SOURCE */
 #define _POSIX_C_SOURCE 200809L
 
-/* scene.h first: it decides which scene implementation the build uses,
- * and that only works if it is included before any wlroots header. */
+/* scene.h must come first */
 #include "scene.h"
 
 #include "prompt.h"
@@ -80,12 +67,7 @@ static char *dup_or_empty(const char *s)
 
 /* ── colours ───────────────────────────────────────────────────────────── */
 
-/*
- * The primary pill carries the accent on its border and its label — it is
- * what Enter does, so it is the "focused" answer, and focus is the only
- * thing that gets colour. Hover lifts the background one step, from the
- * unfocused frame colour to the border colour: visible, and still grey.
- */
+/* button colors */
 static void pill_colors(struct aro_server *s, struct prompt_pill *p,
                         bool hover)
 {
@@ -117,17 +99,7 @@ static int pill_width(const struct q_theme *th, const struct prompt_pill *p)
 	return th->text_pad * 3 + p->label.w + p->hint.w;
 }
 
-/*
- * Everything is sized from the text, so the card fits its words at any font
- * and any scale rather than at the one they were tuned on.
- *
- *   ┌──────────────────────────────────┐
- *   │  Exit aro?                    │   title, font
- *   │  3 windows will close.           │   detail, font_small, dim
- *   │                                  │
- *   │             [ Cancel n ][ Exit y ]│   pills, right-aligned
- *   └──────────────────────────────────┘
- */
+/* layout prompt from text sizes */
 static void prompt_layout(struct aro_server *s)
 {
 	struct aro_prompt *p = &s->prompt;
@@ -160,12 +132,10 @@ static void prompt_layout(struct aro_server *s)
 	pill_place(th, &p->yes);
 	pill_place(th, &p->no);
 
-	/* The card tree sits still at the final origin; tick moves the rects
-	 * inside it, so the content never moves while the frame springs. */
+	/* card container stays at final origin */
 	wlr_scene_node_set_position(&p->card->node, p->final.x, p->final.y);
 
-	/* One scrim over the union of every output: the keyboard is taken
-	 * everywhere, so the dimming should say so everywhere. */
+	/* scrim covers all outputs */
 	int x0 = ob.x, y0 = ob.y, x1 = ob.x + ob.w, y1 = ob.y + ob.h;
 	struct aro_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
@@ -182,7 +152,7 @@ static void prompt_layout(struct aro_server *s)
 
 static void teardown_nodes(struct aro_prompt *p)
 {
-	/* qtext_finish before the tree goes, the order notify.c uses */
+	/* tear down text before tree */
 	if (p->tree) {
 		qtext_finish(&p->title_t);
 		qtext_finish(&p->detail_t);
@@ -210,11 +180,7 @@ static void free_strings(struct aro_prompt *p)
 	p->title = p->detail = p->yes_label = p->no_label = NULL;
 }
 
-/*
- * Build the card from the strings already in *p. On failure everything
- * built so far is destroyed; like notify.c, a qtext that was initialised
- * but never set has nothing of its own to free, so none is finished here.
- */
+/* build prompt nodes */
 static bool prompt_build(struct aro_server *s, bool animate)
 {
 	struct aro_prompt *p = &s->prompt;
@@ -225,12 +191,10 @@ static bool prompt_build(struct aro_server *s, bool animate)
 	if (!p->tree)
 		return false;
 
-	/* toasts are siblings in the same layer and stack in creation order;
-	 * one posted before the prompt must not sit on top of it */
+	/* raise prompt above existing toasts */
 	wlr_scene_node_raise_to_top(&p->tree->node);
 
-	/* Creation order is stacking order: scrim, then the card over it;
-	 * inside the card border, background, ring, then content on top. */
+	/* prompt stacking */
 	p->scrim = rect(p->tree, animate ? (th->scrim & ~0xffu) : th->scrim);
 	p->card = wlr_scene_tree_create(p->tree);
 	if (!p->scrim || !p->card)
@@ -250,7 +214,7 @@ static bool prompt_build(struct aro_server *s, bool animate)
 	if (!p->no.edge || !p->no.bg || !p->yes.edge || !p->yes.bg)
 		goto fail;
 
-	/* labels after their pill's rects, or the rects bury them */
+	/* labels above pill backgrounds */
 	if (!qtext_init(&p->title_t, p->content, th->font) ||
 	    !qtext_init(&p->detail_t, p->content, th->font_small) ||
 	    !qtext_init(&p->no.label, p->content, th->font) ||
@@ -286,7 +250,7 @@ static bool prompt_build(struct aro_server *s, bool animate)
 	const uint32_t now = aro_now_ms();
 	const uint32_t fade = th->anim_focus_ms > 0 ? (uint32_t)th->anim_focus_ms : 1;
 	if (animate) {
-		/* grow from open_scale around the centre, as a new frame does */
+		/* animate prompt in */
 		const double os = th->open_scale;
 		const ly_box f = p->final;
 		anim_box_set(&p->geo, (ly_box){
@@ -367,8 +331,7 @@ bool prompt_active(struct aro_server *s)
 	return s->prompt.active;
 }
 
-/* Close first, THEN act: the callback may well end the process, and a
- * callback that opens another prompt must find this one gone. */
+/* close before callback */
 static void answer_yes(struct aro_server *s)
 {
 	void (*cb)(struct aro_server *) = s->prompt.on_yes;
@@ -406,8 +369,7 @@ static bool in_box(ly_box b, double x, double y)
 	return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
 }
 
-/* 1 yes, 2 no, 0 neither — in layout coordinates, against where the pills
- * settle rather than where the springing card happens to be */
+/* hit-test buttons against final layout */
 static int pill_at(struct aro_prompt *p, double lx, double ly)
 {
 	double x = lx - p->final.x, y = ly - p->final.y;
@@ -435,13 +397,7 @@ void prompt_pointer_motion(struct aro_server *s, double lx, double ly)
 	schedule_all(s);
 }
 
-/*
- * Answers happen on RELEASE, over the same thing the press landed on —
- * the usual button contract: press, change your mind, drag off, let go,
- * nothing happens. That includes the scrim: acting on its press would close
- * the card and hand the release to whatever window is underneath, a release
- * with no press that the client never asked for.
- */
+/* confirm on release, allow drag-away cancel */
 void prompt_pointer_button(struct aro_server *s, double lx, double ly,
                            bool pressed)
 {
@@ -490,8 +446,7 @@ bool prompt_tick(struct aro_server *s, uint32_t now)
 	wlr_scene_node_set_position(&p->ring->node, ox + bw, oy + bw);
 	wlr_scene_rect_set_size(p->ring, iw, 1);
 
-	/* The words appear once the frame has grown past them — before that
-	 * they would hang outside a card still too small to hold them. */
+	/* show content after card lands */
 	if (!p->content_shown && b.w >= p->final.w && b.h >= p->final.h) {
 		p->content_shown = true;
 		wlr_scene_node_set_enabled(&p->content->node, true);
@@ -512,8 +467,7 @@ bool prompt_tick(struct aro_server *s, uint32_t now)
 		}
 	}
 
-	/* A spring that settled undershooting by a pixel would otherwise
-	 * never show the content at all. */
+	/* fallback show content when animation ends */
 	if (!moving && !p->content_shown) {
 		p->content_shown = true;
 		wlr_scene_node_set_enabled(&p->content->node, true);
@@ -523,10 +477,7 @@ bool prompt_tick(struct aro_server *s, uint32_t now)
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
-/*
- * Rebuilt rather than recoloured: fonts can change size, and a qtext
- * borrows its font pointer from the config that a reload just freed.
- */
+/* rebuild prompt on retheme */
 void prompt_retheme(struct aro_server *s)
 {
 	struct aro_prompt *p = &s->prompt;
@@ -536,7 +487,7 @@ void prompt_retheme(struct aro_server *s)
 	teardown_nodes(p);
 	p->active = false;
 	if (!prompt_build(s, false)) {
-		/* no card, but still modal would be the worst of both */
+		/* drop modal state if rebuild fails */
 		free_strings(p);
 		p->output = NULL;
 		p->on_yes = NULL;

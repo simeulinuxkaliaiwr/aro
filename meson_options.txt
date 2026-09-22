@@ -1,8 +1,6 @@
 option('compositor', type: 'boolean', value: true,
-  description: 'Build the Wayland compositor (needs wlroots 0.19)')
-
+       description: 'Build the Wayland compositor (needs wlroots 0.20)')
 option('effects', type: 'boolean', value: true,
-  description: 'Use SceneFX for rounded corners and shadows instead of plain wlr_scene')
-
+       description: 'Use SceneFX for rounded corners and shadows instead of plain wlr_scene')
 option('xwayland', type: 'feature', value: 'auto',
-  description: 'X11 client support via wlr_xwayland')
+       description: 'X11 client support via wlr_xwayland')
