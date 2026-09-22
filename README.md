@@ -2,13 +2,6 @@
 A tiling window manager for Wayland, built on wlroots. Minimal, flat, one
 accent colour, spring-animated.
 
-![aro](docs/screen.jpg)
-
-<!--
-Drop demo.mp4 here via the GitHub web editor so it gets hosted properly.
-Don't commit the raw video file to the repo.
--->
-
 *aro* is Portuguese for the rim of a pair of glasses. It names the 1px
 accent ring just inside every focused border — the one thing on screen that
 says "this is the window you are in".
