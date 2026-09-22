@@ -264,6 +264,27 @@ struct aro_output {
 
 	struct aro_bar bar;          /* one bar per output */
 
+	/*
+	 * In the layout, drawing, owning workspaces. An output that is NOT
+	 * enabled sits on server.outputs_off instead of server.outputs, so
+	 * every loop over outputs skips it without having to ask.
+	 *
+	 * This is not wlr_output->enabled: output power (DPMS) turns the
+	 * panel off by disabling the wlr_output, and a blanked screen must
+	 * keep its windows. This flag is the layout's idea of "on".
+	 */
+	bool enabled;
+
+	/*
+	 * What the monitor blocks said last time they were applied. A reload
+	 * applies only the fields that changed since — saving the file to
+	 * change a colour must not undo what wlr-randr or kanshi just set.
+	 * mon_applied is false until the first successful apply, so a block
+	 * that failed is tried again, whole, on the next save.
+	 */
+	struct q_monitor_set mon_last;
+	bool mon_applied;
+
 	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
@@ -315,12 +336,14 @@ struct aro_server {
 	struct wlr_idle_notifier_v1 *idle_notifier;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit_mgr;
 	struct wlr_output_power_manager_v1 *output_power_mgr;
+	struct wlr_output_manager_v1 *output_mgr;   /* wlr-randr, kanshi */
 	struct aro_lock *lock;               /* non-NULL while locked */
 	struct wlr_seat *seat;
 	struct wlr_cursor *cursor;
 	struct wlr_xcursor_manager *xcursor_mgr;
 
-	struct wl_list outputs;
+	struct wl_list outputs;         /* enabled ones only; see aro_output */
+	struct wl_list outputs_off;     /* disabled by config or wlr-randr */
 	struct wl_list views;
 	struct wl_list keyboards;
 	struct wl_list layers;
@@ -400,6 +423,8 @@ struct aro_server {
 	struct wl_listener new_lock;
 	struct wl_listener new_inhibitor;
 	struct wl_listener output_power_set_mode;
+	struct wl_listener output_mgr_apply;
+	struct wl_listener output_mgr_test;
 	struct wl_listener new_input;
 	struct wl_listener cursor_motion;
 	struct wl_listener cursor_motion_abs;

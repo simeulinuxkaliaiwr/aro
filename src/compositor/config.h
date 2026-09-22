@@ -106,6 +106,54 @@ struct q_rule_result {
 };
 
 /*
+ * A monitor block: settings for every output whose name or description
+ * matches its pattern.
+ *
+ *   monitor eDP-1 {
+ *       scale = 1.25
+ *   }
+ *   monitor "Dell Inc. DELL U2419H*" {
+ *       mode = 1920x1080@60
+ *       position = 1920,0
+ *   }
+ *
+ * The pattern is a glob, case-insensitive, exactly like a rule's, and is
+ * tried against the connector name (eDP-1, HDMI-A-1) and against
+ * "make model serial" — the second is what survives moving a screen to
+ * another port. Every matching block applies in file order; for a field two
+ * blocks both set, the later one wins, as everywhere else in this file.
+ *
+ * Every field starts unset, and unset means "leave it alone": on a reload
+ * only fields that changed are applied, so an output someone moved with
+ * wlr-randr stays where they put it.
+ *
+ * `auto` is NOT the same as leaving a key out. Leaving it out says nothing;
+ * `auto` actively asks for the default — the preferred mode, scale worked
+ * out from the panel's DPI, placed to the right of the others — so it is
+ * how you undo a setting you had before without restarting.
+ */
+#define Q_MON_AUTO (-2)
+
+struct q_monitor_set {
+	int enabled;            /* -1 unset, 0, 1 (auto = 1) */
+	int mode_w, mode_h;     /* 0 unset; -1 x -1 = preferred (auto) */
+	int mode_mhz;           /* refresh in mHz; 0 = the best at that size */
+	bool has_pos;           /* a fixed x,y was given */
+	bool pos_auto;          /* ...or `position = auto` */
+	int x, y;               /* layout coordinates, when has_pos */
+	double scale;           /* 0 unset, Q_MON_AUTO = from the panel's DPI */
+	int transform;          /* -1 unset, else an enum wl_output_transform
+	                         * (auto = NORMAL) */
+	int adaptive_sync;      /* -1 unset, 0, 1 (auto = 0, the default) */
+};
+
+struct q_monitor {
+	char *match;            /* glob; owned */
+	int line;               /* where the block opened, for messages */
+	struct q_monitor_set set;
+};
+
+/*
  * Everything that used to be a #define in theme.h. The macros are still
  * there and are still the single source of truth for the DEFAULTS — this
  * struct is what the running compositor actually reads.
@@ -165,6 +213,9 @@ struct aro_config {
 	struct q_rule *rules;   /* in file order; owned */
 	int nrules;
 
+	struct q_monitor *monitors;     /* in file order; owned */
+	int nmonitors;
+
 	char **exec;            /* run once at startup; owned */
 	int nexec;
 	char **exec_always;     /* run at startup AND on every reload; owned */
@@ -213,6 +264,16 @@ void config_set_modkey(struct aro_config *c, uint32_t modkey);
  */
 void config_rules_eval(const struct aro_config *c, const char *app_id,
                        const char *title, struct q_rule_result *out);
+
+/*
+ * Every monitor block that matches this output, merged in file order.
+ * `desc` is "make model serial"; either may be NULL.
+ */
+void config_monitor_eval(const struct aro_config *c, const char *name,
+                         const char *desc, struct q_monitor_set *out);
+
+/* A set with every field unset — what no block at all would give. */
+void config_monitor_unset(struct q_monitor_set *m);
 
 void config_finish(struct aro_config *c);
 

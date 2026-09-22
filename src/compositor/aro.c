@@ -37,6 +37,7 @@
 #include "bar.h"
 #include "config.h"
 #include "aro.h"
+#include "idle.h"
 #include "text.h"
 #include "theme.h"
 
@@ -44,6 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <sys/inotify.h>
 #include <time.h>
 #include <unistd.h>
@@ -79,6 +81,7 @@
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
@@ -108,6 +111,9 @@ static void arrange_layers(struct aro_server *s);
 static void drag_icon_update(struct aro_server *s);
 static void pointer_motion_common(struct aro_server *s, uint32_t time);
 static void arrange_layers_output(struct aro_output *o);
+static void output_mgr_update(struct aro_server *s);
+static struct aro_output *output_evacuate(struct aro_server *s,
+                                          struct aro_output *o);
 
 uint32_t aro_now_ms(void)
 {
@@ -356,6 +362,15 @@ void aro_arrange(struct aro_server *s)
 			bar_update(&o->bar, o);
 		wlr_output_schedule_frame(o->wlr_output);
 	}
+
+	/*
+	 * Whether an idle inhibitor counts depends on what is on screen, and
+	 * arrange is already the one call every such change goes through:
+	 * workspace switch, send-to-workspace, map, unmap, fullscreen, output
+	 * added or adopted. Hooking it here means a new path that changes the
+	 * screen cannot forget to re-check — it has to arrange anyway.
+	 */
+	idle_update(s);
 }
 
 static void view_set_visible(struct aro_view *v, bool visible)
@@ -703,6 +718,52 @@ const char *view_app_id(struct aro_view *v)
 struct wlr_surface *view_surface(struct aro_view *v)
 {
 	return (v && v->impl && v->impl->surface) ? v->impl->surface(v) : NULL;
+}
+
+/*
+ * Does this surface count as on screen, for idle inhibition (idle.h)?
+ *
+ * The inhibitor may sit on a subsurface (a video widget inside a browser
+ * window) or on a popup; either way the question is really about the
+ * window it belongs to, so climb to that first. Subsurfaces lead to their
+ * root; a popup's root is itself, so it is followed to its parent, which
+ * may be another popup — hence the loop, capped against a cycle a buggy
+ * client should not be able to build but could.
+ *
+ * A window counts when view_visible() says so: mapped, on an output, on
+ * that output's current workspace. Anything that is not a window — a layer
+ * surface, an override-redirect X11 window, the lock screen — counts
+ * whenever it is mapped, as in sway: there is no workspace to be on.
+ *
+ * Deliberately NOT considered (see the handoff notes):
+ *   - a tiled window covered by a fullscreen one on the same workspace
+ *     still counts;
+ *   - while locked, windows behind the lock still count.
+ */
+bool aro_surface_visible(struct aro_server *s, struct wlr_surface *surface)
+{
+	if (!surface)
+		return false;
+
+	surface = wlr_surface_get_root_surface(surface);
+	if (!surface->mapped)
+		return false;               /* an unmapped popup of a visible window */
+
+	for (int depth = 0; depth < 32; depth++) {
+		struct wlr_xdg_popup *p = wlr_xdg_popup_try_from_wlr_surface(surface);
+		if (!p || !p->parent)
+			break;
+		surface = wlr_surface_get_root_surface(p->parent);
+	}
+	if (!surface->mapped)
+		return false;
+
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link) {
+		if (view_surface(v) == surface)
+			return view_visible(v);
+	}
+	return true;
 }
 
 /* ── floating ──────────────────────────────────────────────────────────── */
@@ -2359,16 +2420,18 @@ static void output_request_state(struct wl_listener *l, void *data)
 	struct aro_output *o = wl_container_of(l, o, request_state);
 	const struct wlr_output_event_request_state *ev = data;
 	wlr_output_commit_state(o->wlr_output, ev->state);
+	o->scale = o->wlr_output->scale > 0 ? o->wlr_output->scale : 1.0f;
 	output_refresh_box(o);
 	update_backdrop(o->server);
 	aro_arrange(o->server);
+	output_mgr_update(o->server);
 }
 
 /*
  * An output going away takes its workspaces with it, so every window on it
- * has to be rehomed before the trees are freed. They land on the surviving
- * output's current workspace — the windows are still running, and leaving
- * them pointing at freed nodes is how you get a crash minutes later.
+ * has to be rehomed before the trees are freed — output_evacuate() does
+ * that, and parks them if this was the last one. A disabled output was
+ * already evacuated when it went off, and never had a bar since.
  */
 static void output_destroy(struct wl_listener *l, void *data)
 {
@@ -2381,83 +2444,18 @@ static void output_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&o->destroy.link);
 	wl_list_remove(&o->link);
 
-	/* a prompt centred on this output has nowhere left to be drawn */
-	prompt_output_gone(s, o);
-
-	/* anything grabbed on this output stops being grabbed */
-	if (s->grabbed && s->grabbed->output == o)
-		grab_forget(s, s->grabbed);
-
-	if (s->focused_output == o)
-		s->focused_output = NULL;
-	struct aro_output *dest = aro_focused_output(s);   /* now another */
-	s->focused_output = dest;
-
-  	struct aro_view *v, *tmp;
-	wl_list_for_each_safe(v, tmp, &s->views, link) {
-		if (v->output != o)
-			continue;
-
-		if (!dest) {
-			/*
-			 * Nowhere to send it: park it. The leaf stays valid
-			 * because the trees below are handed over rather than
-			 * freed. Boxes go output-relative so they can be
-			 * replayed onto whatever output comes back.
-			 */
-			v->output = NULL;
-			v->fbox.x -= o->box.x;
-			v->fbox.y -= o->box.y;
-			v->pre_fs.x -= o->box.x;
-			v->pre_fs.y -= o->box.y;
-			view_set_visible(v, false);
-			continue;
-		}
-
-		/* drop the leaf first: the tree it points into is about to go */
-		v->node = NULL;
-		v->output = dest;
-		v->workspace = dest->cur_ws;
-		if (v->floating) {
-			v->fbox.x += dest->box.x - o->box.x;
-			v->fbox.y += dest->box.y - o->box.y;
-		} else {
-			ly_node **root = &dest->ws[dest->cur_ws];
-			if (!*root) {
-				*root = ly_leaf(v);
-				v->node = *root;
-			} else {
-				v->node = ly_split(root, ly_first_leaf(*root), LY_ROW, v);
-			}
-		}
-		view_set_visible(v, true);
+	struct aro_output *dest = NULL;
+	if (o->enabled) {
+		dest = output_evacuate(s, o);
+		bar_finish(&o->bar);
 	}
-
-	if (dest) {
-		for (int i = 0; i < ARO_MAX_WS; i++) {
-			ly_free(o->ws[i]);
-			o->ws[i] = NULL;
-		}
-	} else {
-		for (int i = 0; i < ARO_MAX_WS; i++) {
-			s->orphan_ws[i] = o->ws[i];
-			o->ws[i] = NULL;
-		}
-		s->orphan_cur_ws = o->cur_ws;
-		s->parked = true;
-		wlr_log(WLR_INFO, "last output gone — parking its workspaces");
-	}
-	bar_finish(&o->bar);
-
-	if (s->focused && s->focused->output == NULL)
-		aro_focus(s, dest ? output_pick_view(s, dest) : NULL);
-
 	free(o);
 
 	if (dest) {
 		update_backdrop(s);
 		aro_arrange(s);
 	}
+	output_mgr_update(s);
 }
 
 /*
@@ -2515,6 +2513,705 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 	        o->wlr_output->name);
 }
 
+/* ── output configuration ──────────────────────────────────────────────── */
+/*
+ * Two ways in, one way through. Monitor blocks in the config and
+ * wlr-output-management clients (wlr-randr, kanshi, wdisplays) both end up
+ * as an out_req handed to output_configure(), so turning a screen on, off,
+ * moving or rescaling it behaves the same whoever asked.
+ *
+ * Neither remembers the other. A monitor block applies when the output
+ * appears and, on reload, only where the block itself changed; a protocol
+ * client's change is applied and forgotten. So kanshi can move a screen
+ * and saving the config for an unrelated reason will not move it back.
+ */
+
+/* Every field "leave it as it is"; callers fill in what they want. */
+struct out_req {
+	int enabled;                    /* -1 leave, 0, 1 */
+	struct wlr_output_mode *mode;   /* an exact mode (protocol) */
+	bool custom;                    /* mode_w x mode_h @ mode_mhz, as given */
+	int mode_w, mode_h, mode_mhz;   /* 0 leave; -1 preferred; else look up */
+	bool has_pos;
+	bool pos_auto;                  /* place it to the right of the rest */
+	int x, y;
+	float scale;                    /* 0 leave; -1 work it out from the DPI */
+	int transform;                  /* -1 leave */
+	int adaptive_sync;              /* -1 leave */
+};
+
+#define OUT_REQ_NONE { .enabled = -1, .transform = -1, .adaptive_sync = -1 }
+
+/*
+ * Tell wlr-output-management clients what the outputs look like now. Called
+ * after anything that can change it; each call replaces the last answer.
+ */
+static void output_mgr_update(struct aro_server *s)
+{
+	if (!s->output_mgr)
+		return;
+	struct wlr_output_configuration_v1 *cfg =
+		wlr_output_configuration_v1_create();
+	if (!cfg)
+		return;
+
+	struct wl_list *lists[2] = { &s->outputs, &s->outputs_off };
+	for (int i = 0; i < 2; i++) {
+		struct aro_output *o;
+		wl_list_for_each(o, lists[i], link) {
+			struct wlr_output_configuration_head_v1 *h =
+				wlr_output_configuration_head_v1_create(cfg, o->wlr_output);
+			if (!h)
+				continue;
+			/* A screen blanked by DPMS has wlr_output->enabled false,
+			 * and kanshi would read that as "someone turned it off".
+			 * Report the layout's idea instead. */
+			h->state.enabled = o->enabled;
+			if (o->enabled) {
+				h->state.x = o->box.x;
+				h->state.y = o->box.y;
+			}
+		}
+	}
+	/* takes ownership of cfg */
+	wlr_output_manager_v1_set_configuration(s->output_mgr, cfg);
+}
+
+static struct aro_output *output_from_wlr(struct aro_server *s,
+                                          struct wlr_output *wo)
+{
+	struct wl_list *lists[2] = { &s->outputs, &s->outputs_off };
+	for (int i = 0; i < 2; i++) {
+		struct aro_output *o;
+		wl_list_for_each(o, lists[i], link)
+			if (o->wlr_output == wo)
+				return o;
+	}
+	return NULL;
+}
+
+/*
+ * A mode of this size, closest to the asked-for refresh — within 1 Hz, so
+ * `@60` finds the 59.951 Hz mode panels actually report. With no refresh
+ * asked for, the fastest one, preferring the preferred mode on a tie.
+ */
+static struct wlr_output_mode *output_find_mode(struct wlr_output *wo,
+                                                int w, int h, int mhz)
+{
+	struct wlr_output_mode *best = NULL, *m;
+	wl_list_for_each(m, &wo->modes, link) {
+		if (m->width != w || m->height != h)
+			continue;
+		if (!best) {
+			best = m;
+		} else if (mhz) {
+			if (abs(m->refresh - mhz) < abs(best->refresh - mhz))
+				best = m;
+		} else if (m->refresh > best->refresh ||
+		           (m->refresh == best->refresh && m->preferred)) {
+			best = m;
+		}
+	}
+	if (best && mhz && abs(best->refresh - mhz) > 1000)
+		return NULL;
+	return best;
+}
+
+/*
+ * `scale = auto`: 2 on a panel dense enough that 1 is unreadable, 1
+ * otherwise. The threshold is the usual one — 192 DPI, twice the 96 DPI
+ * everything not told otherwise assumes.
+ *
+ * Deliberately not a fractional guess. A wrong 1.25 looks like a rendering
+ * bug rather than a decision, and anyone who wants 1.25 can say so; this is
+ * only here so a HiDPI screen is usable before you have typed anything.
+ * With no physical size reported — projectors, virtual outputs, nested —
+ * there is nothing to guess from, so 1.
+ */
+static float output_auto_scale(struct wlr_output *wo)
+{
+	int w = wo->width, h = wo->height;
+	if (w <= 0 || h <= 0) {
+		struct wlr_output_mode *m = wlr_output_preferred_mode(wo);
+		if (!m)
+			return 1.0f;
+		w = m->width;
+		h = m->height;
+	}
+	if (wo->phys_width <= 0 || wo->phys_height <= 0)
+		return 1.0f;
+
+	/* the diagonal, so a rotated or oddly shaped panel still reads right */
+	double px = sqrt((double)w * w + (double)h * h);
+	double mm = sqrt((double)wo->phys_width * wo->phys_width +
+	                 (double)wo->phys_height * wo->phys_height);
+	double dpi = px / (mm / 25.4);
+	return dpi >= 192 ? 2.0f : 1.0f;
+}
+
+/*
+ * Move everything off an output that is leaving — destroyed, or disabled —
+ * before its trees go. The windows land on the surviving output's current
+ * workspace; with no survivor they are parked, exactly as for a VT switch,
+ * and the next output to come up adopts them whole.
+ *
+ * `o` must already be off s->outputs, or it would pick itself as the place
+ * to send its own windows. Returns where they went, NULL if parked.
+ */
+static struct aro_output *output_evacuate(struct aro_server *s,
+                                          struct aro_output *o)
+{
+	/* a prompt centred on this output has nowhere left to be drawn */
+	prompt_output_gone(s, o);
+
+	/* anything grabbed on this output stops being grabbed */
+	if (s->grabbed && s->grabbed->output == o)
+		grab_forget(s, s->grabbed);
+
+	if (s->focused_output == o)
+		s->focused_output = NULL;
+	struct aro_output *dest = aro_focused_output(s);   /* now another */
+	s->focused_output = dest;
+
+	struct aro_view *v, *tmp;
+	wl_list_for_each_safe(v, tmp, &s->views, link) {
+		if (v->output != o)
+			continue;
+
+		if (!dest) {
+			/*
+			 * Nowhere to send it: park it. The leaf stays valid
+			 * because the trees below are handed over rather than
+			 * freed. Boxes go output-relative so they can be
+			 * replayed onto whatever output comes back.
+			 */
+			v->output = NULL;
+			v->fbox.x -= o->box.x;
+			v->fbox.y -= o->box.y;
+			v->pre_fs.x -= o->box.x;
+			v->pre_fs.y -= o->box.y;
+			view_set_visible(v, false);
+			continue;
+		}
+
+		/* drop the leaf first: the tree it points into is about to go */
+		v->node = NULL;
+		v->output = dest;
+		v->workspace = dest->cur_ws;
+		if (v->floating) {
+			v->fbox.x += dest->box.x - o->box.x;
+			v->fbox.y += dest->box.y - o->box.y;
+		} else {
+			ly_node **root = &dest->ws[dest->cur_ws];
+			if (!*root) {
+				*root = ly_leaf(v);
+				v->node = *root;
+			} else {
+				v->node = ly_split(root, ly_first_leaf(*root), LY_ROW, v);
+			}
+		}
+		view_set_visible(v, true);
+	}
+
+	if (dest) {
+		for (int i = 0; i < ARO_MAX_WS; i++) {
+			ly_free(o->ws[i]);
+			o->ws[i] = NULL;
+		}
+	} else {
+		for (int i = 0; i < ARO_MAX_WS; i++) {
+			s->orphan_ws[i] = o->ws[i];
+			o->ws[i] = NULL;
+		}
+		s->orphan_cur_ws = o->cur_ws;
+		s->parked = true;
+		wlr_log(WLR_INFO, "last output gone — parking its workspaces");
+	}
+	o->cur_ws = 0;
+
+	if (s->focused && s->focused->output == NULL)
+		aro_focus(s, dest ? output_pick_view(s, dest) : NULL);
+
+	return dest;
+}
+
+/*
+ * Take an output out of the layout: its windows move to another screen,
+ * its bar and layer surfaces go, and the wlr_output stops scanning out.
+ * The aro_output itself stays, on outputs_off, so it can come back.
+ */
+static void output_disable(struct aro_output *o)
+{
+	struct aro_server *s = o->server;
+	struct wlr_output *wo = o->wlr_output;
+
+	wl_list_remove(&o->link);
+	wl_list_insert(&s->outputs_off, &o->link);
+	o->enabled = false;
+
+	struct aro_output *dest = output_evacuate(s, o);
+
+	/*
+	 * Layer surfaces belong to one output, and this one is leaving the
+	 * layout. Closing them is what sway does; waybar and friends see the
+	 * wl_output go and put themselves back when it returns. Safe
+	 * iteration: destroying one runs layer_destroy, which unlinks it.
+	 */
+	struct aro_layer *l, *ltmp;
+	wl_list_for_each_safe(l, ltmp, &s->layers, link) {
+		if (l->layer_surface->output == wo)
+			wlr_layer_surface_v1_destroy(l->layer_surface);
+	}
+
+	bar_finish(&o->bar);
+	memset(&o->bar, 0, sizeof o->bar);
+
+	/*
+	 * The scene output first, so its tie to the layout goes with it, then
+	 * the layout entry — which also withdraws the wl_output global, so
+	 * clients see the screen leave. Re-enabling creates both afresh.
+	 */
+	struct wlr_scene_output *so = wlr_scene_get_scene_output(s->scene, wo);
+	if (so)
+		wlr_scene_output_destroy(so);
+	wlr_output_layout_remove(s->output_layout, wo);
+
+	struct wlr_output_state st;
+	wlr_output_state_init(&st);
+	wlr_output_state_set_enabled(&st, false);
+	wlr_output_commit_state(wo, &st);
+	wlr_output_state_finish(&st);
+
+	if (dest) {
+		update_backdrop(s);
+		aro_arrange(s);
+	}
+	wlr_log(WLR_INFO, "output %s disabled", wo->name);
+}
+
+/*
+ * Apply a request to one output. With `test`, only ask whether it would
+ * work — nothing changes. On failure `why` says what went wrong, in words
+ * fit for a toast.
+ */
+static bool output_configure(struct aro_output *o, const struct out_req *r,
+                             bool test, char *why, size_t why_len)
+{
+	struct aro_server *s = o->server;
+	struct wlr_output *wo = o->wlr_output;
+	const bool enable = r->enabled < 0 ? o->enabled : r->enabled == 1;
+	why[0] = '\0';
+
+	if (!enable) {
+		if (test)
+			return true;
+		if (o->enabled) {
+			output_disable(o);
+		} else {
+			/* never on as far as we are concerned — make sure it is
+			 * not still showing whatever it booted with */
+			struct wlr_output_state st;
+			wlr_output_state_init(&st);
+			wlr_output_state_set_enabled(&st, false);
+			wlr_output_commit_state(wo, &st);
+			wlr_output_state_finish(&st);
+		}
+		output_mgr_update(s);
+		return true;
+	}
+
+	struct wlr_output_state st;
+	wlr_output_state_init(&st);
+	wlr_output_state_set_enabled(&st, true);
+
+	if (r->mode) {
+		wlr_output_state_set_mode(&st, r->mode);
+	} else if (r->custom) {
+		wlr_output_state_set_custom_mode(&st, r->mode_w, r->mode_h, r->mode_mhz);
+	} else if (r->mode_w > 0) {
+		struct wlr_output_mode *m =
+			output_find_mode(wo, r->mode_w, r->mode_h, r->mode_mhz);
+		if (m) {
+			wlr_output_state_set_mode(&st, m);
+		} else if (wl_list_empty(&wo->modes)) {
+			/* nested, or a headless output: any size is a size */
+			wlr_output_state_set_custom_mode(&st, r->mode_w, r->mode_h,
+			                                 r->mode_mhz);
+		} else {
+			if (r->mode_mhz)
+				snprintf(why, why_len, "no %dx%d mode at %.3g Hz",
+				         r->mode_w, r->mode_h, r->mode_mhz / 1000.0);
+			else
+				snprintf(why, why_len, "no %dx%d mode",
+				         r->mode_w, r->mode_h);
+			wlr_output_state_finish(&st);
+			return false;
+		}
+	} else if (r->mode_w < 0 || !o->enabled) {
+		/* asked for, or coming on with no opinion: the preferred mode */
+		struct wlr_output_mode *m = wlr_output_preferred_mode(wo);
+		if (m)
+			wlr_output_state_set_mode(&st, m);
+	}
+	if (r->scale > 0)
+		wlr_output_state_set_scale(&st, r->scale);
+	else if (r->scale < 0)
+		wlr_output_state_set_scale(&st, output_auto_scale(wo));
+	if (r->transform >= 0)
+		wlr_output_state_set_transform(&st, (enum wl_output_transform)r->transform);
+	if (r->adaptive_sync >= 0)
+		wlr_output_state_set_adaptive_sync_enabled(&st, r->adaptive_sync == 1);
+
+	bool ok = wlr_output_test_state(wo, &st);
+	if (ok && !test)
+		ok = wlr_output_commit_state(wo, &st);
+	wlr_output_state_finish(&st);
+	if (!ok) {
+		snprintf(why, why_len, "the output refused that combination%s",
+		         r->adaptive_sync == 1 ? " (adaptive_sync?)" : "");
+		return false;
+	}
+	if (test)
+		return true;
+
+	/* ── placement ── */
+	const bool was_on = o->enabled;
+	const ly_box before = o->box;
+
+	struct wlr_output_layout_output *lo =
+		wlr_output_layout_get(s->output_layout, wo);
+	if (r->has_pos)
+		lo = wlr_output_layout_add(s->output_layout, wo, r->x, r->y);
+	else if (r->pos_auto || !lo)
+		lo = wlr_output_layout_add_auto(s->output_layout, wo);
+	if (!was_on && lo) {
+		struct wlr_scene_output *so = wlr_scene_get_scene_output(s->scene, wo);
+		if (!so)
+			so = wlr_scene_output_create(s->scene, wo);
+		if (so)
+			wlr_scene_output_layout_add_output(s->scene_layout, lo, so);
+	}
+
+	o->scale = wo->scale > 0 ? wo->scale : 1.0f;
+
+	if (!was_on) {
+		wl_list_remove(&o->link);
+		wl_list_insert(&s->outputs, &o->link);
+		o->enabled = true;
+
+		/* the box has to exist before the bar can be placed against it */
+		output_refresh_box(o);
+
+		/* One bar per output. It lives in the shared l_bar layer — the
+		 * scene clips each output's render to its own box, so a bar
+		 * positioned over this output only appears on it. */
+		if (!bar_create(&o->bar, o))
+			wlr_log(WLR_ERROR, "could not build a bar for %s", wo->name);
+
+		if (!s->focused_output)
+			s->focused_output = o;
+	}
+
+	update_backdrop(s);
+
+	if (!was_on) {
+		output_adopt_parked(s, o);      /* after the boxes and layers are final */
+	} else if (before.x != o->box.x || before.y != o->box.y) {
+		/* Floating boxes are in layout coordinates; the screen moved
+		 * under them, so they move with it. */
+		int dx = o->box.x - before.x, dy = o->box.y - before.y;
+		struct aro_view *v;
+		wl_list_for_each(v, &s->views, link) {
+			if (v->output != o)
+				continue;
+			v->fbox.x += dx;
+			v->fbox.y += dy;
+			v->pre_fs.x += dx;
+			v->pre_fs.y += dy;
+		}
+	}
+
+	aro_arrange(s);
+
+	/* The screen itself changed shape or place. Springing every window
+	 * from where it sat on the old one reads as the layout breaking, the
+	 * same reason a workspace switch places rather than animates. */
+	if (was_on && !box_eq(before, o->box)) {
+		struct aro_view *v;
+		wl_list_for_each(v, &s->views, link)
+			if (v->output == o && view_visible(v))
+				anim_box_set(&v->geo, view_target(v));
+	}
+
+	output_mgr_update(s);
+	wlr_log(WLR_INFO, "output %s: %dx%d at %d,%d, scale %.2f",
+	        wo->name, o->box.w, o->box.h, o->box.x, o->box.y, o->scale);
+	return true;
+}
+
+/*
+ * A request from what the monitor blocks say. With `last`, only the fields
+ * that differ from it — the changed-only rule. Returns whether it asks for
+ * anything at all.
+ */
+static bool monitor_req(const struct q_monitor_set *m,
+                        const struct q_monitor_set *last, struct out_req *r)
+{
+	*r = (struct out_req)OUT_REQ_NONE;
+	bool any = false;
+
+	if (m->enabled != Q_RULE_UNSET &&
+	    (!last || last->enabled != m->enabled)) {
+		r->enabled = m->enabled;
+		any = true;
+	}
+	if (m->mode_w && (!last || last->mode_w != m->mode_w ||
+	                  last->mode_h != m->mode_h ||
+	                  last->mode_mhz != m->mode_mhz)) {
+		r->mode_w = m->mode_w;
+		r->mode_h = m->mode_h;
+		r->mode_mhz = m->mode_mhz;
+		any = true;
+	}
+	if (m->has_pos && (!last || !last->has_pos ||
+	                   last->x != m->x || last->y != m->y)) {
+		r->has_pos = true;
+		r->x = m->x;
+		r->y = m->y;
+		any = true;
+	}
+	if (m->pos_auto && (!last || !last->pos_auto)) {
+		r->pos_auto = true;
+		any = true;
+	}
+	if (m->scale != 0 && (!last || last->scale != m->scale)) {
+		/* Q_MON_AUTO is negative, which out_req reads as "from DPI" */
+		r->scale = (float)m->scale;
+		any = true;
+	}
+	if (m->transform != Q_RULE_UNSET &&
+	    (!last || last->transform != m->transform)) {
+		r->transform = m->transform;
+		any = true;
+	}
+	if (m->adaptive_sync != Q_RULE_UNSET &&
+	    (!last || last->adaptive_sync != m->adaptive_sync)) {
+		r->adaptive_sync = m->adaptive_sync;
+		any = true;
+	}
+	return any;
+}
+
+static void monitor_eval(struct aro_output *o, struct q_monitor_set *out)
+{
+	struct wlr_output *wo = o->wlr_output;
+	char desc[256];
+	snprintf(desc, sizeof desc, "%s %s %s",
+	         wo->make ? wo->make : "", wo->model ? wo->model : "",
+	         wo->serial ? wo->serial : "");
+	config_monitor_eval(&o->server->cfg, wo->name, desc, out);
+}
+
+/*
+ * Apply the monitor blocks to one output. `initial` is the output
+ * appearing: every field a block sets applies, and the output comes on
+ * unless a block says otherwise. Otherwise (a reload) only what changed.
+ */
+static void monitor_apply(struct aro_output *o, bool initial)
+{
+	struct aro_server *s = o->server;
+	const char *name = o->wlr_output->name;
+
+	struct q_monitor_set m;
+	monitor_eval(o, &m);
+
+	struct out_req r;
+	const bool fresh = initial || !o->mon_applied;
+	bool any = monitor_req(&m, fresh ? NULL : &o->mon_last, &r);
+	if (initial && r.enabled < 0)
+		r.enabled = 1;
+
+	/*
+	 * Never turn off the last screen that is on. A config that did would
+	 * leave you editing it blind, since this file is applied as you save
+	 * — and the fix would be a TTY. The block is kept for when another
+	 * screen is on (mon_last is not updated, so the next save retries).
+	 */
+	bool refused = false;
+	if (r.enabled == 0) {
+		int lit = wl_list_length(&s->outputs) - (o->enabled ? 1 : 0);
+		if (lit == 0) {
+			notify(s, NOTIFY_ERROR,
+			       "monitor %s: not turning off the only screen that is on",
+			       name);
+			r.enabled = initial ? 1 : -1;
+			refused = true;
+		}
+	}
+
+	if (!initial && !any)
+		return;
+
+	char why[128];
+	bool ok = output_configure(o, &r, false, why, sizeof why);
+	if (!ok) {
+		if (initial) {
+			notify(s, NOTIFY_ERROR, "monitor %s: %s — using its "
+			       "preferred mode instead", name, why);
+			struct out_req plain = OUT_REQ_NONE;
+			plain.enabled = 1;
+			if (!output_configure(o, &plain, false, why, sizeof why))
+				wlr_log(WLR_ERROR, "output %s would not come on: %s",
+				        name, why);
+		} else {
+			notify(s, NOTIFY_ERROR, "monitor %s: %s", name, why);
+		}
+	}
+
+	if (ok && !refused) {
+		if (o->enabled) {
+			o->mon_last = m;
+		} else {
+			/*
+			 * Off: only `enabled` was applied, so only it is
+			 * recorded. A scale edited while the screen is off has
+			 * to still read as a change once it comes back on, or
+			 * it would never be applied at all.
+			 */
+			if (fresh)
+				config_monitor_unset(&o->mon_last);
+			o->mon_last.enabled = m.enabled;
+		}
+		o->mon_applied = true;
+	}
+}
+
+/*
+ * On reload, every output — on or off — against the new blocks. Anything
+ * being turned on goes first, so a config that swaps one screen for
+ * another never passes through a moment with neither: that would trip the
+ * last-screen guard, or park every window for nothing.
+ */
+static void monitors_reapply(struct aro_server *s)
+{
+	int n = wl_list_length(&s->outputs) + wl_list_length(&s->outputs_off);
+	if (n == 0)
+		return;
+	struct aro_output **all = calloc(n, sizeof *all);
+	if (!all)
+		return;
+
+	/* a snapshot: applying moves outputs between the two lists */
+	int i = 0;
+	struct aro_output *o;
+	wl_list_for_each(o, &s->outputs, link)
+		all[i++] = o;
+	wl_list_for_each(o, &s->outputs_off, link)
+		all[i++] = o;
+
+	for (int pass = 0; pass < 2; pass++) {
+		for (i = 0; i < n; i++) {
+			struct q_monitor_set m;
+			monitor_eval(all[i], &m);
+			if ((m.enabled == 0) != (pass == 1))
+				continue;
+			monitor_apply(all[i], false);
+		}
+	}
+	free(all);
+}
+
+/*
+ * wlr-output-management: a client sent a whole configuration, every head
+ * either on (with its full state) or off. Applied output by output — not
+ * atomically across outputs; if the third of three fails, the first two
+ * stay changed and the client is told it failed.
+ */
+static void output_mgr_apply_or_test(struct aro_server *s,
+                                     struct wlr_output_configuration_v1 *cfg,
+                                     bool test)
+{
+	bool ok = true;
+	struct wlr_output_configuration_head_v1 *h;
+
+	int lit = 0;
+	wl_list_for_each(h, &cfg->heads, link)
+		if (h->state.enabled)
+			lit++;
+	if (lit == 0) {
+		wlr_log(WLR_ERROR, "output management: refusing to turn every "
+		        "output off");
+		ok = false;
+	}
+
+	/* ons before offs, for the same reason as monitors_reapply() */
+	for (int pass = 0; ok && pass < 2; pass++) {
+		wl_list_for_each(h, &cfg->heads, link) {
+			if (h->state.enabled != (pass == 0))
+				continue;
+			struct aro_output *o = output_from_wlr(s, h->state.output);
+			if (!o) {
+				ok = false;
+				break;
+			}
+
+			struct out_req r = OUT_REQ_NONE;
+			r.enabled = h->state.enabled;
+			if (h->state.enabled) {
+				if (h->state.mode) {
+					r.mode = h->state.mode;
+				} else if (h->state.custom_mode.width > 0) {
+					r.custom = true;
+					r.mode_w = h->state.custom_mode.width;
+					r.mode_h = h->state.custom_mode.height;
+					r.mode_mhz = h->state.custom_mode.refresh;
+				}
+				r.has_pos = true;
+				r.x = h->state.x;
+				r.y = h->state.y;
+				r.scale = h->state.scale;
+				r.transform = h->state.transform;
+				r.adaptive_sync = h->state.adaptive_sync_enabled;
+			}
+
+			char why[128];
+			if (!output_configure(o, &r, test, why, sizeof why)) {
+				wlr_log(WLR_ERROR, "output management: %s: %s",
+				        o->wlr_output->name, why);
+				ok = false;
+				break;
+			}
+		}
+	}
+
+	if (ok)
+		wlr_output_configuration_v1_send_succeeded(cfg);
+	else
+		wlr_output_configuration_v1_send_failed(cfg);
+	wlr_output_configuration_v1_destroy(cfg);
+
+	/* on failure too: the client should see where things really stand */
+	output_mgr_update(s);
+}
+
+static void output_mgr_apply(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, output_mgr_apply);
+	output_mgr_apply_or_test(s, data, false);
+}
+
+static void output_mgr_test(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, output_mgr_test);
+	output_mgr_apply_or_test(s, data, true);
+}
+
+/*
+ * A new output starts OFF, on outputs_off, and the monitor blocks decide
+ * how it comes on — or whether it does. Everything that turns an output on
+ * goes through output_configure(), so hotplug, a reload and wlr-randr all
+ * take the same path.
+ */
 static void new_output(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_output);
@@ -2522,21 +3219,12 @@ static void new_output(struct wl_listener *l, void *data)
 
 	wlr_output_init_render(wlr_output, s->allocator, s->renderer);
 
-	struct wlr_output_state st;
-	wlr_output_state_init(&st);
-	wlr_output_state_set_enabled(&st, true);
-	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
-	if (mode)
-		wlr_output_state_set_mode(&st, mode);
-	wlr_output_commit_state(wlr_output, &st);
-	wlr_output_state_finish(&st);
-
 	struct aro_output *o = calloc(1, sizeof *o);
 	if (!o)
 		return;
 	o->server = s;
 	o->wlr_output = wlr_output;
-	o->scale = wlr_output->scale > 0 ? wlr_output->scale : 1.0f;
+	o->scale = 1.0f;
 	o->cur_ws = 0;
 
 	o->frame.notify = output_frame;
@@ -2545,28 +3233,18 @@ static void new_output(struct wl_listener *l, void *data)
 	wl_signal_add(&wlr_output->events.request_state, &o->request_state);
 	o->destroy.notify = output_destroy;
 	wl_signal_add(&wlr_output->events.destroy, &o->destroy);
-	wl_list_insert(&s->outputs, &o->link);
+	wl_list_insert(&s->outputs_off, &o->link);
 
-	struct wlr_output_layout_output *lo =
-		wlr_output_layout_add_auto(s->output_layout, wlr_output);
-	struct wlr_scene_output *so = wlr_scene_output_create(s->scene, wlr_output);
-	wlr_scene_output_layout_add_output(s->scene_layout, lo, so);
+	/* For writing monitor blocks, like map: for window rules — the name
+	 * and the "make model serial" a pattern can match. */
+	wlr_log(WLR_INFO, "output: name=\"%s\" desc=\"%s %s %s\"",
+	        wlr_output->name,
+	        wlr_output->make ? wlr_output->make : "",
+	        wlr_output->model ? wlr_output->model : "",
+	        wlr_output->serial ? wlr_output->serial : "");
 
-	/* the box has to exist before the bar can be placed against it */
-	output_refresh_box(o);
-
-	/* One bar per output. It lives in the shared l_bar layer — the scene
-	 * clips each output's render to its own box, so a bar positioned over
-	 * this output only appears on it. */
-	if (!bar_create(&o->bar, o))
-		wlr_log(WLR_ERROR, "could not build a bar for this output");
-
-	if (!s->focused_output)
-		s->focused_output = o;
-
-	update_backdrop(s);
-	output_adopt_parked(s, o);      /* after the boxes and layers are final */
-	aro_arrange(s);
+	monitor_apply(o, true);
+	output_mgr_update(s);
 }
 
 /* ── input ─────────────────────────────────────────────────────────────── */
@@ -3859,6 +4537,13 @@ static void config_reload(struct aro_server *s)
 	prompt_retheme(s);
 	notify_config_errors(s);
 
+	/*
+	 * After the error toasts, not before: posting them clears every error
+	 * on screen, and a monitor block that fails to apply posts its own.
+	 * Changed fields only — see monitor_apply().
+	 */
+	monitors_reapply(s);
+
 	for (int i = 0; i < s->cfg.nexec_always; i++)
 		config_spawn(s->cfg.exec_always[i]);
 }
@@ -3993,6 +4678,7 @@ int main(int argc, char *argv[])
 
 	s.pending_split = LY_ROW;
 	wl_list_init(&s.outputs);
+	wl_list_init(&s.outputs_off);
 	wl_list_init(&s.views);
 	wl_list_init(&s.keyboards);
 	wl_list_init(&s.layers);
@@ -4070,6 +4756,19 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	wlr_xdg_output_manager_v1_create(s.display, s.output_layout);
+
+	/* wlr-output-management: wlr-randr, kanshi, wdisplays. Monitor
+	 * blocks in the config go through the same code (output_configure). */
+	s.output_mgr = wlr_output_manager_v1_create(s.display);
+	if (s.output_mgr) {
+		s.output_mgr_apply.notify = output_mgr_apply;
+		wl_signal_add(&s.output_mgr->events.apply, &s.output_mgr_apply);
+		s.output_mgr_test.notify = output_mgr_test;
+		wl_signal_add(&s.output_mgr->events.test, &s.output_mgr_test);
+	} else {
+		wlr_log(WLR_ERROR, "output management unavailable; "
+		        "wlr-randr and kanshi will not work");
+	}
 	wlr_viewporter_create(s.display);
 	wlr_fractional_scale_manager_v1_create(s.display, 1);
 	wlr_single_pixel_buffer_manager_v1_create(s.display);
@@ -4251,6 +4950,15 @@ int main(int argc, char *argv[])
 	config_watch_start(&s);
 	notify_config_errors(&s);
 
+	/*
+	 * The outputs came up inside wlr_backend_start(), and any monitor
+	 * block that failed then posted a toast which the line above has just
+	 * cleared. Failed blocks are never marked applied, so this retries
+	 * exactly those and puts their toasts back; everything that worked
+	 * has nothing new to apply and is left alone.
+	 */
+	monitors_reapply(&s);
+
 	for (int i = 0; i < s.cfg.nexec; i++)
 		config_spawn(s.cfg.exec[i]);
 	for (int i = 0; i < s.cfg.nexec_always; i++)
@@ -4294,6 +5002,11 @@ int main(int argc, char *argv[])
 	wl_list_remove(&s.new_decoration.link);
 	lock_finish(&s);
 	idle_finish(&s);
+	if (s.output_mgr) {
+		wl_list_remove(&s.output_mgr_apply.link);
+		wl_list_remove(&s.output_mgr_test.link);
+		s.output_mgr = NULL;    /* output_destroy runs after this */
+	}
 	wl_list_remove(&s.new_layer_surface.link);
 	wl_list_remove(&s.new_input.link);
 	wl_list_remove(&s.request_cursor.link);

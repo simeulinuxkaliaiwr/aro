@@ -32,6 +32,43 @@ workspaces = 4
 # keyboard_model =
 # keyboard_rules =
 
+# ── monitors ─────────────────────────────────────────────────────────────
+# One block per screen. The name after `monitor` is a pattern — a glob, as
+# in window rules — tried against the connector name and against
+# "make model serial"; the second survives moving a screen to another port.
+# Every screen logs both as it appears:
+#   output: name="HDMI-A-1" desc="Dell Inc. DELL U2419H 7ABC123"
+#
+# monitor * {                 # * matches every screen
+#     scale = auto            # 2 on a panel over 192 DPI, otherwise 1
+#     position = auto         # to the right of the ones already placed
+# }
+#
+# monitor "Dell Inc. DELL U2419H*" {
+#     mode = 1920x1080@60     # or: auto / preferred. @Hz is optional;
+#                             # @60 finds the 59.95 Hz mode panels report
+#     position = 1536,0       # layout pixels, i.e. AFTER scaling: a
+#                             # 1920-wide panel at 1.25 is 1536 wide
+#     scale = 1.25
+#     transform = normal      # 90 180 270 flipped flipped-90 ... or auto
+#     adaptive_sync = false   # auto is off
+#     enabled = true          # auto is on
+# }
+#
+# Every key takes `auto`, and auto is NOT the same as leaving the key out.
+# Leaving it out says nothing, so a reload leaves that setting alone — which
+# is what keeps a wlr-randr or kanshi change from being undone by an
+# unrelated save. `auto` asks for the default, so it is how you undo a
+# setting you had before, without restarting.
+#
+# Where several blocks match, all apply and the lower one wins for anything
+# both set.
+#
+# Blocks apply when a screen is plugged in and, when you save this file,
+# only the settings you changed — so a layout set with wlr-randr or kanshi
+# survives saving for an unrelated reason. aro will not turn off the last
+# screen that is on, from here or from wlr-randr.
+
 # ── spacing ──────────────────────────────────────────────────────────────
 gaps = 9                    # between sibling frames
 outer_gaps = 9              # tree to screen edge

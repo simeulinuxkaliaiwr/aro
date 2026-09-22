@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=aro
+Comment=Tiling window manager for Wayland
+Exec=aro
+TryExec=aro
+Type=Application
+DesktopNames=aro
+Keywords=tiling;wm;wayland;compositor;

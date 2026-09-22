@@ -14,6 +14,8 @@ project('aro', 'c',
 # code they affect.
 add_project_arguments('-DWLR_USE_UNSTABLE', language: 'c')
 
+cc = meson.get_compiler('c')
+
 if get_option('compositor')
   if get_option('effects')
     add_project_arguments('-DARO_EFFECTS', language: 'c')
@@ -28,7 +30,6 @@ if get_option('compositor')
   # error if someone asked for it explicitly and cannot have it.
   xwl = get_option('xwayland')
   if not xwl.disabled()
-    cc = meson.get_compiler('c')
     wlroots_pre = dependency('wlroots-0.20')
     if cc.has_header('wlr/xwayland.h', dependencies: wlroots_pre)
       add_project_arguments('-DARO_XWAYLAND', language: 'c')
@@ -41,15 +42,28 @@ if get_option('compositor')
   endif
 endif
 
-inc = include_directories('src')
+# Every source directory is on the include path, so a header is included by
+# its own name — `#include "layout.h"`, not `#include "layout/layout.h"`.
+# That is what let the tree be split into directories without touching a
+# single #include line, and it costs one rule: header names are unique
+# across the whole project.
+inc = include_directories(
+  'src',
+  'src/layout',
+  'src/compositor',
+  'src/ui',
+)
 
 # ── the layout tree ───────────────────────────────────────────────────────
 # No dependencies by design. It is the part of the WM that can be wrong in
 # interesting ways, so it stays testable without a compositor.
-core = static_library('aro-core', ['src/layout.c', 'src/anim.c'])
+core = static_library('aro-core',
+  ['src/layout/layout.c', 'src/layout/anim.c'],
+  include_directories: inc,
+)
 core_dep = declare_dependency(link_with: core, include_directories: inc)
 
-executable('aro-layout', 'src/layout_harness.c',
+executable('aro-layout', 'src/layout/layout_harness.c',
   dependencies: core_dep,
   install: false,
 )
@@ -117,16 +131,42 @@ if get_option('compositor')
     dependency('xkbcommon'),
     dependency('pixman-1'),
     dependency('pangocairo'),   # text; wlroots has none of its own
+    cc.find_library('m', required: false),   # sqrt, for scale = auto
   ]
 
-  install_data('portals.conf',
+  install_data('data/portals.conf',
     install_dir: get_option('datadir') / 'xdg-desktop-portal',
     rename: 'aro-portals.conf',
   )
 
+  # Without this no display manager can offer aro at all: greeters read
+  # this directory and nothing else to find out what sessions exist.
+  install_data('data/aro.desktop',
+    install_dir: get_option('datadir') / 'wayland-sessions',
+  )
+
+  # Somewhere findable, since aro ships no config of its own: with no
+  # ~/.config/aro/config the defaults apply, and this is the file to copy.
+  install_data('data/config.example',
+    install_dir: get_option('datadir') / 'doc' / 'aro',
+  )
+
+  aro_sources = [
+    'src/compositor/aro.c',
+    'src/compositor/config.c',
+    'src/compositor/idle.c',
+    'src/compositor/lock.c',
+    'src/ui/ui.c',
+    'src/ui/bar.c',
+    'src/ui/notify.c',
+    'src/ui/prompt.c',
+    'src/ui/text.c',
+  ]
+
   executable('aro',
-    ['src/aro.c', 'src/ui.c', 'src/text.c', 'src/bar.c', 'src/config.c', 'src/notify.c', 'src/prompt.c', 'src/lock.c', 'src/idle.c'] + proto_headers,
+    aro_sources + proto_headers,
     dependencies: deps,
+    include_directories: inc,
     install: true,
   )
 endif

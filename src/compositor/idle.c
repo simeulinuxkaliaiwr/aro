@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
 #include <wlr/types/wlr_output.h>
@@ -23,35 +24,79 @@ void idle_activity(struct aro_server *s)
 }
 
 /*
- * One inhibitor is enough to hold the whole seat awake, so this is a
- * presence test rather than a count of anything.
- *
- * Note that every inhibitor counts, including one belonging to a window on
- * a workspace you are not looking at. Sway checks visibility; doing the
- * same here means re-evaluating on every workspace switch, map and unmap,
- * and getting it wrong means either a screen that blanks during a film or
- * one that never blanks at all. Left simple deliberately — see the missing
- * list in CONTEXT.md.
+ * Last answer given to wlroots, so the log line fires on changes only.
+ * -1 until the first update. File-static rather than a server field: there
+ * is one server, and this is bookkeeping for a log line, not state anything
+ * else reads.
  */
-static void idle_update_inhibited(struct aro_server *s)
+static int last_inhibited = -1;
+
+/*
+ * One VISIBLE inhibitor is enough to hold the whole seat awake, so this
+ * stops at the first one that counts rather than counting.
+ *
+ * Visibility is the protocol's own rule ("only in effect while this surface
+ * is visible") and sway's: a paused video on a workspace you are not
+ * looking at must not keep the panel on. aro_surface_visible() decides;
+ * see it in aro.c for exactly what counts.
+ */
+void idle_update(struct aro_server *s)
 {
 	if (!s->idle_notifier)
 		return;
-	wlr_idle_notifier_v1_set_inhibited(s->idle_notifier,
-	                                   !wl_list_empty(&s->inhibitors));
+
+	int total = 0;
+	bool inhibited = false;
+	struct aro_inhibitor *qi;
+	wl_list_for_each(qi, &s->inhibitors, link) {
+		total++;
+		if (!inhibited && aro_surface_visible(s, qi->inhibitor->surface))
+			inhibited = true;
+	}
+
+	if ((int)inhibited == last_inhibited)
+		return;
+	last_inhibited = inhibited;
+	wlr_idle_notifier_v1_set_inhibited(s->idle_notifier, inhibited);
+	wlr_log(WLR_INFO, "idle: %s (%d inhibitor%s)",
+	        inhibited ? "inhibited" : "not inhibited",
+	        total, total == 1 ? "" : "s");
 }
 
+static void inhibitor_surface_map(struct wl_listener *l, void *data)
+{
+	struct aro_inhibitor *qi = wl_container_of(l, qi, surface_map);
+	(void)data;
+	idle_update(qi->server);
+}
+
+static void inhibitor_surface_unmap(struct wl_listener *l, void *data)
+{
+	struct aro_inhibitor *qi = wl_container_of(l, qi, surface_unmap);
+	(void)data;
+	idle_update(qi->server);
+}
+
+static void inhibitor_free(struct aro_inhibitor *qi)
+{
+	wl_list_remove(&qi->destroy.link);
+	wl_list_remove(&qi->surface_map.link);
+	wl_list_remove(&qi->surface_unmap.link);
+	wl_list_remove(&qi->link);
+	free(qi);
+}
+
+/* Fires on the client's destroy request and when its surface is destroyed
+ * (wlroots destroys the inhibitor with the surface), so the surface
+ * listeners are still attached to a live surface here. */
 static void inhibitor_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_inhibitor *qi = wl_container_of(l, qi, destroy);
 	struct aro_server *s = qi->server;
 	(void)data;
 
-	wl_list_remove(&qi->destroy.link);
-	wl_list_remove(&qi->link);
-	free(qi);
-
-	idle_update_inhibited(s);
+	inhibitor_free(qi);
+	idle_update(s);
 }
 
 static void new_inhibitor(struct wl_listener *l, void *data)
@@ -67,9 +112,13 @@ static void new_inhibitor(struct wl_listener *l, void *data)
 
 	qi->destroy.notify = inhibitor_destroy;
 	wl_signal_add(&inhibitor->events.destroy, &qi->destroy);
+	qi->surface_map.notify = inhibitor_surface_map;
+	wl_signal_add(&inhibitor->surface->events.map, &qi->surface_map);
+	qi->surface_unmap.notify = inhibitor_surface_unmap;
+	wl_signal_add(&inhibitor->surface->events.unmap, &qi->surface_unmap);
 
 	wl_list_insert(&s->inhibitors, &qi->link);
-	idle_update_inhibited(s);
+	idle_update(s);
 }
 
 /*
@@ -100,6 +149,7 @@ static void output_set_power(struct wl_listener *l, void *data)
 void idle_init(struct aro_server *s)
 {
 	wl_list_init(&s->inhibitors);
+	last_inhibited = -1;
 
 	s->idle_notifier = wlr_idle_notifier_v1_create(s->display);
 	if (!s->idle_notifier)
@@ -127,11 +177,8 @@ void idle_init(struct aro_server *s)
 void idle_finish(struct aro_server *s)
 {
 	struct aro_inhibitor *qi, *tmp;
-	wl_list_for_each_safe(qi, tmp, &s->inhibitors, link) {
-		wl_list_remove(&qi->destroy.link);
-		wl_list_remove(&qi->link);
-		free(qi);
-	}
+	wl_list_for_each_safe(qi, tmp, &s->inhibitors, link)
+		inhibitor_free(qi);
 
 	if (s->idle_inhibit_mgr)
 		wl_list_remove(&s->new_inhibitor.link);

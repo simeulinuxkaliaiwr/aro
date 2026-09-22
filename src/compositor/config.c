@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <wayland-server-protocol.h>     /* enum wl_output_transform */
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/util/log.h>
 
@@ -574,6 +575,249 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 	}
 }
 
+/* ── monitor blocks ────────────────────────────────────────────────────── */
+
+void config_monitor_unset(struct q_monitor_set *m)
+{
+	*m = (struct q_monitor_set){
+		.enabled = Q_RULE_UNSET,
+		.transform = Q_RULE_UNSET,
+		.adaptive_sync = Q_RULE_UNSET,
+	};
+}
+
+void config_monitor_eval(const struct aro_config *c, const char *name,
+                         const char *desc, struct q_monitor_set *out)
+{
+	config_monitor_unset(out);
+	const char *n = name ? name : "";
+	const char *d = desc ? desc : "";
+
+	for (int i = 0; i < c->nmonitors; i++) {
+		const struct q_monitor *m = &c->monitors[i];
+		if (!glob_match(m->match, n) && !glob_match(m->match, d))
+			continue;
+		const struct q_monitor_set *b = &m->set;
+		if (b->enabled != Q_RULE_UNSET)
+			out->enabled = b->enabled;
+		if (b->mode_w) {
+			/* a mode is one thing: size and refresh travel together */
+			out->mode_w = b->mode_w;
+			out->mode_h = b->mode_h;
+			out->mode_mhz = b->mode_mhz;
+		}
+		if (b->has_pos || b->pos_auto) {
+			out->has_pos = b->has_pos;
+			out->pos_auto = b->pos_auto;
+			out->x = b->x;
+			out->y = b->y;
+		}
+		if (b->scale != 0)
+			out->scale = b->scale;
+		if (b->transform != Q_RULE_UNSET)
+			out->transform = b->transform;
+		if (b->adaptive_sync != Q_RULE_UNSET)
+			out->adaptive_sync = b->adaptive_sync;
+	}
+}
+
+/* "1920x1080", "1920x1080@60", "2560x1440@143.912Hz", "preferred"/"auto" */
+static bool parse_mode(const char *v, struct q_monitor_set *m)
+{
+	if (!strcasecmp(v, "preferred") || !strcasecmp(v, "auto")) {
+		m->mode_w = m->mode_h = -1;
+		m->mode_mhz = 0;
+		return true;
+	}
+
+	char *end;
+	long w = strtol(v, &end, 10);
+	if (end == v || (*end != 'x' && *end != 'X'))
+		return false;
+	const char *hs = end + 1;
+	long h = strtol(hs, &end, 10);
+	if (end == hs)
+		return false;
+
+	double hz = 0;
+	if (*end == '@') {
+		const char *rs = end + 1;
+		hz = strtod(rs, &end);
+		if (end == rs || hz <= 0 || hz > 1000)
+			return false;
+		if (!strcasecmp(end, "hz"))
+			end += 2;
+	}
+	if (*end)
+		return false;
+	if (w < 1 || w > 16384 || h < 1 || h > 16384)
+		return false;
+
+	m->mode_w = (int)w;
+	m->mode_h = (int)h;
+	m->mode_mhz = (int)(hz * 1000 + 0.5);
+	return true;
+}
+
+/* "1920,0", "1920 0", "-1080,0", or "auto" — to the right of the others */
+static bool parse_pos(const char *v, struct q_monitor_set *m)
+{
+	if (!strcasecmp(v, "auto")) {
+		m->pos_auto = true;
+		m->has_pos = false;
+		return true;
+	}
+
+	char *end;
+	long x = strtol(v, &end, 10);
+	if (end == v)
+		return false;
+	const char *p = end;
+	while (*p == ',' || isspace((unsigned char)*p))
+		p++;
+	if (p == end)
+		return false;           /* needs a separator between the two */
+	long y = strtol(p, &end, 10);
+	if (end == p || *end)
+		return false;
+	if (x < -100000 || x > 100000 || y < -100000 || y > 100000)
+		return false;
+	m->has_pos = true;
+	m->pos_auto = false;
+	m->x = (int)x;
+	m->y = (int)y;
+	return true;
+}
+
+static bool parse_transform(const char *v, int *out)
+{
+	static const struct { const char *name; int t; } names[] = {
+		{ "normal",      WL_OUTPUT_TRANSFORM_NORMAL },
+		{ "auto",        WL_OUTPUT_TRANSFORM_NORMAL },
+		{ "0",           WL_OUTPUT_TRANSFORM_NORMAL },
+		{ "90",          WL_OUTPUT_TRANSFORM_90 },
+		{ "180",         WL_OUTPUT_TRANSFORM_180 },
+		{ "270",         WL_OUTPUT_TRANSFORM_270 },
+		{ "flipped",     WL_OUTPUT_TRANSFORM_FLIPPED },
+		{ "flipped-90",  WL_OUTPUT_TRANSFORM_FLIPPED_90 },
+		{ "flipped-180", WL_OUTPUT_TRANSFORM_FLIPPED_180 },
+		{ "flipped-270", WL_OUTPUT_TRANSFORM_FLIPPED_270 },
+	};
+	for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+		if (!strcasecmp(v, names[i].name)) {
+			*out = names[i].t;
+			return true;
+		}
+	}
+	return false;
+}
+
+/* One `key = value` line inside a monitor block. Reports its own errors. */
+static void monitor_key(struct aro_config *c, int lineno,
+                        struct q_monitor_set *m, const char *key,
+                        const char *value)
+{
+	bool ok, b;
+	const bool is_auto = !strcasecmp(value, "auto");
+
+	if (!strcasecmp(key, "enabled")) {
+		/* `auto` is on: a screen you plugged in is a screen you want */
+		if (is_auto) {
+			m->enabled = 1;
+			ok = true;
+		} else if ((ok = parse_bool(value, &b))) {
+			m->enabled = b;
+		}
+	} else if (!strcasecmp(key, "mode")) {
+		ok = parse_mode(value, m);
+	} else if (!strcasecmp(key, "position")) {
+		ok = parse_pos(value, m);
+	} else if (!strcasecmp(key, "scale")) {
+		double d;
+		if (is_auto) {
+			m->scale = Q_MON_AUTO;
+			ok = true;
+		} else {
+			ok = parse_double(value, &d) && d > 0 && d <= 10;
+			if (ok)
+				m->scale = d;
+		}
+	} else if (!strcasecmp(key, "transform")) {
+		ok = parse_transform(value, &m->transform);
+	} else if (!strcasecmp(key, "adaptive_sync")) {
+		/* `auto` is off — the default everywhere that has to be asked */
+		if (is_auto) {
+			m->adaptive_sync = 0;
+			ok = true;
+		} else if ((ok = parse_bool(value, &b))) {
+			m->adaptive_sync = b;
+		}
+	} else {
+		config_err(c, lineno, "monitor: unknown key '%s' (enabled, mode, "
+		           "position, scale, transform, adaptive_sync)", key);
+		return;
+	}
+
+	if (!ok)
+		config_err(c, lineno, "monitor: bad value for '%s'", key);
+}
+
+/*
+ * The line that opens a block: everything after the word `monitor`.
+ * `rest` is `eDP-1 {` or `"Dell *" {`. Returns the new block's index,
+ * or -1 after reporting what was wrong — the caller then swallows the
+ * block's body — or -2 for the one-line `monitor = ...` form, which has
+ * no body to swallow.
+ */
+static int monitor_open(struct aro_config *c, int lineno, char *rest)
+{
+	char *p = trim(rest);
+	size_t n = strlen(p);
+
+	/* `monitor = eDP-1 ...` — the one-line form people will try first */
+	if (*p == '=') {
+		config_err(c, lineno, "monitor settings go in a block: "
+		           "monitor NAME { ... }");
+		return -2;
+	}
+	if (!n || p[n - 1] != '{') {
+		config_err(c, lineno, "monitor: the line must end with '{'");
+		return -1;
+	}
+	p[n - 1] = '\0';
+
+	bool bad_quote = false;
+	char *cur = p;
+	char *pat = next_word(&cur, &bad_quote);
+	if (bad_quote) {
+		config_err(c, lineno, "monitor: unterminated quote");
+		return -1;
+	}
+	if (!pat || !*pat) {
+		config_err(c, lineno, "monitor: needs a name or pattern, "
+		           "e.g. monitor eDP-1 {");
+		return -1;
+	}
+	if (next_word(&cur, &bad_quote)) {
+		config_err(c, lineno, "monitor: quote a pattern with spaces in it");
+		return -1;
+	}
+
+	struct q_monitor *grown =
+		realloc(c->monitors, (c->nmonitors + 1) * sizeof *grown);
+	if (!grown)
+		return -1;
+	c->monitors = grown;
+
+	struct q_monitor *m = &c->monitors[c->nmonitors];
+	m->match = strdup(pat);
+	if (!m->match)
+		return -1;
+	m->line = lineno;
+	config_monitor_unset(&m->set);
+	return c->nmonitors++;
+}
+
 /*
  * The theme keys, as a table rather than thirty branches. Every one is a
  * name, a type and where in q_theme it lands — adding a setting is one line
@@ -717,6 +961,16 @@ bool config_load(struct aro_config *c, const char *path)
 	char line[1024];
 	int lineno = 0;
 
+	/*
+	 * Monitor blocks. `block` is the open one's index; `in_block` can be
+	 * true with block == -1 when the opening line was bad — its body is
+	 * then read into `scratch` and dropped, so one typo in a header is
+	 * one toast rather than one per line inside it.
+	 */
+	bool in_block = false;
+	int block = -1, block_line = 0;
+	struct q_monitor_set scratch;
+
 	while (fgets(line, sizeof line, f)) {
 		lineno++;
 
@@ -728,6 +982,25 @@ bool config_load(struct aro_config *c, const char *path)
 		if (!*p)
 			continue;
 
+		if (!strcmp(p, "}")) {
+			if (!in_block)
+				config_err(c, lineno, "'}' with no monitor block open");
+			in_block = false;
+			block = -1;
+			continue;
+		}
+		if (!strncasecmp(p, "monitor", 7) &&
+		    (isspace((unsigned char)p[7]) || p[7] == '{' || p[7] == '=')) {
+			if (in_block)
+				config_err(c, lineno, "monitor block from line %d "
+				           "has no '}'", block_line);
+			block = monitor_open(c, lineno, p + 7);
+			in_block = block != -2;
+			block_line = lineno;
+			config_monitor_unset(&scratch);
+			continue;
+		}
+
 		char *eq = strchr(p, '=');
 		if (!eq) {
 			config_err(c, lineno, "no '='");
@@ -736,6 +1009,13 @@ bool config_load(struct aro_config *c, const char *path)
 		*eq = '\0';
 		char *key = trim(p);
 		char *value = trim(eq + 1);
+
+		if (in_block) {
+			monitor_key(c, lineno,
+			            block >= 0 ? &c->monitors[block].set : &scratch,
+			            key, value);
+			continue;
+		}
 
 		bool ok = true;
 
@@ -809,6 +1089,11 @@ bool config_load(struct aro_config *c, const char *path)
 			config_err(c, lineno, "bad value for '%s'", key);
 	}
 
+	/* keep what the unclosed block said; a missing brace is not a
+	 * reason to ignore the settings above it */
+	if (in_block)
+		config_err(c, block_line, "monitor block has no '}'");
+
 	fclose(f);
 	free(owned);
 	return true;
@@ -828,6 +1113,9 @@ void config_finish(struct aro_config *c)
 	for (int i = 0; i < c->nrules; i++)
 		rule_free(&c->rules[i]);
 	free(c->rules);
+	for (int i = 0; i < c->nmonitors; i++)
+		free(c->monitors[i].match);
+	free(c->monitors);
 	for (int i = 0; i < c->nexec; i++)
 		free(c->exec[i]);
 	free(c->exec);
