@@ -1,0 +1,10 @@
+# Meson build directories
+/build/
+/builddir/
+
+/.cache/
+.clangd
+*.swp
+*~
+
+*.log

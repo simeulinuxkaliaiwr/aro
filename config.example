@@ -1,0 +1,191 @@
+# aro — example config
+# Copy to ~/.config/aro/config
+#
+# Everything here is optional; missing keys keep their defaults, which live
+# in src/theme.h. Colours are 0xRRGGBBAA — #rrggbbaa and a bare rrggbbaa
+# work too, and the alpha may be left off (it defaults to ff).
+
+mod = super                 # or: alt (use alt when testing nested)
+focus_follows_mouse = false
+
+# Ask before the quit bind ends the session — every open window goes with
+# it. y or Enter exits; n, Escape or a click outside the card cancels.
+confirm_quit = true
+
+# manual: new windows open beside the focused one (i3). mod+v / mod+s set
+# the direction for the next window only.
+# dwindle: the split follows the shape of the frame being split, along its
+# longer axis, so the layout spirals on its own (Hyprland). mod+v / mod+s
+# still override it for one window.
+layout = manual
+
+# Workspaces are created as you use them — this is only how many pills the
+# bar always shows, so it is not empty on a fresh session. Switching to a
+# higher one brings it into existence; it disappears again when it empties.
+workspaces = 4
+
+# ── keyboard ─────────────────────────────────────────────────────────────
+# Unset means the system default (the XKB_DEFAULT_* environment variables).
+# keyboard_layout = br
+# keyboard_variant = nodeadkeys
+# keyboard_options = compose:ralt
+# keyboard_model =
+# keyboard_rules =
+
+# ── spacing ──────────────────────────────────────────────────────────────
+gaps = 9                    # between sibling frames
+outer_gaps = 9              # tree to screen edge
+border = 2
+radius = 5                  # needs -Deffects=true
+min_size = 80               # what a tiled frame shrinks to when crowded
+header_height = 26          # 0 disables the per-frame title strip
+
+# always: every frame gets a header, including GTK windows that draw their
+#         own — two title bars stacked, but a consistent strip everywhere.
+# auto:   drop ours when the client decorates itself. Tidier per window,
+#         inconsistent across the desktop.
+header = always
+bar_height = 30
+bar_padding = 12
+text_padding = 10
+
+# Floating windows are sized by the client, so they need their own floor —
+# min_size is a tiling constraint and would let a dialog open at 80x80.
+float_min_width = 240
+float_min_height = 120
+float_scale = 0.5           # of the usable area, when the client says nothing
+
+# ── colour ───────────────────────────────────────────────────────────────
+# One accent on screen, ever. Focus is the only thing that gets colour.
+background = 0x0c0f13ff     # seen through the gaps
+frame = 0x12161dff
+frame_focus = 0x161b23ff
+border_color = 0x222a35ff   # unfocused; focused borders use the accent
+accent = 0xe6a54bff
+accent_soft = 0xe6a54b4d    # the 1px ring just inside the border
+text = 0xd7dfe9ff
+text_dim = 0x6b7788ff
+bar_color = 0x0a0d11ff
+urgent = 0xc0566bff
+drop_fill = 0xe6a54b1f      # the drag preview
+drop_line = 0xe6a54bcc
+
+# aro's own on-screen messages — a config line that did not parse, say.
+# Not a notification daemon: applications cannot post to this.
+notify_color = 0x12161deb
+notify_ms = 6000
+notify_max_width = 520
+scrim_color = 0x0c0f13b3    # dims the desktop behind the exit prompt
+
+font = Sans 10
+font_small = Sans 9
+
+# ── motion ───────────────────────────────────────────────────────────────
+anim_ms = 340               # open, close, retile
+fullscreen_anim_ms = 220    # flat, no overshoot — see theme.h
+focus_anim_ms = 160
+drop_anim_ms = 160
+open_scale = 0.88           # new frames grow from this
+
+# ── pointer ──────────────────────────────────────────────────────────────
+drag_threshold = 12         # px before a tiled window tears out of the tree
+resize_zone = 8             # how far in from an edge still grabs it
+resize_step = 0.04          # one press of the resize bind
+
+# ── startup ──────────────────────────────────────────────────────────────
+# This file is watched: saving it applies immediately, no restart, no signal.
+# A line that does not parse is reported with its number and skipped.
+#
+# exec        runs once, when the compositor starts
+# exec_always runs then AND on every reload — kill the old instance yourself
+#
+# exec = swaybg -i ~/wallpaper.png
+# exec_always = pkill waybar; waybar
+
+# Hand aro's environment to the systemd user session, so services
+# started on demand — the xdg-desktop-portal above all — connect to THIS
+# compositor. Without it the portal inherits whatever session started it,
+# and out-of-process dialogs (GTK's file chooser, screen sharing) hang
+# forever talking to a socket that may not even exist any more.
+#
+# Only needed on systemd systems; harmless to leave commented out if the
+# portal already works.
+# exec = systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
+# exec = systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk
+
+# ── window rules ─────────────────────────────────────────────────────────
+# rule = <match>... <action>...
+#
+# match:   app_id:<pattern>   title:<pattern>
+#          Globs: * is anything, ? is one character, \ makes the next one
+#          literal. Case-insensitive. Quote a pattern with spaces in it:
+#          title:"Open File". Every match on a line must hold, and a rule
+#          needs at least one. On X11 windows app_id is the WM_CLASS class.
+#          A # always starts a comment, even inside quotes.
+#
+# action:  float | tile | fullscreen | workspace <1..32>
+#          tile overrides aro's own guess that a window should float
+#          (dialogs, fixed-size windows); float overrides the reverse.
+#
+# Every rule that matches applies, top to bottom; where two set the same
+# thing, the lower line wins. A window sent to another workspace opens
+# there without taking focus.
+#
+# Rules are checked when a window opens, again whenever its title changes,
+# and against every open window when this file is saved — but only what a
+# rule newly says is applied. Retitling a terminal, or saving the file for
+# an unrelated reason, never undoes something you changed by hand.
+#
+# Finding an app_id: every window logs one line as it opens —
+#   map: app_id="org.gnome.Calculator" title="Calculator"
+#
+# rule = app_id:mpv  workspace 3
+# rule = app_id:firefox  title:Picture-in-Picture  float
+# rule = app_id:org.gnome.Calculator  float
+# rule = title:*YouTube*  fullscreen
+
+# ── bindings ─────────────────────────────────────────────────────────────
+# bind = <combo>, <action>[, <argument>]
+#
+# The first bind line replaces the built-in bindings entirely — so this list
+# IS your keymap. Delete a line and that binding is gone; there is no hidden
+# default underneath it.
+#
+# actions: spawn <cmd> | close | quit | float | fullscreen
+#          focus|move|resize left|right|up|down
+#          workspace|sendto 1..32
+#          split right|down
+
+bind = mod+Return, spawn, foot
+bind = mod+d, spawn, fuzzel
+bind = mod+q, close
+bind = mod+shift+e, quit
+bind = mod+space, float
+bind = mod+f, fullscreen
+bind = mod+v, split, right
+bind = mod+s, split, down
+
+bind = mod+h, focus, left
+bind = mod+j, focus, down
+bind = mod+k, focus, up
+bind = mod+l, focus, right
+
+bind = mod+shift+h, move, left
+bind = mod+shift+j, move, down
+bind = mod+shift+k, move, up
+bind = mod+shift+l, move, right
+
+bind = mod+ctrl+h, resize, left
+bind = mod+ctrl+j, resize, down
+bind = mod+ctrl+k, resize, up
+bind = mod+ctrl+l, resize, right
+
+bind = mod+1, workspace, 1
+bind = mod+2, workspace, 2
+bind = mod+3, workspace, 3
+bind = mod+4, workspace, 4
+
+bind = mod+shift+1, sendto, 1
+bind = mod+shift+2, sendto, 2
+bind = mod+shift+3, sendto, 3
+bind = mod+shift+4, sendto, 4
