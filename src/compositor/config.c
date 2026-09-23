@@ -226,7 +226,39 @@ bool config_parse_action(const char *name, const char *arg,
 		return true;
 	}
 
+	if (!strcasecmp(name, "layout")) {
+		if (!arg || !*arg || !strcasecmp(arg, "toggle"))
+			*num = Q_LAYOUT_TOGGLE;
+		else if (!strcasecmp(arg, "manual"))
+			*num = Q_LAYOUT_MANUAL;
+		else if (!strcasecmp(arg, "dwindle"))
+			*num = Q_LAYOUT_DWINDLE;
+		else
+			return false;
+		*action = Q_LAYOUT;
+		return true;
+	}
+
 	return false;
+}
+
+static bool parse_layout(const char *s, enum q_layout *out)
+{
+	if (!strcasecmp(s, "manual"))  { *out = Q_LAYOUT_MANUAL;  return true; }
+	if (!strcasecmp(s, "dwindle")) { *out = Q_LAYOUT_DWINDLE; return true; }
+	return false;
+}
+
+const char *config_layout_name(enum q_layout l)
+{
+	return l == Q_LAYOUT_DWINDLE ? "dwindle" : "manual";
+}
+
+enum q_layout config_ws_layout(const struct aro_config *c, int ws)
+{
+	if (ws >= 0 && ws < ARO_MAX_WS && c->ws_layout[ws] != Q_LAYOUT_INHERIT)
+		return (enum q_layout)c->ws_layout[ws];
+	return c->layout;
 }
 
 /* bind line: combo, action, arg */
@@ -271,6 +303,7 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_s, Q_SPLIT, LY_COL, NULL);
 	bind_add(c, M, XKB_KEY_Tab, Q_SWITCH, 1, NULL);
 	bind_add(c, M | S, XKB_KEY_Tab, Q_SWITCH, -1, NULL);
+	bind_add(c, M, XKB_KEY_t, Q_LAYOUT, Q_LAYOUT_TOGGLE, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -319,6 +352,8 @@ void config_defaults(struct aro_config *c)
 	c->bar = TH_BAR;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
+	for (int i = 0; i < ARO_MAX_WS; i++)
+		c->ws_layout[i] = Q_LAYOUT_INHERIT;
 	c->header = Q_HEADER_ALWAYS;
 	c->ws_slide = Q_SLIDE_HORIZONTAL;
 
@@ -486,6 +521,55 @@ static void rule_free(struct q_rule *r)
 	free(r->title);
 	free(r->type);
 	r->app_id = r->title = r->type = NULL;
+}
+
+/*
+ * `workspace = 3 layout dwindle`. Words after the number are settings for
+ * that workspace; layout is the only one so far. The number means the
+ * same workspace on every output, as `mod+3` does.
+ */
+static void parse_workspace(struct aro_config *c, int lineno, char *value)
+{
+	bool bad_quote = false;
+	char *cur = value;
+	char *n = next_word(&cur, &bad_quote);
+	int ws;
+
+	if (!n || !parse_int(n, &ws) || ws < 1 || ws > ARO_MAX_WS) {
+		config_err(c, lineno, "workspace: needs a number from 1 to %d",
+		           ARO_MAX_WS);
+		return;
+	}
+
+	int layout = Q_LAYOUT_INHERIT;
+	bool any = false;
+	char *w;
+	while ((w = next_word(&cur, &bad_quote))) {
+		if (!strcasecmp(w, "layout")) {
+			char *l = next_word(&cur, &bad_quote);
+			enum q_layout ql;
+			if (!l || !parse_layout(l, &ql)) {
+				config_err(c, lineno, "workspace %d: layout is manual "
+				           "or dwindle", ws);
+				return;
+			}
+			layout = ql;
+			any = true;
+		} else {
+			config_err(c, lineno, "workspace %d: unknown word '%s'", ws, w);
+			return;
+		}
+	}
+	if (bad_quote) {
+		config_err(c, lineno, "workspace %d: unterminated quote", ws);
+		return;
+	}
+	if (!any) {
+		config_err(c, lineno, "workspace %d: nothing to set (try "
+		           "'layout dwindle')", ws);
+		return;
+	}
+	c->ws_layout[ws - 1] = layout;
 }
 
 /* parse one rule line */
@@ -1039,12 +1123,10 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_int(value, &c->workspaces) &&
 			     c->workspaces >= 1 && c->workspaces <= ARO_MAX_WS;
 		} else if (!strcasecmp(key, "layout")) {
-			if (!strcasecmp(value, "manual"))
-				c->layout = Q_LAYOUT_MANUAL;
-			else if (!strcasecmp(value, "dwindle"))
-				c->layout = Q_LAYOUT_DWINDLE;
-			else
-				ok = false;
+			ok = parse_layout(value, &c->layout);
+		} else if (!strcasecmp(key, "workspace")) {
+			parse_workspace(c, lineno, value);  /* reports its own errors */
+			continue;
 		} else if (!strcasecmp(key, "header")) {
 			if (!strcasecmp(value, "always"))
 				c->header = Q_HEADER_ALWAYS;

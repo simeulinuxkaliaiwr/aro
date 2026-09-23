@@ -16,6 +16,13 @@ confirm_quit = true
 # mod+v / mod+s will temporarily override either mode for the next window.
 layout = dwindle
 
+# per-workspace layouts. the number means that workspace on every screen.
+# mod+t flips the current workspace between the two at runtime; that only
+# changes where the NEXT windows go, and lasts until you edit that
+# workspace's line here (or the `layout` line above, for workspaces
+# without one).
+# workspace = 3 layout manual
+
 # workspaces are created on demand. this just sets how many pills the bar
 # shows by default so it isn't empty on startup.
 workspaces = 8
@@ -203,6 +210,7 @@ bind = mod+space, float
 bind = mod+f, fullscreen
 bind = mod+Tab, switch, next
 bind = mod+shift+Tab, switch, prev
+bind = mod+t, layout, toggle        # or: layout, manual / layout, dwindle
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

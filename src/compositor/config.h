@@ -22,10 +22,13 @@ enum q_slide {
 	Q_SLIDE_OFF,
 };
 
+/* how a new tiled window is placed; per workspace, see ws_layout */
 enum q_layout {
 	Q_LAYOUT_MANUAL = 0,
 	Q_LAYOUT_DWINDLE,
 };
+#define Q_LAYOUT_INHERIT (-1)   /* ws_layout: use the global `layout` */
+#define Q_LAYOUT_TOGGLE  (-1)   /* Q_LAYOUT's num: the other one */
 
 /* `wallpaper = auto | none | <path>`; aro runs aropaper (wallpaper.c) */
 enum q_wallpaper {
@@ -48,6 +51,7 @@ enum q_action {
 	Q_SENDTO,       /* num: index, 0-based */
 	Q_SPLIT,        /* num: ly_dir */
 	Q_SWITCH,       /* num: +1 next, -1 previous */
+	Q_LAYOUT,       /* num: enum q_layout, or Q_LAYOUT_TOGGLE */
 };
 
 struct q_bind {
@@ -134,6 +138,9 @@ struct aro_config {
 	bool focus_follows_mouse;
 	bool confirm_quit;      /* ask before the quit bind ends the session */
 	enum q_layout layout;
+	/* `workspace = N layout X`, by number on every output;
+	 * Q_LAYOUT_INHERIT where no line says */
+	int ws_layout[ARO_MAX_WS];
 	enum q_header header;
 	enum q_slide ws_slide;  /* how a workspace switch moves */
 
@@ -188,6 +195,10 @@ char *config_path(void);
 
 /* remap bindings when modkey changes */
 void config_set_modkey(struct aro_config *c, uint32_t modkey);
+
+/* the layout a workspace gets from the file: its own line, else `layout` */
+enum q_layout config_ws_layout(const struct aro_config *c, int ws);
+const char *config_layout_name(enum q_layout l);
 
 /* evaluate window rules */
 void config_rules_eval(const struct aro_config *c, const char *app_id,

@@ -207,6 +207,56 @@ static ly_node **view_ws_root(struct aro_view *v)
 	return &v->server->orphan_ws[v->workspace];
 }
 
+/* the layout workspace ws of o uses: the layout action's choice, else the
+ * config's (its own `workspace =` line, else `layout`) */
+static enum q_layout ws_layout(struct aro_server *s, struct aro_output *o,
+                               int ws)
+{
+	if (o && ws >= 0 && ws < ARO_MAX_WS &&
+	    o->ws_layout[ws] != Q_LAYOUT_INHERIT)
+		return (enum q_layout)o->ws_layout[ws];
+	return config_ws_layout(&s->cfg, ws);
+}
+
+/*
+ * Put v into workspace ws of o. Every path that adds a window to a tree
+ * comes through here except a drop, which names its own slot, so this is
+ * the one place a workspace's layout gets a say.
+ *
+ * target NULL means "nowhere in particular": the first leaf in manual, as
+ * it always was, and the newest (last) leaf in dwindle, so the spiral
+ * carries on instead of restarting in the corner. forced means dir is what
+ * the user asked for (mod+v / mod+s) and dwindle does not overrule it.
+ *
+ * The tree is arranged afterwards even when it is not on screen, because
+ * aro_arrange only arranges visible workspaces and dwindle reads the
+ * target's box: a hidden tree would otherwise hand the next insert a
+ * stale or 0x0 box and the wrong axis.
+ */
+static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
+                            int ws, struct aro_view *v, ly_node *target,
+                            ly_dir dir, bool forced)
+{
+	ly_node **root = &o->ws[ws];
+	ly_node *leaf;
+
+	if (!*root) {
+		leaf = *root = ly_leaf(v);
+	} else {
+		bool dwindle = ws_layout(s, o, ws) == Q_LAYOUT_DWINDLE;
+		if (!target)
+			target = dwindle ? ly_last_leaf(*root) : ly_first_leaf(*root);
+		if (dwindle && !forced)
+			dir = target->box.w > target->box.h ? LY_ROW : LY_COL;
+		leaf = ly_split(root, target, dir, v);
+	}
+	if (leaf)
+		ly_arrange(*root, usable_area(o), &(ly_metrics){
+			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap,
+			.min = s->cfg.theme.min });
+	return leaf;
+}
+
 /* configure layer surfaces and update usable area */
 static void arrange_layers(struct aro_server *s)
 {
@@ -524,13 +574,7 @@ static void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 		v->node = NULL;
 		v->workspace = ws;
 
-		ly_node **root = &v->output->ws[ws];
-		if (!*root) {
-			*root = ly_leaf(v);
-			v->node = *root;
-		} else {
-			v->node = ly_split(root, ly_first_leaf(*root), LY_ROW, v);
-		}
+		v->node = tree_insert(s, v->output, ws, v, NULL, LY_ROW, false);
 		if (!v->node)
 			return;
 	}
@@ -956,17 +1000,13 @@ static void view_set_floating(struct aro_server *s, struct aro_view *v,
 		v->floating = false;
 		v->float_follow = false;        /* the tree decides again */
 
-		ly_node **root = &v->output->ws[v->workspace];
-		if (!*root) {
-			*root = ly_leaf(v);
-			v->node = *root;
-		} else {
-			ly_node *target = s->focused && s->focused != v &&
-			                  s->focused->node
-			                ? s->focused->node
-			                : ly_first_leaf(*root);
-			v->node = ly_split(root, target, LY_ROW, v);
-		}
+		ly_node *target = s->focused && s->focused != v &&
+		                  s->focused->node &&
+		                  s->focused->output == v->output &&
+		                  s->focused->workspace == v->workspace
+		                ? s->focused->node : NULL;
+		v->node = tree_insert(s, v->output, v->workspace, v, target,
+		                      LY_ROW, false);
 		if (!v->node) {
 			/* OOM: stay floating */
 			v->floating = true;
@@ -1136,13 +1176,7 @@ static void view_move_to_output(struct aro_server *s, struct aro_view *v,
 		v->fbox.x += dest->box.x - src->box.x;
 		v->fbox.y += dest->box.y - src->box.y;
 	} else {
-		ly_node **root = &dest->ws[dest->cur_ws];
-		if (!*root) {
-			*root = ly_leaf(v);
-			v->node = *root;
-		} else {
-			v->node = ly_split(root, ly_first_leaf(*root), LY_ROW, v);
-		}
+		v->node = tree_insert(s, dest, dest->cur_ws, v, NULL, LY_ROW, false);
 		if (!v->node) {
 			wlr_log(WLR_ERROR, "out of memory moving a window between outputs");
 			return;
@@ -1695,24 +1729,16 @@ static void view_map(struct wl_listener *l, void *data)
 		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		view_float_configure_once(v);
 	} else {
-		ly_node **root = &o->ws[ws];
-		if (!*root) {
-			*root = ly_leaf(v);
-			v->node = *root;
-		} else {
-			ly_node *target = s->focused &&
-			                  s->focused->output == o &&
-			                  s->focused->workspace == ws &&
-			                  s->focused->node
-			                ? s->focused->node
-			                : ly_first_leaf(*root);
-			/* dwindle split direction */
-			ly_dir dir = s->pending_split;
-			if (s->cfg.layout == Q_LAYOUT_DWINDLE && !s->split_forced)
-				dir = target->box.w > target->box.h ? LY_ROW : LY_COL;
-
-			v->node = ly_split(root, target, dir, v);
-		}
+		ly_node *target = s->focused &&
+		                  s->focused->output == o &&
+		                  s->focused->workspace == ws &&
+		                  s->focused->node
+		                ? s->focused->node : NULL;
+		/* a pending mod+v/mod+s is only for a window opening where you
+		 * are looking; one a rule sends elsewhere leaves it alone */
+		v->node = tree_insert(s, o, ws, v, target,
+		                      here ? s->pending_split : LY_ROW,
+		                      here && s->split_forced);
 		if (!v->node) {
 			wlr_log(WLR_ERROR, "out of memory inserting a window");
 			return;
@@ -1722,10 +1748,6 @@ static void view_map(struct wl_listener *l, void *data)
 			s->pending_split = LY_ROW;      /* one-shot, like i3 */
 			s->split_forced = false;
 		}
-
-		/* animate open */
-		ly_arrange(*root, usable_area(o),
-		           &(ly_metrics){ .gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
 	}
 
 	/* handle pre-map fullscreen request */
@@ -2321,6 +2343,8 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 	for (int i = 0; i < ARO_MAX_WS; i++) {
 		o->ws[i] = s->orphan_ws[i];
 		s->orphan_ws[i] = NULL;
+		o->ws_layout[i] = s->orphan_ws_layout[i];
+		s->orphan_ws_layout[i] = Q_LAYOUT_INHERIT;
 	}
 	o->cur_ws = s->orphan_cur_ws;
 
@@ -2508,13 +2532,8 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 			v->fbox.x += dest->box.x - o->box.x;
 			v->fbox.y += dest->box.y - o->box.y;
 		} else {
-			ly_node **root = &dest->ws[dest->cur_ws];
-			if (!*root) {
-				*root = ly_leaf(v);
-				v->node = *root;
-			} else {
-				v->node = ly_split(root, ly_first_leaf(*root), LY_ROW, v);
-			}
+			v->node = tree_insert(s, dest, dest->cur_ws, v, NULL,
+			                      LY_ROW, false);
 		}
 		view_set_visible(v, true);
 	}
@@ -2528,12 +2547,17 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 		for (int i = 0; i < ARO_MAX_WS; i++) {
 			s->orphan_ws[i] = o->ws[i];
 			o->ws[i] = NULL;
+			s->orphan_ws_layout[i] = o->ws_layout[i];
 		}
 		s->orphan_cur_ws = o->cur_ws;
 		s->parked = true;
 		wlr_log(WLR_INFO, "last output gone — parking its workspaces");
 	}
 	o->cur_ws = 0;
+	/* an output switched off and on again starts empty, and so do its
+	 * choices; rehomed windows follow the survivor's layout */
+	for (int i = 0; i < ARO_MAX_WS; i++)
+		o->ws_layout[i] = Q_LAYOUT_INHERIT;
 
 	if (s->focused && s->focused->output == NULL)
 		aro_focus(s, dest ? output_pick_view(s, dest) : NULL);
@@ -2977,6 +3001,8 @@ static void new_output(struct wl_listener *l, void *data)
 	o->wlr_output = wlr_output;
 	o->scale = 1.0f;
 	o->cur_ws = 0;
+	for (int i = 0; i < ARO_MAX_WS; i++)
+		o->ws_layout[i] = Q_LAYOUT_INHERIT;
 
 	o->frame.notify = output_frame;
 	wl_signal_add(&wlr_output->events.frame, &o->frame);
@@ -3166,6 +3192,35 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 	aro_arrange(s);
 }
 
+/*
+ * The layout action: the focused output's current workspace only. It
+ * changes how the NEXT windows are placed and leaves the ones already there
+ * alone — re-inserting them would throw away every ratio set by hand.
+ * Landing back on what the config says drops the override, so the
+ * workspace follows the file again from then on.
+ */
+static void layout_set(struct aro_server *s, int want)
+{
+	struct aro_output *o = aro_focused_output(s);
+	if (!o)
+		return;
+	const int ws = o->cur_ws;
+	enum q_layout cur = ws_layout(s, o, ws);
+	enum q_layout next = want == Q_LAYOUT_TOGGLE
+	                   ? (cur == Q_LAYOUT_DWINDLE ? Q_LAYOUT_MANUAL
+	                                              : Q_LAYOUT_DWINDLE)
+	                   : (enum q_layout)want;
+
+	o->ws_layout[ws] = next == config_ws_layout(&s->cfg, ws)
+	                 ? Q_LAYOUT_INHERIT : (int)next;
+	wlr_log(WLR_INFO, "layout: workspace %d on %s is %s", ws + 1,
+	        o->wlr_output->name, config_layout_name(next));
+	/* there is nothing else on screen that says which layout is in use */
+	if (next != cur)
+		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
+		       config_layout_name(next));
+}
+
 static void run_action(struct aro_server *s, const struct q_bind *b)
 {
 	struct aro_view *f = s->focused;
@@ -3199,6 +3254,9 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		/* one-shot split */
 		s->pending_split = (ly_dir)b->num;
 		s->split_forced = true;
+		return;
+	case Q_LAYOUT:
+		layout_set(s, b->num);
 		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);
@@ -4590,8 +4648,27 @@ static void config_reload(struct aro_server *s)
 	config_defaults(&nc);
 	config_load(&nc, s->cfg_path);
 
+	/* what each workspace's layout was per the file, before the swap */
+	enum q_layout was[ARO_MAX_WS];
+	for (int i = 0; i < ARO_MAX_WS; i++)
+		was[i] = config_ws_layout(&s->cfg, i);
+
 	config_finish(&s->cfg);
 	s->cfg = nc;
+
+	/* changed-only, like rules and monitor blocks: where the file now
+	 * says something different about a workspace, the file wins over
+	 * the layout action; saving the file for a colour changes nothing */
+	for (int i = 0; i < ARO_MAX_WS; i++) {
+		if (config_ws_layout(&s->cfg, i) == was[i])
+			continue;
+		struct aro_output *lo;
+		wl_list_for_each(lo, &s->outputs, link)
+			lo->ws_layout[i] = Q_LAYOUT_INHERIT;
+		wl_list_for_each(lo, &s->outputs_off, link)
+			lo->ws_layout[i] = Q_LAYOUT_INHERIT;
+		s->orphan_ws_layout[i] = Q_LAYOUT_INHERIT;
+	}
 
 	wlr_log(WLR_INFO, "config reloaded");
 
@@ -4657,6 +4734,11 @@ void aro_config_reload(struct aro_server *s)
 ly_box aro_view_box(struct aro_view *v)
 {
 	return view_target(v);
+}
+
+enum q_layout aro_ws_layout(struct aro_output *o, int ws)
+{
+	return ws_layout(o->server, o, ws);
 }
 
 const char *aro_view_type(struct aro_view *v)
@@ -4778,6 +4860,8 @@ int main(int argc, char *argv[])
 	}
 
 	s.pending_split = LY_ROW;
+	for (int i = 0; i < ARO_MAX_WS; i++)
+		s.orphan_ws_layout[i] = Q_LAYOUT_INHERIT;
 	wl_list_init(&s.outputs);
 	wl_list_init(&s.outputs_off);
 	wl_list_init(&s.views);

@@ -160,6 +160,13 @@ ly_node *ly_first_leaf(ly_node *n)
 	return n;
 }
 
+ly_node *ly_last_leaf(ly_node *n)
+{
+	while (n && n->kind == LY_SPLIT)
+		n = n->b;
+	return n;
+}
+
 static int collect(ly_node *n, ly_node **out, int max, int i)
 {
 	if (!n || i >= max)
