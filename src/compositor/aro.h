@@ -78,6 +78,7 @@ struct view_impl {
 struct aro_view {
 	struct wl_list link;            /* aro_server.views */
 	struct aro_server *server;
+	uint32_t id;                    /* stable, never reused; aroctl's window id */
 
 	/* shell vtable */
 	const struct view_impl *impl;
@@ -175,6 +176,22 @@ struct aro_output {
 
 	ly_node *ws[ARO_MAX_WS];     /* one tree per workspace, this output */
 	int cur_ws;
+
+	/*
+	 * Workspace slide. Draw-time only: geo stays the real position and
+	 * the tree never hears of it. The outgoing workspace is offset by
+	 * from..to along the axis, the incoming one by that plus span, so the
+	 * two move as one strip and a switch mid-slide continues from where
+	 * things are.
+	 */
+	struct {
+		bool active;
+		int out_ws;             /* leaving; drawn until the slide ends */
+		bool vertical;          /* axis, fixed when the slide starts */
+		int span;               /* signed: incoming sits this far from outgoing */
+		int from, to;           /* outgoing offset at start and end */
+		uint32_t start_ms, dur_ms;
+	} slide;
 
 	struct aro_bar bar;          /* one bar per output */
 
@@ -284,6 +301,10 @@ struct aro_server {
 
 	struct wl_event_source *clock_timer;
 
+	/* aroctl: ipc.c; NULL if the socket could not be made */
+	struct aro_ipc *ipc;
+	uint32_t next_view_id;          /* last id handed out; 0 is never one */
+
 	/* config reload: watch the directory, not the file */
 	char *cfg_path;
 	int cfg_fd, cfg_wd;
@@ -359,6 +380,13 @@ void aro_focus(struct aro_server *s, struct aro_view *v);
 /* switch to the window's workspace and focus it */
 void view_raise_and_focus(struct aro_server *s, struct aro_view *v);
 struct aro_output *aro_focused_output(struct aro_server *s);
+
+/* for ipc.c: the same paths the keyboard and the config watch take */
+void aro_run_action(struct aro_server *s, const struct q_bind *b);
+void aro_config_reload(struct aro_server *s);
+/* where the frame is going (view_target): output box, fbox or leaf box */
+ly_box aro_view_box(struct aro_view *v);
+const char *aro_view_type(struct aro_view *v);
 
 /* shell wrappers */
 void view_configure(struct aro_view *v, int x, int y, int w, int h);

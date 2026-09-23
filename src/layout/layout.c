@@ -184,27 +184,18 @@ int ly_count(ly_node *n)
 	return n->kind == LY_LEAF ? 1 : ly_count(n->a) + ly_count(n->b);
 }
 
-ly_node *ly_focus(ly_node *root, ly_node *from, ly_edge e)
+int ly_pick(const ly_box *boxes, int n, ly_box from, ly_edge e)
 {
-	if (!root || !from)
-		return NULL;
+	double cx = from.x + from.w / 2.0;
+	double cy = from.y + from.h / 2.0;
 
-	ly_node *buf[256];
-	int n = ly_collect(root, buf, 256);
-
-	double cx = from->box.x + from->box.w / 2.0;
-	double cy = from->box.y + from->box.h / 2.0;
-
-	ly_node *best = NULL;
+	int best = -1;
 	double best_score = 0;
 
 	for (int i = 0; i < n; i++) {
-		ly_node *c = buf[i];
-		if (c == from)
-			continue;
-
-		double dx = (c->box.x + c->box.w / 2.0) - cx;
-		double dy = (c->box.y + c->box.h / 2.0) - cy;
+		const ly_box *c = &boxes[i];
+		double dx = (c->x + c->w / 2.0) - cx;
+		double dy = (c->y + c->h / 2.0) - cy;
 
 		bool ok;
 		switch (e) {
@@ -223,12 +214,29 @@ ly_node *ly_focus(ly_node *root, ly_node *from, ly_edge e)
 
 		/* spatial focus scoring */
 		double score = along + off * 2.0;
-		if (!best || score < best_score) {
-			best = c;
+		if (best < 0 || score < best_score) {
+			best = i;
 			best_score = score;
 		}
 	}
 	return best;
+}
+
+ly_node *ly_focus(ly_node *root, ly_node *from, ly_edge e)
+{
+	if (!root || !from)
+		return NULL;
+
+	ly_node *buf[256];
+	int n = ly_collect(root, buf, 256);
+
+	/* `from` itself is skipped: its own centre is never "that way" */
+	ly_box boxes[256];
+	for (int i = 0; i < n; i++)
+		boxes[i] = buf[i]->box;
+
+	int at = ly_pick(boxes, n, from->box, e);
+	return at >= 0 && buf[at] != from ? buf[at] : NULL;
 }
 
 bool ly_resize(ly_node *leaf, ly_edge e, double amount)

@@ -57,6 +57,13 @@ int      ly_count(ly_node *root);
 /* spatial focus */
 ly_node *ly_focus(ly_node *root, ly_node *from, ly_edge e);
 
+/*
+ * The same rule on bare boxes, for things outside the tree (floating
+ * windows): the index of the box nearest `from` in direction e, sideways
+ * drift counting double. -1 if nothing lies that way.
+ */
+int ly_pick(const ly_box *boxes, int n, ly_box from, ly_edge e);
+
 /* resize boundary */
 bool ly_resize(ly_node *leaf, ly_edge e, double amount);
 

@@ -81,7 +81,12 @@ static bool parse_int(const char *v, int *out)
 {
 	char *end;
 	long n = strtol(v, &end, 0);
-	if (end == v || *trim(end) != '\0')
+	if (end == v)
+		return false;
+	/* trailing blanks only; read, never write — v may be const */
+	while (isspace((unsigned char)*end))
+		end++;
+	if (*end != '\0')
 		return false;
 	*out = (int)n;
 	return true;
@@ -153,6 +158,77 @@ static bool parse_edge(const char *s, int *out)
 	return false;
 }
 
+/*
+ * The action half of a bind line: "focus" + "left", "workspace" + "3",
+ * "spawn" + "foot". arg may be NULL. Shared by bind lines and by IPC's
+ * dispatch, so a command typed at aroctl means exactly what it would mean
+ * in the config. For Q_SPAWN the command stays in arg; the caller copies it.
+ */
+bool config_parse_action(const char *name, const char *arg,
+                         enum q_action *action, int *num)
+{
+	*action = Q_NONE;
+	*num = 0;
+	if (!name)
+		return false;
+
+	if (!strcasecmp(name, "spawn") || !strcasecmp(name, "exec")) {
+		if (!arg || !*arg)
+			return false;
+		*action = Q_SPAWN;
+		return true;
+	}
+	if (!strcasecmp(name, "close"))      { *action = Q_CLOSE;      return true; }
+	if (!strcasecmp(name, "quit"))       { *action = Q_QUIT;       return true; }
+	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
+	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }
+
+	if (!strcasecmp(name, "focus") || !strcasecmp(name, "move") ||
+	    !strcasecmp(name, "resize")) {
+		if (!arg || !parse_edge(arg, num))
+			return false;
+		*action = !strcasecmp(name, "focus") ? Q_FOCUS
+		        : !strcasecmp(name, "move")  ? Q_MOVE
+		                                     : Q_RESIZE;
+		return true;
+	}
+
+	if (!strcasecmp(name, "workspace") || !strcasecmp(name, "sendto")) {
+		int n;
+		if (!arg || !parse_int(arg, &n) || n < 1 || n > ARO_MAX_WS)
+			return false;
+		*num = n - 1;
+		*action = !strcasecmp(name, "workspace") ? Q_WORKSPACE : Q_SENDTO;
+		return true;
+	}
+
+	if (!strcasecmp(name, "switch")) {
+		if (!arg || !*arg || !strcasecmp(arg, "next"))
+			*num = 1;
+		else if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "previous"))
+			*num = -1;
+		else
+			return false;
+		*action = Q_SWITCH;
+		return true;
+	}
+
+	if (!strcasecmp(name, "split")) {
+		if (!arg)
+			return false;
+		if (!strcasecmp(arg, "right") || !strcasecmp(arg, "horizontal"))
+			*num = LY_ROW;
+		else if (!strcasecmp(arg, "down") || !strcasecmp(arg, "vertical"))
+			*num = LY_COL;
+		else
+			return false;
+		*action = Q_SPLIT;
+		return true;
+	}
+
+	return false;
+}
+
 /* bind line: combo, action, arg */
 static bool parse_bind(struct aro_config *c, char *value)
 {
@@ -170,63 +246,11 @@ static bool parse_bind(struct aro_config *c, char *value)
 	if (!parse_combo(c, combo, &mods, &sym))
 		return false;
 
-	int num = 0;
-
-	if (!strcasecmp(action, "spawn") || !strcasecmp(action, "exec")) {
-		if (!arg || !*arg)
-			return false;
-		return bind_add(c, mods, sym, Q_SPAWN, 0, arg);
-	}
-	if (!strcasecmp(action, "close"))
-		return bind_add(c, mods, sym, Q_CLOSE, 0, NULL);
-	if (!strcasecmp(action, "quit"))
-		return bind_add(c, mods, sym, Q_QUIT, 0, NULL);
-	if (!strcasecmp(action, "float"))
-		return bind_add(c, mods, sym, Q_FLOAT, 0, NULL);
-	if (!strcasecmp(action, "fullscreen"))
-		return bind_add(c, mods, sym, Q_FULLSCREEN, 0, NULL);
-
-	if (!strcasecmp(action, "focus") || !strcasecmp(action, "move") ||
-	    !strcasecmp(action, "resize")) {
-		if (!arg || !parse_edge(arg, &num))
-			return false;
-		enum q_action a = !strcasecmp(action, "focus")  ? Q_FOCUS
-		                : !strcasecmp(action, "move")   ? Q_MOVE
-		                                                : Q_RESIZE;
-		return bind_add(c, mods, sym, a, num, NULL);
-	}
-
-	if (!strcasecmp(action, "workspace") || !strcasecmp(action, "sendto")) {
-		if (!arg || !parse_int(arg, &num) || num < 1 || num > ARO_MAX_WS)
-			return false;
-		return bind_add(c, mods, sym,
-		                !strcasecmp(action, "workspace") ? Q_WORKSPACE : Q_SENDTO,
-		                num - 1, NULL);
-	}
-
-	if (!strcasecmp(action, "switch")) {
-		if (!arg || !*arg || !strcasecmp(arg, "next"))
-			num = 1;
-		else if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "previous"))
-			num = -1;
-		else
-			return false;
-		return bind_add(c, mods, sym, Q_SWITCH, num, NULL);
-	}
-
-	if (!strcasecmp(action, "split")) {
-		if (!arg)
-			return false;
-		if (!strcasecmp(arg, "right") || !strcasecmp(arg, "horizontal"))
-			num = LY_ROW;
-		else if (!strcasecmp(arg, "down") || !strcasecmp(arg, "vertical"))
-			num = LY_COL;
-		else
-			return false;
-		return bind_add(c, mods, sym, Q_SPLIT, num, NULL);
-	}
-
-	return false;
+	enum q_action a;
+	int num;
+	if (!config_parse_action(action, arg, &a, &num))
+		return false;
+	return bind_add(c, mods, sym, a, num, a == Q_SPAWN ? arg : NULL);
 }
 
 /* defaults */
@@ -294,6 +318,7 @@ void config_defaults(struct aro_config *c)
 	c->confirm_quit = TH_CONFIRM_QUIT;
 	c->layout = Q_LAYOUT_MANUAL;
 	c->header = Q_HEADER_ALWAYS;
+	c->ws_slide = Q_SLIDE_HORIZONTAL;
 
 	c->theme = (struct q_theme){
 		.gap = TH_GAP, .outer_gap = TH_OUTER_GAP, .border = TH_BORDER,
@@ -305,6 +330,7 @@ void config_defaults(struct aro_config *c)
 
 		.anim_ms = TH_ANIM_MS, .anim_fs_ms = TH_ANIM_FS_MS,
 		.anim_focus_ms = TH_ANIM_FOCUS_MS, .drop_ms = TH_DROP_MS,
+		.ws_slide_ms = TH_WS_SLIDE_MS,
 		.open_scale = TH_OPEN_SCALE,
 
 		.drag_tear = TH_DRAG_TEAR, .resize_zone = TH_RESIZE_ZONE,
@@ -832,6 +858,7 @@ static const struct theme_key theme_keys[] = {
 	{ "fullscreen_anim_ms", K_INT,    T(anim_fs_ms),    0, 5000 },
 	{ "focus_anim_ms",      K_INT,    T(anim_focus_ms), 0, 5000 },
 	{ "drop_anim_ms",       K_INT,    T(drop_ms),       0, 5000 },
+	{ "workspace_slide_ms", K_INT,    T(ws_slide_ms),   0, 5000 },
 	{ "open_scale",         K_DOUBLE, T(open_scale),    0, 0 },
 
 	{ "drag_threshold", K_INT,    T(drag_tear),   0, 500 },
@@ -1021,6 +1048,15 @@ bool config_load(struct aro_config *c, const char *path)
 				c->header = Q_HEADER_ALWAYS;
 			else if (!strcasecmp(value, "auto"))
 				c->header = Q_HEADER_AUTO;
+			else
+				ok = false;
+		} else if (!strcasecmp(key, "workspace_slide")) {
+			if (!strcasecmp(value, "horizontal"))
+				c->ws_slide = Q_SLIDE_HORIZONTAL;
+			else if (!strcasecmp(value, "vertical"))
+				c->ws_slide = Q_SLIDE_VERTICAL;
+			else if (!strcasecmp(value, "off"))
+				c->ws_slide = Q_SLIDE_OFF;
 			else
 				ok = false;
 		} else if (!strcasecmp(key, "keyboard_layout")) {

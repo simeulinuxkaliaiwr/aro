@@ -11,6 +11,9 @@ project('aro', 'c',
 # === project-wide args ===
 # meson wants all add_project_arguments() calls before any target is declared.
 add_project_arguments('-DWLR_USE_UNSTABLE', language: 'c')
+# `aroctl version` and `aroctl --version`; the literal keeps its quotes
+add_project_arguments('-DARO_VERSION="@0@"'.format(meson.project_version()),
+  language: 'c')
 
 cc = meson.get_compiler('c')
 
@@ -129,6 +132,7 @@ if get_option('compositor')
     'src/compositor/config.c',
     'src/compositor/idle.c',
     'src/compositor/ime.c',
+    'src/compositor/ipc.c',
     'src/compositor/lock.c',
     'src/ui/ui.c',
     'src/ui/bar.c',
@@ -142,6 +146,11 @@ if get_option('compositor')
     aro_sources + proto_headers,
     dependencies: deps,
     include_directories: inc,
+    install: true,
+  )
+
+  # talks to a running aro over its socket; no wlroots, no libwayland
+  executable('aroctl', 'src/aroctl/aroctl.c',
     install: true,
   )
 endif

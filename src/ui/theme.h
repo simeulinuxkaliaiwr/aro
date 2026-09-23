@@ -65,6 +65,10 @@
 #define TH_EASE_FLAT_Y2 1.00
 #define TH_ANIM_FS_MS   220
 
+/* workspace switch: flat slide, the old workspace out, the new one in.
+ * Flat because the move is a whole screen wide (see fullscreen). */
+#define TH_WS_SLIDE_MS  220
+
 /* toast styling */
 /* internal toasts only */
 #define TH_NOTIFY_BG    0x12161deb      /* slightly translucent frame colour */

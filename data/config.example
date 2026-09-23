@@ -105,6 +105,12 @@ anim_ms = 340               # standard window animations
 fullscreen_anim_ms = 220    # no spring overshoot for fullscreen
 focus_anim_ms = 160
 drop_anim_ms = 160
+
+# workspace switches slide the old workspace out and the new one in.
+# a higher workspace number comes in from the right (or from below).
+# with two monitors the windows briefly cross onto the other screen.
+workspace_slide = horizontal    # horizontal | vertical | off
+workspace_slide_ms = 220        # no overshoot; 0 is the same as off
 open_scale = 0.88           # starting scale for new windows
 
 # === window switcher (mod+tab) ===

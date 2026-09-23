@@ -16,6 +16,7 @@
 #include "config.h"
 #include "aro.h"
 #include "idle.h"
+#include "ipc.h"
 #include "text.h"
 #include "theme.h"
 
@@ -258,6 +259,133 @@ static bool view_visible(struct aro_view *v)
 	return v->mapped && v->output && v->workspace == v->output->cur_ws;
 }
 
+/* ── workspace slide ───────────────────────────────────────────────────── */
+/*
+ * Drawing only. view_visible() stays the truth for focus, arrange, rules,
+ * idle and hit testing: a window on the outgoing workspace is drawn while
+ * it leaves, and is otherwise already gone.
+ */
+
+/* on the workspace sliding out of this output */
+static bool view_leaving(struct aro_view *v)
+{
+	struct aro_output *o = v->output;
+	return v->mapped && o && o->slide.active &&
+	       v->workspace == o->slide.out_ws && v->workspace != o->cur_ws;
+}
+
+/* drawn this frame: visible, or on its way out */
+static bool view_on_screen(struct aro_view *v)
+{
+	return view_visible(v) || view_leaving(v);
+}
+
+/* the outgoing workspace's offset now; the incoming one is this + span */
+static int slide_offset(const struct aro_output *o, uint32_t now)
+{
+	uint32_t el = now - o->slide.start_ms;
+	double t = el >= o->slide.dur_ms ? 1.0
+		: anim_ease_eval(&FLAT, (double)el / (double)o->slide.dur_ms);
+	double off = o->slide.from + (o->slide.to - o->slide.from) * t;
+	return (int)(off + (off >= 0 ? 0.5 : -0.5));
+}
+
+/* where to draw a window this frame: geo.cur, plus the slide */
+static ly_box view_draw_box(struct aro_view *v, uint32_t now)
+{
+	ly_box b = v->geo.cur;
+	struct aro_output *o = v->output;
+	if (!o || !o->slide.active)
+		return b;
+
+	int off;
+	if (view_visible(v))
+		off = slide_offset(o, now) + o->slide.span;
+	else if (view_leaving(v))
+		off = slide_offset(o, now);
+	else
+		return b;
+
+	if (o->slide.vertical)
+		b.y += off;
+	else
+		b.x += off;
+	return b;
+}
+
+/* end a slide now: the outgoing workspace is hidden, the incoming one
+ * is drawn where it belongs on the next frame */
+static void slide_finish(struct aro_output *o)
+{
+	if (!o->slide.active)
+		return;
+	o->slide.active = false;
+
+	struct aro_view *v;
+	wl_list_for_each(v, &o->server->views, link) {
+		if (v->output == o && v->workspace != o->cur_ws)
+			wlr_scene_node_set_enabled(&v->frame_tree->node, false);
+	}
+	wlr_output_schedule_frame(o->wlr_output);
+}
+
+/* finish every slide whose time is up; an output that is not drawing
+ * (DPMS) would otherwise never finish its own */
+static void slides_reap(struct aro_server *s, uint32_t now)
+{
+	struct aro_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		if (o->slide.active && now - o->slide.start_ms >= o->slide.dur_ms)
+			slide_finish(o);
+	}
+}
+
+static bool slides_active(struct aro_server *s)
+{
+	struct aro_output *o;
+	wl_list_for_each(o, &s->outputs, link)
+		if (o->slide.active)
+			return true;
+	return false;
+}
+
+/*
+ * Begin (or redirect) a slide from workspace old to ws. Called before
+ * cur_ws changes. A higher number comes in from the right, or from below.
+ * If a slide is already running, the workspace that was coming in is
+ * where it is now, and that is where the new slide starts from, so
+ * reversing mid-way retraces instead of jumping.
+ */
+static void slide_start(struct aro_output *o, int old, int ws)
+{
+	struct aro_server *s = o->server;
+	const bool vertical = s->cfg.ws_slide == Q_SLIDE_VERTICAL;
+	const uint32_t now = aro_now_ms();
+
+	if (s->cfg.ws_slide == Q_SLIDE_OFF || s->cfg.theme.ws_slide_ms <= 0 ||
+	    !o->wlr_output->enabled) {
+		o->slide.active = false;
+		return;
+	}
+
+	int base = 0;           /* where old is drawn right now */
+	if (o->slide.active && o->slide.vertical == vertical &&
+	    now - o->slide.start_ms < o->slide.dur_ms)
+		base = slide_offset(o, now) + o->slide.span;
+
+	const int size = vertical ? o->box.h : o->box.w;
+	const int sgn = ws > old ? 1 : -1;
+
+	o->slide.active = true;
+	o->slide.out_ws = old;
+	o->slide.vertical = vertical;
+	o->slide.span = sgn * size;
+	o->slide.from = base;
+	o->slide.to = -sgn * size;
+	o->slide.start_ms = now;
+	o->slide.dur_ms = (uint32_t)s->cfg.theme.ws_slide_ms;
+}
+
 void aro_arrange(struct aro_server *s)
 {
 	const ly_metrics m = {
@@ -265,6 +393,7 @@ void aro_arrange(struct aro_server *s)
 	};
 
 	uint32_t now = aro_now_ms();
+	slides_reap(s, now);
 
 	/* arrange each output's current workspace */
 	struct aro_output *o;
@@ -323,12 +452,17 @@ static void workspace_show(struct aro_server *s, int ws)
 	if (!o || ws < 0 || ws >= ARO_MAX_WS || ws == o->cur_ws)
 		return;
 
+	/* the old workspace stays drawn while it slides out; anything left
+	 * over from an earlier slide that is neither of these two is hidden */
+	slide_start(o, o->cur_ws, ws);
 	o->cur_ws = ws;
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
 		if (v->output == o)
-			view_set_visible(v, v->workspace == ws);
+			view_set_visible(v, v->workspace == ws ||
+			                    (o->slide.active &&
+			                     v->workspace == o->slide.out_ws));
 	}
 
 	ly_node *root = o->ws[ws];
@@ -1363,6 +1497,10 @@ static void grab_begin(struct aro_server *s, struct aro_view *v,
 	if (!v || !v->mapped || v->fullscreen)
 		return;
 
+	/* grabs read geo.cur; a window still sliding in is drawn elsewhere */
+	if (v->output)
+		slide_finish(v->output);
+
 	/* begin tiled resize */
 	if (mode == ARO_CURSOR_RESIZE && !v->floating) {
 		if (!v->node)
@@ -1855,6 +1993,7 @@ static void new_xdg_toplevel(struct wl_listener *l, void *data)
 	v->destroy.notify = view_destroy;
 	wl_signal_add(&toplevel->events.destroy, &v->destroy);
 
+	v->id = ++s->next_view_id;
 	wl_list_insert(&s->views, &v->link);
 }
 
@@ -2088,15 +2227,17 @@ static void output_frame(struct wl_listener *l, void *data)
 	(void)data;
 
 	uint32_t now = aro_now_ms();
-	bool moving = false;
+	slides_reap(s, now);
+	/* any output's slide: its windows can cross onto this one */
+	bool moving = slides_active(s);
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (!view_visible(v))
+		if (!view_on_screen(v))
 			continue;
 		if (anim_box_tick(&v->geo, now))
 			moving = true;
-		ui_frame_geometry(v, v->geo.cur);
+		ui_frame_geometry(v, view_draw_box(v, now));
 	}
 
 	if (notify_tick(s, now))
@@ -2324,6 +2465,12 @@ static float output_auto_scale(struct wlr_output *wo)
 static struct aro_output *output_evacuate(struct aro_server *s,
                                           struct aro_output *o)
 {
+	/* the views below are rehomed or parked and made visible or hidden
+	 * there; only the flag is left. No slide_finish(): this runs from
+	 * output_destroy, and scheduling a frame on a dying output is not
+	 * something to rely on */
+	o->slide.active = false;
+
 	/* dismiss prompt on output loss */
 	prompt_output_gone(s, o);
 	switcher_output_gone(s, o);
@@ -2573,6 +2720,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 
 	/* snap views after output geometry change */
 	if (was_on && !box_eq(before, o->box)) {
+		slide_finish(o);        /* its span was the old width */
 		struct aro_view *v;
 		wl_list_for_each(v, &s->views, link)
 			if (v->output == o && view_visible(v))
@@ -2935,6 +3083,89 @@ static void prompt_after(struct aro_server *s, bool was_active)
 		pointer_motion_common(s, aro_now_ms());
 }
 
+/*
+ * mod+hjkl and friends on a floating window. Floating windows live
+ * outside the tree, so they get their own versions:
+ *   focus   the nearest floating window that way on this workspace, by the
+ *           tree's own spatial rule (ly_pick); none that way does nothing,
+ *           since jumping screens from a dialog would surprise
+ *   move    nudge by resize_step of the usable area, kept on screen
+ *   resize  grow (right, down) or shrink (left, up) the far edges
+ * Reaching the tiled windows from here is mod+tab's job.
+ */
+static void float_directional(struct aro_server *s, struct aro_view *f,
+                              enum q_action action, ly_edge e)
+{
+	struct aro_output *o = f->output;
+	const struct q_theme *th = &s->cfg.theme;
+
+	if (action == Q_FOCUS) {
+		struct aro_view *cand[64];
+		ly_box boxes[64];
+		int n = 0;
+		struct aro_view *v;
+		wl_list_for_each(v, &s->views, link) {
+			if (n == 64)
+				break;
+			if (v == f || !v->floating || v->fullscreen || !view_visible(v) ||
+			    v->output != o)
+				continue;
+			cand[n] = v;
+			boxes[n++] = view_target(v);
+		}
+		int at = ly_pick(boxes, n, view_target(f), e);
+		if (at >= 0) {
+			aro_focus(s, cand[at]);
+			cursor_warp_to_view(s, cand[at]);
+		}
+		return;
+	}
+
+	ly_box u = usable_area(o);
+	int sx = (int)(u.w * th->resize_step + 0.5), sy = (int)(u.h * th->resize_step + 0.5);
+	if (sx < 1)
+		sx = 1;
+	if (sy < 1)
+		sy = 1;
+	int dx = e == LY_LEFT ? -sx : e == LY_RIGHT ? sx : 0;
+	int dy = e == LY_UP ? -sy : e == LY_DOWN ? sy : 0;
+	ly_box b = f->fbox;
+
+	if (action == Q_MOVE) {
+		b.x += dx;
+		b.y += dy;
+		/* stay on screen: flush against an edge, not past it */
+		if (b.x + b.w > u.x + u.w)
+			b.x = u.x + u.w - b.w;
+		if (b.y + b.h > u.y + u.h)
+			b.y = u.y + u.h - b.h;
+		if (b.x < u.x)
+			b.x = u.x;
+		if (b.y < u.y)
+			b.y = u.y;
+	} else {
+		b.w += dx;
+		b.h += dy;
+		if (b.w < th->float_min_w)
+			b.w = th->float_min_w;
+		if (b.h < th->float_min_h)
+			b.h = th->float_min_h;
+		if (b.x + b.w > u.x + u.w)
+			b.w = u.x + u.w - b.x > th->float_min_w ? u.x + u.w - b.x : b.w;
+		if (b.y + b.h > u.y + u.h)
+			b.h = u.y + u.h - b.y > th->float_min_h ? u.y + u.h - b.y : b.h;
+		/* we chose a size, so the client stops choosing it: the same
+		 * hand-over as dragging an edge */
+		f->float_follow = false;
+	}
+
+	if (b.x == f->fbox.x && b.y == f->fbox.y &&
+	    b.w == f->fbox.w && b.h == f->fbox.h)
+		return;
+	f->fbox = b;
+	aro_arrange(s);
+}
+
 static void run_action(struct aro_server *s, const struct q_bind *b)
 {
 	struct aro_view *f = s->focused;
@@ -2983,7 +3214,11 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	}
 
-	/* the directional three, which all need a focused tiled window */
+	/* the directional three; a floating window has its own */
+	if (f && f->floating && !f->fullscreen && f->output) {
+		float_directional(s, f, b->action, (ly_edge)b->num);
+		return;
+	}
 	if (!f || !f->node || !f->output)
 		return;
 
@@ -3308,7 +3543,15 @@ static struct aro_view *view_at(struct aro_server *s, double lx, double ly,
 	struct wlr_scene_tree *tree = node->parent;
 	while (tree && !tree->node.data)
 		tree = tree->node.parent;
-	return tree ? tree->node.data : NULL;
+	struct aro_view *v = tree ? tree->node.data : NULL;
+
+	/* a workspace sliding out is drawn, not there: clicking it would
+	 * focus a window on a workspace nobody is looking at */
+	if (v && !view_visible(v)) {
+		*surface = NULL;
+		return NULL;
+	}
+	return v;
 }
 
 static void pointer_motion_common(struct aro_server *s, uint32_t time)
@@ -4239,6 +4482,7 @@ static void new_xwayland_surface(struct wl_listener *l, void *data)
 	v->destroy.notify = xwl_destroy;
 	wl_signal_add(&xsurface->events.destroy, &v->destroy);
 
+	v->id = ++s->next_view_id;
 	wl_list_insert(&s->views, &v->link);
 }
 
@@ -4387,6 +4631,28 @@ static void config_reload(struct aro_server *s)
 
 	for (int i = 0; i < s->cfg.nexec_always; i++)
 		config_spawn(s->cfg.exec_always[i]);
+}
+
+/* ── exported for ipc.c ────────────────────────────────────────────────── */
+
+void aro_run_action(struct aro_server *s, const struct q_bind *b)
+{
+	run_action(s, b);
+}
+
+void aro_config_reload(struct aro_server *s)
+{
+	config_reload(s);
+}
+
+ly_box aro_view_box(struct aro_view *v)
+{
+	return view_target(v);
+}
+
+const char *aro_view_type(struct aro_view *v)
+{
+	return view_type(v);
 }
 
 /* watch config directory */
@@ -4768,6 +5034,9 @@ int main(int argc, char *argv[])
 	setenv("XDG_CURRENT_DESKTOP", "aro", false);
 	wlr_log(WLR_INFO, "aro running on %s", socket);
 
+	/* aroctl; before autostart, so every child inherits ARO_SOCKET */
+	ipc_init(&s, socket);
+
 	/* spawn after environment is ready */
 	config_watch_start(&s);
 	notify_config_errors(&s);
@@ -4783,6 +5052,9 @@ int main(int argc, char *argv[])
 		config_spawn(startup);
 
 	wl_display_run(s.display);
+
+	/* first: its connections are event sources on the loop */
+	ipc_finish(&s);
 
 	/* teardown order matters */
 	wl_display_destroy_clients(s.display);

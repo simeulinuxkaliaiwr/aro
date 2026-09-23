@@ -15,6 +15,13 @@ enum q_header {
 	Q_HEADER_AUTO,
 };
 
+/* workspace switch animation */
+enum q_slide {
+	Q_SLIDE_HORIZONTAL = 0,
+	Q_SLIDE_VERTICAL,
+	Q_SLIDE_OFF,
+};
+
 enum q_layout {
 	Q_LAYOUT_MANUAL = 0,
 	Q_LAYOUT_DWINDLE,
@@ -91,6 +98,7 @@ struct q_theme {
 	double float_scale;
 
 	int anim_ms, anim_fs_ms, anim_focus_ms, drop_ms;
+	int ws_slide_ms;                /* 0 = no slide */
 	double open_scale;
 
 	int drag_tear, resize_zone;
@@ -120,6 +128,7 @@ struct aro_config {
 	bool confirm_quit;      /* ask before the quit bind ends the session */
 	enum q_layout layout;
 	enum q_header header;
+	enum q_slide ws_slide;  /* how a workspace switch moves */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;
@@ -147,6 +156,11 @@ struct aro_config {
 
 /* defaults + built-in bindings */
 void config_defaults(struct aro_config *c);
+
+/* the action half of a bind line; also what IPC dispatch uses.
+ * arg may be NULL; for Q_SPAWN the command is arg itself */
+bool config_parse_action(const char *name, const char *arg,
+                         enum q_action *action, int *num);
 
 /* load config; bad lines are reported and skipped */
 bool config_load(struct aro_config *c, const char *path);
