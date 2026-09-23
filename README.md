@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OWNER/aro/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/OWNER/aro/build.yml?branch=main&label=build&labelColor=12161d"></a>
+  <a href="https://github.com/simeulinuxkaliaiwr/aro/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/simeulinuxkaliaiwr/aro/build.yml?branch=main&label=build&labelColor=12161d"></a>
   <a href="LICENSE"><img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-222a35?labelColor=12161d"></a>
   <img alt="wlroots 0.20" src="https://img.shields.io/badge/wlroots-0.20-222a35?labelColor=12161d">
   <img alt="written in C" src="https://img.shields.io/badge/written_in-C-222a35?labelColor=12161d">
