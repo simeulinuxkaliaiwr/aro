@@ -301,8 +301,10 @@ static void cmd_workspaces(struct req *r)
 				sb_puts(b, "\"output\":");
 				sb_json_str(b, o->wlr_output->name);
 				sb_printf(b, ",\"index\":%d,\"windows\":%d,"
+				          "\"layout\":\"%s\","
 				          "\"visible\":%s,\"focused\":%s}",
 				          i + 1, n,
+				          config_layout_name(aro_ws_layout(o, i)),
 				          i == o->cur_ws ? "true" : "false",
 				          o == fo && i == o->cur_ws ? "true" : "false");
 			}
@@ -320,7 +322,7 @@ static void cmd_workspaces(struct req *r)
 	w += 2;
 
 	sb_pad(b, "OUTPUT", w);
-	sb_puts(b, "WS  WINDOWS  STATE\n");
+	sb_puts(b, "WS  WINDOWS  LAYOUT   STATE\n");
 	wl_list_for_each(o, &s->outputs, link) {
 		for (int i = 0; i < ARO_MAX_WS; i++) {
 			int n = ws_count(s, o, i);
@@ -328,11 +330,12 @@ static void cmd_workspaces(struct req *r)
 				continue;
 			const char *state = i != o->cur_ws ? ""
 			                  : o == fo ? "focused" : "visible";
+			const char *lay = config_layout_name(aro_ws_layout(o, i));
 			sb_pad(b, o->wlr_output->name, w);
 			if (*state)
-				sb_printf(b, "%-4d%-9d%s\n", i + 1, n, state);
+				sb_printf(b, "%-4d%-9d%-9s%s\n", i + 1, n, lay, state);
 			else
-				sb_printf(b, "%-4d%d\n", i + 1, n);
+				sb_printf(b, "%-4d%-9d%s\n", i + 1, n, lay);
 		}
 	}
 }

@@ -177,8 +177,7 @@ struct aro_output {
 
 	ly_node *ws[ARO_MAX_WS];     /* one tree per workspace, this output */
 	int cur_ws;
-	/* the layout action's choice for each workspace here;
-	 * Q_LAYOUT_INHERIT = what the config says (config_ws_layout) */
+	/* runtime layout per workspace; Q_LAYOUT_INHERIT = config */
 	int ws_layout[ARO_MAX_WS];
 
 	/*
@@ -298,7 +297,7 @@ struct aro_server {
 
   	/* parked workspaces: kept when the last output disappears */
 	ly_node *orphan_ws[ARO_MAX_WS];
-	int orphan_ws_layout[ARO_MAX_WS];       /* aro_output.ws_layout, parked */
+	int orphan_ws_layout[ARO_MAX_WS];
 	int orphan_cur_ws;
 	bool parked;
 
@@ -395,7 +394,7 @@ void aro_config_reload(struct aro_server *s);
 /* where the frame is going (view_target): output box, fbox or leaf box */
 ly_box aro_view_box(struct aro_view *v);
 const char *aro_view_type(struct aro_view *v);
-/* the layout new windows on that workspace get: override, else config */
+/* effective workspace layout */
 enum q_layout aro_ws_layout(struct aro_output *o, int ws);
 
 /* shell wrappers */

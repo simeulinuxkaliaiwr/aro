@@ -21,6 +21,7 @@
 #include "theme.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -207,8 +208,7 @@ static ly_node **view_ws_root(struct aro_view *v)
 	return &v->server->orphan_ws[v->workspace];
 }
 
-/* the layout workspace ws of o uses: the layout action's choice, else the
- * config's (its own `workspace =` line, else `layout`) */
+/* runtime override, else config */
 static enum q_layout ws_layout(struct aro_server *s, struct aro_output *o,
                                int ws)
 {
@@ -218,21 +218,7 @@ static enum q_layout ws_layout(struct aro_server *s, struct aro_output *o,
 	return config_ws_layout(&s->cfg, ws);
 }
 
-/*
- * Put v into workspace ws of o. Every path that adds a window to a tree
- * comes through here except a drop, which names its own slot, so this is
- * the one place a workspace's layout gets a say.
- *
- * target NULL means "nowhere in particular": the first leaf in manual, as
- * it always was, and the newest (last) leaf in dwindle, so the spiral
- * carries on instead of restarting in the corner. forced means dir is what
- * the user asked for (mod+v / mod+s) and dwindle does not overrule it.
- *
- * The tree is arranged afterwards even when it is not on screen, because
- * aro_arrange only arranges visible workspaces and dwindle reads the
- * target's box: a hidden tree would otherwise hand the next insert a
- * stale or 0x0 box and the wrong axis.
- */
+/* insert into a workspace tree; forced dir beats dwindle */
 static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
                             int ws, struct aro_view *v, ly_node *target,
                             ly_dir dir, bool forced)
@@ -244,12 +230,14 @@ static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
 		leaf = *root = ly_leaf(v);
 	} else {
 		bool dwindle = ws_layout(s, o, ws) == Q_LAYOUT_DWINDLE;
+		/* dwindle continues the spiral */
 		if (!target)
 			target = dwindle ? ly_last_leaf(*root) : ly_first_leaf(*root);
 		if (dwindle && !forced)
 			dir = target->box.w > target->box.h ? LY_ROW : LY_COL;
 		leaf = ly_split(root, target, dir, v);
 	}
+	/* hidden trees too, so dwindle reads real boxes */
 	if (leaf)
 		ly_arrange(*root, usable_area(o), &(ly_metrics){
 			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap,
@@ -1734,8 +1722,7 @@ static void view_map(struct wl_listener *l, void *data)
 		                  s->focused->workspace == ws &&
 		                  s->focused->node
 		                ? s->focused->node : NULL;
-		/* a pending mod+v/mod+s is only for a window opening where you
-		 * are looking; one a rule sends elsewhere leaves it alone */
+		/* pending split only applies here */
 		v->node = tree_insert(s, o, ws, v, target,
 		                      here ? s->pending_split : LY_ROW,
 		                      here && s->split_forced);
@@ -2554,8 +2541,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 		wlr_log(WLR_INFO, "last output gone — parking its workspaces");
 	}
 	o->cur_ws = 0;
-	/* an output switched off and on again starts empty, and so do its
-	 * choices; rehomed windows follow the survivor's layout */
+	/* reset layout overrides */
 	for (int i = 0; i < ARO_MAX_WS; i++)
 		o->ws_layout[i] = Q_LAYOUT_INHERIT;
 
@@ -3192,13 +3178,7 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 	aro_arrange(s);
 }
 
-/*
- * The layout action: the focused output's current workspace only. It
- * changes how the NEXT windows are placed and leaves the ones already there
- * alone — re-inserting them would throw away every ratio set by hand.
- * Landing back on what the config says drops the override, so the
- * workspace follows the file again from then on.
- */
+/* set current workspace layout; matching config clears override */
 static void layout_set(struct aro_server *s, int want)
 {
 	struct aro_output *o = aro_focused_output(s);
@@ -3215,7 +3195,6 @@ static void layout_set(struct aro_server *s, int want)
 	                 ? Q_LAYOUT_INHERIT : (int)next;
 	wlr_log(WLR_INFO, "layout: workspace %d on %s is %s", ws + 1,
 	        o->wlr_output->name, config_layout_name(next));
-	/* there is nothing else on screen that says which layout is in use */
 	if (next != cur)
 		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
 		       config_layout_name(next));
@@ -4648,7 +4627,7 @@ static void config_reload(struct aro_server *s)
 	config_defaults(&nc);
 	config_load(&nc, s->cfg_path);
 
-	/* what each workspace's layout was per the file, before the swap */
+	/* old layouts, for changed-only reset */
 	enum q_layout was[ARO_MAX_WS];
 	for (int i = 0; i < ARO_MAX_WS; i++)
 		was[i] = config_ws_layout(&s->cfg, i);
@@ -4656,9 +4635,7 @@ static void config_reload(struct aro_server *s)
 	config_finish(&s->cfg);
 	s->cfg = nc;
 
-	/* changed-only, like rules and monitor blocks: where the file now
-	 * says something different about a workspace, the file wins over
-	 * the layout action; saving the file for a colour changes nothing */
+	/* changed config layout wins over runtime override */
 	for (int i = 0; i < ARO_MAX_WS; i++) {
 		if (config_ws_layout(&s->cfg, i) == was[i])
 			continue;
@@ -4822,23 +4799,84 @@ static void config_watch_stop(struct aro_server *s)
 
 /* ── main ──────────────────────────────────────────────────────────────── */
 
+/* aro -c: 0 ok, 1 errors, 2 unreadable */
+static int config_check(const char *arg)
+{
+	char *owned = arg ? NULL : config_path();
+	const char *path = arg ? arg : owned;
+	if (!path) {
+		fprintf(stderr, "aro: no config path (HOME and XDG_CONFIG_HOME "
+		        "are both unset)\n");
+		return 2;
+	}
+
+	/* missing file is an error here */
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		fprintf(stderr, "aro: %s: %s\n", path, strerror(errno));
+		free(owned);
+		return 2;
+	}
+	fclose(f);
+
+	struct aro_config c;
+	config_defaults(&c);
+	config_load(&c, path);
+
+	/* file:line: message */
+	for (int i = 0; i < c.nerrors; i++) {
+		const char *e = c.errors[i];
+		if (!strncmp(e, "config:", 7))
+			fprintf(stderr, "%s:%s\n", path, e + 7);
+		else
+			fprintf(stderr, "%s: %s\n", path, e);
+	}
+	int n = c.nerrors;
+	if (!n)
+		printf("%s: ok\n", path);
+	config_finish(&c);
+	free(owned);
+	return n ? 1 : 0;
+}
+
+static void usage(const char *argv0)
+{
+	fprintf(stderr,
+	        "usage: %s [-s startup-command] [-m logo|alt]\n"
+	        "       %s -c [config-file]    check a config and exit\n",
+	        argv0, argv0);
+}
+
 int main(int argc, char *argv[])
 {
-	wlr_log_init(WLR_DEBUG, NULL);
-
 	const char *startup = NULL;
 	const char *modkey_override = NULL;      /* -m beats the config file */
+	bool check = false;
+	const char *check_path = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
 			startup = argv[++i];
 		else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
 			modkey_override = argv[++i];
-		else {
-			fprintf(stderr,
-			        "usage: %s [-s startup-command] [-m logo|alt]\n", argv[0]);
+		else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--check")) {
+			check = true;
+			if (i + 1 < argc && argv[i + 1][0] != '-')
+				check_path = argv[++i];
+		} else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+			usage(argv[0]);
+			return 0;
+		} else {
+			usage(argv[0]);
 			return 1;
 		}
 	}
+
+	if (check) {
+		wlr_log_init(WLR_SILENT, NULL);
+		return config_check(check_path);
+	}
+
+	wlr_log_init(WLR_DEBUG, NULL);
 
 	struct aro_server s = { 0 };
 	config_defaults(&s.cfg);

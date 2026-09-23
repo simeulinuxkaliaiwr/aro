@@ -523,11 +523,7 @@ static void rule_free(struct q_rule *r)
 	r->app_id = r->title = r->type = NULL;
 }
 
-/*
- * `workspace = 3 layout dwindle`. Words after the number are settings for
- * that workspace; layout is the only one so far. The number means the
- * same workspace on every output, as `mod+3` does.
- */
+/* workspace = N layout X */
 static void parse_workspace(struct aro_config *c, int lineno, char *value)
 {
 	bool bad_quote = false;
@@ -1125,7 +1121,7 @@ bool config_load(struct aro_config *c, const char *path)
 		} else if (!strcasecmp(key, "layout")) {
 			ok = parse_layout(value, &c->layout);
 		} else if (!strcasecmp(key, "workspace")) {
-			parse_workspace(c, lineno, value);  /* reports its own errors */
+			parse_workspace(c, lineno, value);
 			continue;
 		} else if (!strcasecmp(key, "header")) {
 			if (!strcasecmp(value, "always"))

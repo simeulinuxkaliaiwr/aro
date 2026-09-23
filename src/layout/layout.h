@@ -51,7 +51,7 @@ void ly_arrange(ly_node *root, ly_box area, const ly_metrics *m);
 
 /* queries */
 ly_node *ly_first_leaf(ly_node *n);
-ly_node *ly_last_leaf(ly_node *n);   /* the newest leaf of a dwindle spiral */
+ly_node *ly_last_leaf(ly_node *n);
 int      ly_collect(ly_node *root, ly_node **out, int max);   /* leaves, in tree order */
 int      ly_count(ly_node *root);
 
