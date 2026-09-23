@@ -39,6 +39,13 @@ if get_option('compositor')
   endif
 endif
 
+# === wallpaper client: probed early, the scanner below depends on it ===
+# aropaper is a plain Wayland client and builds without the compositor.
+wallpaper_opt = get_option('wallpaper')
+gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0', required: wallpaper_opt)
+wl_client_dep = dependency('wayland-client', required: wallpaper_opt)
+build_wallpaper = gdk_pixbuf_dep.found() and wl_client_dep.found()
+
 inc = include_directories(
   'src',
   'src/layout',
@@ -60,9 +67,8 @@ executable('aro-layout', 'src/layout/layout_harness.c',
   install: false,
 )
 
-# === compositor ===
-# example: meson setup build -Dcompositor=true -Deffects=true
-if get_option('compositor')
+# === wayland-scanner: the compositor and aropaper both generate code ===
+if get_option('compositor') or build_wallpaper
   wayland_protos = dependency('wayland-protocols')
   wl_protocol_dir = wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
   wayland_scanner_dep = dependency('wayland-scanner', native: true)
@@ -70,7 +76,11 @@ if get_option('compositor')
     wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'),
     native: true,
   )
+endif
 
+# === compositor ===
+# example: meson setup build -Dcompositor=true -Deffects=true
+if get_option('compositor')
   proto_xml = [
     wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
     # wlroots' own headers include these two; they are not shipped
@@ -134,6 +144,7 @@ if get_option('compositor')
     'src/compositor/ime.c',
     'src/compositor/ipc.c',
     'src/compositor/lock.c',
+    'src/compositor/wallpaper.c',
     'src/ui/ui.c',
     'src/ui/bar.c',
     'src/ui/notify.c',
@@ -151,6 +162,52 @@ if get_option('compositor')
 
   # talks to a running aro over its socket; no wlroots, no libwayland
   executable('aroctl', 'src/aroctl/aroctl.c',
+    install: true,
+  )
+endif
+
+# === wallpaper ===
+# the art installs either way: the PNGs are useful to swaybg users too
+wallpaper_dir = get_option('prefix') / get_option('datadir') / 'backgrounds' / 'aro'
+install_data(
+  'data/wallpaper/aro-wallpaper.svg',
+  'data/wallpaper/aro-wallpaper-1920x1080.png',
+  'data/wallpaper/aro-wallpaper-2560x1440.png',
+  'data/wallpaper/aro-wallpaper-3840x2160.png',
+  install_dir: wallpaper_dir,
+)
+
+if build_wallpaper
+  # client side: headers and the interface tables (libwayland-client has
+  # only the core ones). layer shell refers to xdg_popup, hence xdg-shell.
+  paper_xml = [
+    wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
+    wl_protocol_dir / 'stable/viewporter/viewporter.xml',
+    wl_protocol_dir / 'staging/fractional-scale/fractional-scale-v1.xml',
+    'protocols/wlr-layer-shell-unstable-v1.xml',
+  ]
+  paper_proto = []
+  foreach xml : paper_xml
+    paper_proto += custom_target(
+      input: xml,
+      output: '@BASENAME@-client-protocol.h',
+      command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+    )
+    paper_proto += custom_target(
+      input: xml,
+      output: '@BASENAME@-protocol.c',
+      command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+    )
+  endforeach
+
+  executable('aropaper',
+    ['src/aropaper/aropaper.c'] + paper_proto,
+    dependencies: [
+      wl_client_dep,
+      gdk_pixbuf_dep,
+      cc.find_library('m', required: false),  # ceil
+    ],
+    c_args: ['-DARO_WALLPAPER_DIR="@0@"'.format(wallpaper_dir)],
     install: true,
   )
 endif

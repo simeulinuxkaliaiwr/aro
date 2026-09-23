@@ -21,6 +21,7 @@
 #include "switcher.h"
 #include "layout.h"
 #include "text.h"
+#include "wallpaper.h"
 
 struct wlr_scene_tree;
 struct wlr_scene_rect;
@@ -300,6 +301,9 @@ struct aro_server {
 	struct aro_config cfg;
 
 	struct wl_event_source *clock_timer;
+
+	/* aropaper, run as the `wallpaper` key says */
+	struct aro_wallpaper wallpaper;
 
 	/* aroctl: ipc.c; NULL if the socket could not be made */
 	struct aro_ipc *ipc;

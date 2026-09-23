@@ -4,3 +4,5 @@ option('effects', type: 'boolean', value: true,
        description: 'Use SceneFX for rounded corners and shadows instead of plain wlr_scene')
 option('xwayland', type: 'feature', value: 'auto',
        description: 'X11 client support via wlr_xwayland')
+option('wallpaper', type: 'feature', value: 'auto',
+       description: 'aropaper, the wallpaper client (needs gdk-pixbuf and wayland-client)')

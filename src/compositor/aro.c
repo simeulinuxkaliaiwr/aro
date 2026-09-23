@@ -4578,6 +4578,12 @@ static void notify_config_errors(struct aro_server *s)
 		notify(s, NOTIFY_ERROR, "...and %d more config problems", n - cap);
 }
 
+/* wallpaper.c's problems, as toasts */
+static void wallpaper_report(void *data, const char *msg)
+{
+	notify(data, NOTIFY_ERROR, "%s", msg);
+}
+
 static void config_reload(struct aro_server *s)
 {
 	struct aro_config nc;
@@ -4628,6 +4634,9 @@ static void config_reload(struct aro_server *s)
 
 	/* reapply monitor blocks after errors */
 	monitors_reapply(s);
+
+	/* after the error toasts are redrawn, or they would clear its own */
+	wallpaper_apply(&s->wallpaper, &s->cfg);
 
 	for (int i = 0; i < s->cfg.nexec_always; i++)
 		config_spawn(s->cfg.exec_always[i]);
@@ -5044,6 +5053,10 @@ int main(int argc, char *argv[])
 	/* retry failed monitor blocks */
 	monitors_reapply(&s);
 
+	/* before exec lines: the wallpaper is the first thing to come up */
+	wallpaper_init(&s.wallpaper, s.loop, wallpaper_report, &s);
+	wallpaper_apply(&s.wallpaper, &s.cfg);
+
 	for (int i = 0; i < s.cfg.nexec; i++)
 		config_spawn(s.cfg.exec[i]);
 	for (int i = 0; i < s.cfg.nexec_always; i++)
@@ -5055,6 +5068,8 @@ int main(int argc, char *argv[])
 
 	/* first: its connections are event sources on the loop */
 	ipc_finish(&s);
+	/* likewise its pidfds; and aropaper goes before the clients do */
+	wallpaper_finish(&s.wallpaper);
 
 	/* teardown order matters */
 	wl_display_destroy_clients(s.display);

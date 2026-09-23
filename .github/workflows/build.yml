@@ -13,14 +13,20 @@ jobs:
           pacman -Syu --noconfirm --needed \
             git meson ninja pkgconf \
             wayland wayland-protocols wlroots0.20 \
-            libxkbcommon pixman pango cairo
+            libxkbcommon pixman pango cairo \
+            gdk-pixbuf2
       - uses: actions/checkout@v4
       # scenefx isn't in the Arch repos, so we build without it.
       # this also verifies that the plain wlr_scene fallback in scene.h still works.
+      # wallpaper=enabled: with auto, a missing gdk-pixbuf would skip aropaper
+      # silently and CI would stay green without ever building it.
       - name: build
         run: |
-          meson setup build -Deffects=false
+          meson setup build -Deffects=false -Dwallpaper=enabled
           ninja -C build
       # the layout tree is pure C (no wlroots deps), so we can run the test harness here.
       - name: layout harness
         run: ./build/aro-layout
+      # links and starts; drawing needs a compositor, which CI doesn't have
+      - name: aropaper
+        run: ./build/aropaper --version

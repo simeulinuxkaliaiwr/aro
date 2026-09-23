@@ -104,6 +104,9 @@
 
 /* confirm quit default */
 #define TH_CONFIRM_QUIT 1
+
+/* our bar along the bottom; false leaves the space to windows */
+#define TH_BAR          1
 #define TH_RESIZE_STEP  0.04    /* one press of the resize bind */
 
 #endif

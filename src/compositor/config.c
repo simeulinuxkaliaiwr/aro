@@ -316,6 +316,8 @@ void config_defaults(struct aro_config *c)
 	c->workspaces = TH_WORKSPACES;
 	c->focus_follows_mouse = TH_FOCUS_FOLLOWS_MOUSE;
 	c->confirm_quit = TH_CONFIRM_QUIT;
+	c->bar = TH_BAR;
+	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
 	c->header = Q_HEADER_ALWAYS;
 	c->ws_slide = Q_SLIDE_HORIZONTAL;
@@ -1073,6 +1075,22 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->focus_follows_mouse);
 		} else if (!strcasecmp(key, "confirm_quit")) {
 			ok = parse_bool(value, &c->confirm_quit);
+		} else if (!strcasecmp(key, "bar")) {
+			ok = parse_bool(value, &c->bar);
+		} else if (!strcasecmp(key, "wallpaper")) {
+			/* the keywords are words, not paths: `none` never means a
+			 * file called none. ./none does, if anyone needs it. */
+			if (!strcasecmp(value, "auto")) {
+				c->wallpaper = Q_WALLPAPER_AUTO;
+			} else if (!strcasecmp(value, "none")) {
+				c->wallpaper = Q_WALLPAPER_NONE;
+			} else if (!*value) {
+				ok = false;
+			} else {
+				ok = set_str(&c->wallpaper_file, value);
+				if (ok)
+					c->wallpaper = Q_WALLPAPER_FILE;
+			}
 		} else if (!strcasecmp(key, "exec")) {
 			ok = list_add(&c->exec, &c->nexec, value);
 		} else if (!strcasecmp(key, "exec_always")) {
@@ -1100,6 +1118,10 @@ bool config_load(struct aro_config *c, const char *path)
 	if (in_block)
 		config_err(c, block_line, "monitor block has no '}'");
 
+	/* no bar takes no room; see aro_config.bar */
+	if (!c->bar)
+		c->theme.bar_h = 0;
+
 	fclose(f);
 	free(owned);
 	return true;
@@ -1114,6 +1136,7 @@ void config_finish(struct aro_config *c)
 	free(c->xkb_options);
 	free(c->xkb_model);
 	free(c->xkb_rules);
+	free(c->wallpaper_file);
 	clear_binds(c);
 	free(c->binds);
 	for (int i = 0; i < c->nrules; i++)

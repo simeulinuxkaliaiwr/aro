@@ -60,8 +60,12 @@ void bar_place(struct aro_bar *b, int x, int y, int w, float scale)
 	b->w = w;
 	b->scale = scale > 0 ? scale : 1.0f;
 
+	/* bar_h is 0 with `bar = false`: hidden, not destroyed, so turning it
+	 * back on is just this call again on the next reload */
+	wlr_scene_node_set_enabled(&b->tree->node, th->bar_h > 0);
 	wlr_scene_node_set_position(&b->tree->node, x, y);
-	wlr_scene_rect_set_size(b->bg, w, th->bar_h);
+	if (th->bar_h > 0)
+		wlr_scene_rect_set_size(b->bg, w, th->bar_h);
 }
 
 /* occupied = tree exists or mapped view exists */
@@ -84,7 +88,8 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	struct aro_server *s = o->server;
 	const struct q_theme *th = &s->cfg.theme;
 
-	if (!b->tree || b->w <= 0)
+	/* hidden: skip the text passes, the clock ticks here every minute */
+	if (!b->tree || b->w <= 0 || th->bar_h <= 0)
 		return;
 
 	const int mid = th->bar_h / 2;
@@ -177,7 +182,8 @@ void bar_retheme(struct aro_bar *b)
 
 	ui_color(th->bar_bg, c);
 	wlr_scene_rect_set_color(b->bg, c);
-	wlr_scene_rect_set_size(b->bg, b->w, th->bar_h);
+	if (th->bar_h > 0)
+		wlr_scene_rect_set_size(b->bg, b->w, th->bar_h);
 
 	for (int i = 0; i < b->nws; i++) {
 		ui_color(th->accent, c);

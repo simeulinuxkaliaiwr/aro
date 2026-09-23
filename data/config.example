@@ -57,6 +57,16 @@ monitor * {
 # if multiple blocks match, they all apply. the bottom-most one wins for conflicts.
 # aro won't let you turn off your only active monitor via config.
 
+# === wallpaper and bar ===
+# auto draws aro's own wallpaper. a path draws that instead (png, jpeg, svg;
+# ~ works). none draws nothing: use it to run swaybg or similar yourself.
+# aro runs aropaper for you and restarts it when this line changes.
+wallpaper = auto
+# wallpaper = ~/pictures/wallpaper.jpg
+
+# false removes the bar and gives its space to windows (running waybar, say).
+bar = true
+
 # === spacing ===
 gaps = 9                    # between tiled windows
 outer_gaps = 9              # between the layout and screen edges
@@ -67,7 +77,7 @@ header_height = 26          # set to 0 to hide window titles
 # always: draw our header even if the app draws its own (results in two titlebars).
 # auto: hide our header if the app uses CSD.
 header = always
-bar_height = 30
+bar_height = 30             # 0 is the same as bar = false
 bar_padding = 12
 text_padding = 10
 
@@ -134,7 +144,6 @@ resize_step = 0.04          # resize amount per keypress
 # exec        runs once on startup.
 # exec_always runs on startup AND on every config reload (doesn't kill old instances).
 #
-# exec = swaybg -i ~/wallpaper.png
 # exec_always = pkill waybar; waybar
 
 # fix for xdg-desktop-portal on systemd:

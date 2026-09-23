@@ -27,6 +27,13 @@ enum q_layout {
 	Q_LAYOUT_DWINDLE,
 };
 
+/* `wallpaper = auto | none | <path>`; aro runs aropaper (wallpaper.c) */
+enum q_wallpaper {
+	Q_WALLPAPER_AUTO = 0,   /* aro's own art */
+	Q_WALLPAPER_NONE,       /* nothing: swaybg, or a plain background */
+	Q_WALLPAPER_FILE,       /* wallpaper_file */
+};
+
 enum q_action {
 	Q_NONE = 0,
 	Q_SPAWN,        /* arg: shell command */
@@ -129,6 +136,17 @@ struct aro_config {
 	enum q_layout layout;
 	enum q_header header;
 	enum q_slide ws_slide;  /* how a workspace switch moves */
+
+	/*
+	 * `bar = false` removes our bar. It is carried out by setting
+	 * theme.bar_h to 0 once the file is read, so everything that makes
+	 * room for the bar stops doing so without knowing why. bar_height = 0
+	 * means the same thing.
+	 */
+	bool bar;
+
+	enum q_wallpaper wallpaper;
+	char *wallpaper_file;   /* Q_WALLPAPER_FILE only; owned, `~` unexpanded */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;
