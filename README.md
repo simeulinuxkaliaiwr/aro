@@ -55,8 +55,19 @@ On Arch, from the AUR:
 paru -S aro-git   # or: yay -S aro-git
 ```
 
-It builds the latest commit and pulls in SceneFX itself. Elsewhere, build
-it from source as below.
+It builds the latest commit and pulls in SceneFX itself.
+
+On Gentoo, from [aro-overlay](https://github.com/simeulinuxkaliaiwr/aro-overlay):
+
+```sh
+eselect repository add aro git https://github.com/simeulinuxkaliaiwr/aro-overlay.git
+emaint sync -r aro
+echo "gui-wm/aro **" >> /etc/portage/package.accept_keywords/aro
+emerge -av gui-wm/aro
+```
+
+Rounded corners need `USE=effects` and SceneFX from GURU; the overlay's
+README has the details. Elsewhere, build it from source as below.
 
 ## Building
 
