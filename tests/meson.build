@@ -8,6 +8,9 @@ test_proto = []
 foreach xml : [
   wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
   wl_protocol_dir / 'staging/ext-workspace/ext-workspace-v1.xml',
+  wl_protocol_dir / 'unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml',
+  wl_protocol_dir / 'staging/security-context/security-context-v1.xml',
+  wl_protocol_dir / 'staging/xdg-dialog/xdg-dialog-v1.xml',
   '../protocols/wlr-layer-shell-unstable-v1.xml',
 ]
   test_proto += custom_target(
@@ -28,7 +31,7 @@ test_common = static_library('aro-test-common',
 )
 
 test_clients = []
-foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window']
+foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox']
   test_clients += executable(name, 'clients' / name + '.c', test_proto,
     link_with: test_common,
     dependencies: test_client_dep,

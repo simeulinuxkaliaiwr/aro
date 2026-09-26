@@ -22,7 +22,7 @@ jobs:
             git meson ninja pkgconf \
             wayland wayland-protocols wlroots0.20 \
             libxkbcommon pixman pango cairo \
-            gdk-pixbuf2 grim
+            gdk-pixbuf2 grim wtype
       - uses: actions/checkout@v4
       - name: build
         run: |

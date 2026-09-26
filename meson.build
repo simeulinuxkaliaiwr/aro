@@ -153,6 +153,7 @@ if get_option('compositor')
     'src/compositor/aro.c',
     'src/compositor/config.c',
     'src/compositor/extws.c',
+    'src/compositor/protocols.c',
     'src/compositor/idle.c',
     'src/compositor/ime.c',
     'src/compositor/ipc.c',

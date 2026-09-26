@@ -1,10 +1,12 @@
-/* window: opens N windows, keeps them for HOLD seconds, then closes them one by one */
+/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" marks the first one a modal dialog */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
+#include "xdg-dialog-v1-client-protocol.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define MAX_WINDOWS 16
@@ -19,6 +21,18 @@ struct win {
 
 static struct globals g;
 static struct win wins[MAX_WINDOWS];
+static struct xdg_wm_dialog_v1 *dialogs;
+
+static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t v)
+{
+	(void)d; (void)v;
+	if (!strcmp(iface, xdg_wm_dialog_v1_interface.name))
+		dialogs = wl_registry_bind(r, name, &xdg_wm_dialog_v1_interface, 1);
+}
+
+static void reg_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
+
+static const struct wl_registry_listener reg = { reg_global, reg_remove };
 
 static void xs_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
@@ -52,9 +66,14 @@ int main(int argc, char **argv)
 {
 	int n = argc > 1 ? atoi(argv[1]) : 3;
 	int hold = argc > 2 ? atoi(argv[2]) : 3;
+	int modal = argc > 3 && !strcmp(argv[3], "modal");
 	if (n < 1 || n > MAX_WINDOWS)
-		fail("usage: window N HOLD, N from 1 to %d", MAX_WINDOWS);
+		fail("usage: window N HOLD [modal], N from 1 to %d", MAX_WINDOWS);
 	connect_globals(&g);
+	wl_registry_add_listener(wl_display_get_registry(g.dpy), &reg, NULL);
+	roundtrip(&g);
+	if (modal && !dialogs)
+		fail("aro does not offer xdg-dialog");
 
 	for (int i = 0; i < n; i++) {
 		struct win *w = &wins[i];
@@ -64,6 +83,8 @@ int main(int argc, char **argv)
 		w->top = xdg_surface_get_toplevel(w->xs);
 		xdg_toplevel_add_listener(w->top, &top_listener, w);
 		xdg_toplevel_set_app_id(w->top, "aro-test");
+		if (modal && i == 0)
+			xdg_dialog_v1_set_modal(xdg_wm_dialog_v1_get_xdg_dialog(dialogs, w->top));
 		wl_surface_commit(w->surf);
 		roundtrip(&g);
 	}

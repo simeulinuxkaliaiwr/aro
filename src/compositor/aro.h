@@ -14,6 +14,7 @@
 #include "bar.h"
 #include "config.h"
 #include "extws.h"
+#include "protocols.h"
 #include "ghost.h"
 #include "idle.h"
 #include "ime.h"
@@ -298,6 +299,11 @@ struct aro_server {
 	struct wlr_foreign_toplevel_manager_v1 *ftl_mgr;
 	struct wlr_ext_foreign_toplevel_list_v1 *ext_ftl_list;
 	struct wlr_ext_workspace_manager_v1 *extws_mgr;  /* extws.c; NULL if unavailable */
+	/* protocols.c: apps that take aro's shortcuts while focused */
+	struct wlr_keyboard_shortcuts_inhibit_manager_v1 *inhibit_mgr;
+	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
+	struct wl_listener new_kb_inhibitor;
+	struct wl_list kb_inhibitors;
 	struct wl_listener extws_commit;
 	struct aro_view *ftl_activated;         /* last view reported focused */
 	struct wlr_virtual_keyboard_manager_v1 *virtual_kbd_mgr;

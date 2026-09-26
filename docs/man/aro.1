@@ -171,6 +171,13 @@ Quit, after asking.
 .TP
 .BR mod+drag ", " mod+right-drag
 Move or resize with the mouse; a tiled window tears out of the layout.
+.PP
+A focused program can ask for these keys itself, as virtual machines and
+remote desktops do; aro's bindings then pass to it.
+Clicking another window gives them back to aro, and switching to a text
+console with
+.B Ctrl+Alt+F1
+and so on always works.
 .SH REPORTING BUGS
 Attach the output of
 .B aroctl log \-\-old

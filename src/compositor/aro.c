@@ -83,6 +83,7 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #ifdef ARO_XWAYLAND
 #include <wlr/xwayland.h>
@@ -736,6 +737,7 @@ static void focus_apply(struct aro_server *s, struct aro_view *v);
 static void keyboard_focus_changed(struct aro_server *s)
 {
 	constraint_sync(s);
+	shortcuts_inhibit_sync(s);
 	ime_set_focus(s, s->seat->keyboard_state.focused_surface);
 }
 
@@ -841,9 +843,18 @@ static const char *xdg_app_id(struct aro_view *v)
 }
 
 /* xdg-shell has no window types; a toplevel with a parent is a dialog */
+/* a dialog has a parent, or says it is modal through xdg-dialog */
+static bool xdg_is_dialog(struct wlr_xdg_toplevel *t)
+{
+	if (!t)
+		return false;
+	struct wlr_xdg_dialog_v1 *d = wlr_xdg_dialog_v1_try_from_wlr_xdg_toplevel(t);
+	return t->parent || (d && d->modal);
+}
+
 static const char *xdg_type(struct aro_view *v)
 {
-	return v->toplevel && v->toplevel->parent ? "dialog" : "normal";
+	return xdg_is_dialog(v->toplevel) ? "dialog" : "normal";
 }
 
 /* float heuristics */
@@ -852,7 +863,7 @@ static bool xdg_wants_float(struct aro_view *v)
 	struct wlr_xdg_toplevel *t = v->toplevel;
 	if (!t)
 		return false;
-	if (t->parent)
+	if (xdg_is_dialog(t))
 		return true;
 
 	int minw = t->current.min_width, maxw = t->current.max_width;
@@ -3591,8 +3602,8 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 /* match bindings */
 static bool handle_bind(struct aro_server *s, uint32_t mods, xkb_keysym_t sym)
 {
-	/* let lock screen receive keys */
-	if (aro_locked(s))
+	/* let lock screen receive keys; an app that took the shortcuts gets them too */
+	if (aro_locked(s) || shortcuts_inhibited(s))
 		return false;
 
 	const uint32_t care = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
@@ -5410,6 +5421,7 @@ int main(int argc, char *argv[])
 		wlr_log(WLR_ERROR, "could not bind the renderer to the display");
 		return 1;
 	}
+	protocols_init(&s);
 
 	s.allocator = wlr_allocator_autocreate(s.backend, s.renderer);
 	if (!s.allocator) {
@@ -5731,6 +5743,7 @@ teardown:
 	wl_list_remove(&s.new_virtual_keyboard.link);
 	wl_list_remove(&s.new_virtual_pointer.link);
 	extws_finish(&s);
+	protocols_finish(&s);
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;
 

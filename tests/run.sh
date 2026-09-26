@@ -84,6 +84,27 @@ else
 fi
 ctl version > /dev/null && ok "aroctl answers" || bad "aroctl answers"
 
+# protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
+client globals > "$T/globals.out"
+for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 \
+	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1; do
+	grep -q "^$p " "$T/globals.out" && ok "offers $p" || bad "offers $p"
+done
+grep -q "^xwayland_shell_v1 " "$T/globals.out" && bad "xwayland_shell hidden from other clients" \
+	|| ok "xwayland_shell hidden from other clients"
+
+# a sandboxed app (Flatpak) keeps the basics but none of the privileged protocols
+client sandbox > "$T/sandbox.out" 2>&1 || bad "sandboxed client connects"
+for p in wl_compositor xdg_wm_base wl_seat; do
+	grep -qx "$p" "$T/sandbox.out" || bad "sandbox keeps $p"
+done
+for p in zwlr_screencopy_manager_v1 zwlr_layer_shell_v1 zwp_virtual_keyboard_manager_v1 \
+	zwlr_data_control_manager_v1 ext_session_lock_manager_v1; do
+	grep -qx "$p" "$T/sandbox.out" && bad "sandbox cannot see $p"
+done
+ok "sandboxed clients see only safe protocols"
+alive
+
 # 1. popups with no parent: this crashed aro on every waybar tooltip
 client popup-orphan > /dev/null && ok "parentless popups" || bad "parentless popups"
 alive
@@ -141,6 +162,52 @@ wait "$CW" || bad "window client exited with an error"
 n=$(ctl -j windows | grep -o '"id":' | wc -l)
 [ "$n" -eq 0 ] && ok "windows closed" || bad "windows closed: aroctl still sees $n"
 alive
+
+# 4a. a modal dialog floats even without a parent window; a plain window tiles
+client window 1 2 modal > "$T/modal.out" 2>&1 &
+CM=$!
+if wait_for "$T/modal.out" "1 windows open"; then
+	ctl windows | grep -q "floating.*aro-test" && ok "modal dialog floats" || bad "modal dialog floats"
+else
+	bad "modal dialog floats: it never opened"
+fi
+wait "$CM" || bad "modal client exited with an error"
+client window 1 2 > "$T/plain.out" 2>&1 &
+CM=$!
+if wait_for "$T/plain.out" "1 windows open"; then
+	ctl windows | grep -q "tiled.*aro-test" && ok "plain window tiles" || bad "plain window tiles"
+fi
+wait "$CM"
+alive
+
+# 4b. an app that takes the shortcuts gets them while focused, and only then
+focused_ws() { ctl workspaces | awk '$NF == "focused" { print $2 }'; }
+if command -v wtype > /dev/null; then
+	kb() { env -i PATH="$PATH" XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 wtype "$@"; }
+	kb -s 7000 -k Shift_L &
+	KB=$!
+	sleep 0.5
+	client inhibit 6 > "$T/inh.out" 2>&1 &
+	CI=$!
+	if wait_for "$T/inh.out" "^active"; then
+		ok "shortcut inhibitor active while focused"
+		kb -M logo -k 2 -m logo; sleep 0.3
+		[ "$(focused_ws)" = 1 ] && ok "super+2 went to the app" || bad "super+2 went to the app"
+		ctl dispatch workspace 2 > /dev/null; sleep 0.3
+		tail -n 1 "$T/inh.out" | grep -q "^inactive" && ok "inhibitor dropped when focus leaves" \
+			|| bad "inhibitor dropped when focus leaves"
+		kb -M logo -k 1 -m logo; sleep 0.3
+		[ "$(focused_ws)" = 1 ] && ok "super+1 works again" || bad "super+1 works again"
+	else
+		bad "shortcut inhibitor active while focused"
+	fi
+	wait "$CI" || bad "inhibit client exited with an error"
+	kill "$KB" 2> /dev/null
+	wait "$KB" 2> /dev/null
+	alive
+else
+	echo "skip  shortcut inhibiting (no wtype)"
+fi
 
 # 5. saving the config while running: the reload freed strings still in use
 before=$(grep -c "config reloaded" "$T/aro.log")
