@@ -298,6 +298,11 @@ struct aro_server {
 	struct wlr_seat *seat;
 	struct wlr_cursor *cursor;
 	struct wlr_xcursor_manager *xcursor_mgr;
+	char *xcursor_theme;            /* what xcursor_mgr loaded; NULL = default */
+	int xcursor_size;
+	/* the session's XCURSOR_THEME / XCURSOR_SIZE */
+	char *env_cursor_theme;
+	int env_cursor_size;
 
 	struct wl_list outputs;         /* enabled ones only; see aro_output */
 	struct wl_list outputs_off;     /* disabled by config or wlr-randr */

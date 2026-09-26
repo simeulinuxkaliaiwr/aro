@@ -37,6 +37,12 @@ touchpad_natural_scroll = false
 touchpad_disable_while_typing = true
 touchpad_speed = 0.0            # -1.0 to 1.0
 
+# === cursor ===
+# falls back to XCURSOR_THEME / XCURSOR_SIZE if unset. apps started after
+# a change pick it up; GTK apps also read gsettings' cursor-theme.
+# cursor_theme = Adwaita
+# cursor_size = 24              # 8 to 256
+
 # === monitors ===
 # one block per screen. the name is a glob matched against the connector
 # name (e.g. HDMI-A-1) and the "make model serial" string.

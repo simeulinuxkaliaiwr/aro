@@ -1158,6 +1158,13 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = set_str(&c->xkb_model, value);
 		} else if (!strcasecmp(key, "keyboard_rules")) {
 			ok = set_str(&c->xkb_rules, value);
+		} else if (!strcasecmp(key, "cursor_theme")) {
+			ok = *value && set_str(&c->cursor_theme, value);
+		} else if (!strcasecmp(key, "cursor_size")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 8 && n <= 256;
+			if (ok)
+				c->cursor_size = n;
 		} else if (!strcasecmp(key, "touchpad_tap")) {
 			ok = parse_bool(value, &c->tp_tap);
 		} else if (!strcasecmp(key, "touchpad_natural_scroll")) {
@@ -1238,6 +1245,7 @@ void config_finish(struct aro_config *c)
 	free(c->xkb_options);
 	free(c->xkb_model);
 	free(c->xkb_rules);
+	free(c->cursor_theme);
 	free(c->wallpaper_file);
 	clear_binds(c);
 	free(c->binds);

@@ -4895,6 +4895,50 @@ static void wallpaper_report(void *data, const char *msg)
 	notify(data, NOTIFY_ERROR, "%s", msg);
 }
 
+/* load the config's cursor theme, or the session's; export it to children */
+static void cursor_theme_apply(struct aro_server *s)
+{
+	const char *theme = s->cfg.cursor_theme ? s->cfg.cursor_theme
+	                                        : s->env_cursor_theme;
+	int size = s->cfg.cursor_size ? s->cfg.cursor_size : s->env_cursor_size;
+
+	bool same = theme && s->xcursor_theme ?
+	            !strcmp(theme, s->xcursor_theme) : theme == s->xcursor_theme;
+	if (s->xcursor_mgr && same && size == s->xcursor_size)
+		return;
+
+	struct wlr_xcursor_manager *mgr = wlr_xcursor_manager_create(theme, size);
+	if (!mgr) {
+		wlr_log(WLR_ERROR, "could not load cursor theme %s",
+		        theme ? theme : "default");
+		return;
+	}
+	wlr_log(WLR_INFO, "cursor: theme=%s size=%d",
+	        theme ? theme : "default", size);
+
+	char buf[16];
+	snprintf(buf, sizeof buf, "%d", size);
+	setenv("XCURSOR_SIZE", buf, true);
+	if (theme)
+		setenv("XCURSOR_THEME", theme, true);
+	else
+		unsetenv("XCURSOR_THEME");
+
+	struct wlr_xcursor_manager *old = s->xcursor_mgr;
+	s->xcursor_mgr = mgr;
+	free(s->xcursor_theme);
+	s->xcursor_theme = theme ? strdup(theme) : NULL;
+	s->xcursor_size = size;
+	if (!old)
+		return;         /* startup: nothing drawn with it yet */
+
+	/* swap the image off the old theme, then let the client resend its own */
+	wlr_cursor_set_xcursor(s->cursor, mgr, "default");
+	wlr_xcursor_manager_destroy(old);
+	wlr_seat_pointer_clear_focus(s->seat);
+	pointer_motion_common(s, aro_now_ms());
+}
+
 static void config_reload(struct aro_server *s)
 {
 	struct aro_config nc;
@@ -4928,6 +4972,8 @@ static void config_reload(struct aro_server *s)
 	wl_list_for_each(kb, &s->keyboards, link)
 		if (!kb->is_virtual)
 			apply_keymap(s, kb->wlr_keyboard);
+
+	cursor_theme_apply(s);
 
 	/* reapply touchpad settings */
 	struct aro_pointer *ptr;
@@ -5184,6 +5230,14 @@ int main(int argc, char *argv[])
 			config_set_modkey(&s.cfg, m);
 	}
 
+	/* the session's cursor, before cursor_theme_apply() exports ours */
+	const char *env_theme = getenv("XCURSOR_THEME");
+	const char *env_size = getenv("XCURSOR_SIZE");
+	s.env_cursor_theme = env_theme && *env_theme ? strdup(env_theme) : NULL;
+	s.env_cursor_size = env_size ? atoi(env_size) : 0;
+	if (s.env_cursor_size <= 0)
+		s.env_cursor_size = 24;
+
 	s.pending_split = LY_ROW;
 	for (int i = 0; i < ARO_MAX_WS; i++)
 		s.orphan_ws_layout[i] = Q_LAYOUT_INHERIT;
@@ -5362,7 +5416,7 @@ int main(int argc, char *argv[])
 
 	s.cursor = wlr_cursor_create();
 	wlr_cursor_attach_output_layout(s.cursor, s.output_layout);
-	s.xcursor_mgr = wlr_xcursor_manager_create(NULL, 24);
+	cursor_theme_apply(&s);
 
 	s.cursor_motion.notify = cursor_motion;
 	wl_signal_add(&s.cursor->events.motion, &s.cursor_motion);
@@ -5543,6 +5597,8 @@ int main(int argc, char *argv[])
 
 	wlr_scene_node_destroy(&s.scene->tree.node);
 	wlr_xcursor_manager_destroy(s.xcursor_mgr);
+	free(s.xcursor_theme);
+	free(s.env_cursor_theme);
 	wlr_cursor_destroy(s.cursor);
 	wlr_allocator_destroy(s.allocator);
 	wlr_renderer_destroy(s.renderer);

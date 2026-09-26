@@ -171,6 +171,10 @@ struct aro_config {
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;
 
+	/* cursor: NULL / 0 means whatever XCURSOR_THEME / XCURSOR_SIZE say */
+	char *cursor_theme;     /* owned */
+	int cursor_size;
+
 	struct q_theme theme;
 
 	struct q_bind *binds;
