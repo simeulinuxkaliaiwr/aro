@@ -69,7 +69,8 @@ pacman -S --needed base-devel meson ninja wayland wayland-protocols \
 ```
 
 `librsvg` is only what lets `aropaper` read SVG. Without it the default
-wallpaper falls back to the default wallpaper.
+wallpaper falls back to the bundled 4K PNG, and SVG wallpapers of your
+own will not load.
 
 ```sh
 # installing it system-wide
