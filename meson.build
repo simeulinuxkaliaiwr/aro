@@ -26,10 +26,13 @@ if get_option('compositor')
   #
   # plenty of desktop apps are still X11, but wlroots can be built without it.
   xwl = get_option('xwayland')
+  xwl_deps = []
   if not xwl.disabled()
     wlroots_pre = dependency('wlroots-0.20')
     if cc.has_header('wlr/xwayland.h', dependencies: wlroots_pre)
       add_project_arguments('-DARO_XWAYLAND', language: 'c')
+      # wlroots' xwayland headers include these but keep them private
+      xwl_deps = [dependency('xcb'), dependency('xcb-ewmh'), dependency('xcb-icccm')]
       message('XWayland: enabled')
     elif xwl.enabled()
       error('-Dxwayland=enabled but wlroots was built without XWayland support')
@@ -99,9 +102,10 @@ if get_option('compositor')
     )
   endforeach
 
-  deps = [core_dep]
+  deps = [core_dep] + xwl_deps
   if get_option('effects')
     deps += dependency('scenefx-0.5')  # needs to come before wlroots
+    deps += dependency('glesv2')       # scenefx's headers include GLES2 but keep it private
   endif
 
   wlroots = dependency('wlroots-0.20')
@@ -116,6 +120,7 @@ if get_option('compositor')
     dependency('wayland-server'),
     dependency('xkbcommon'),
     dependency('pixman-1'),
+    dependency('libdrm'),      # drm_fourcc.h in text.c
     dependency('pangocairo'),  # text rendering; wlroots doesn't provide it
     cc.find_library('m', required: false),  # sqrt for scale = auto
   ]
