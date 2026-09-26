@@ -14,6 +14,13 @@
   <img alt="written in C" src="https://img.shields.io/badge/written_in-C-222a35?labelColor=12161d">
 </p>
 
+<p align="center">
+  <a href="https://aur.archlinux.org/packages/aro-git"><img alt="Arch: AUR" src="https://img.shields.io/badge/Arch-AUR-222a35?logo=archlinux&labelColor=12161d&logoColor=e6a54b"></a>
+  <a href="https://github.com/simeulinuxkaliaiwr/aro-overlay"><img alt="Gentoo: aro-overlay" src="https://img.shields.io/badge/Gentoo-aro--overlay-222a35?logo=gentoo&labelColor=12161d&logoColor=e6a54b"></a>
+  <a href="https://copr.fedorainfracloud.org/coprs/simeulinuxkaliaiwr/aro/"><img alt="Fedora: COPR" src="https://img.shields.io/badge/Fedora-COPR-222a35?logo=fedora&labelColor=12161d&logoColor=e6a54b"></a>
+  <a href="#installing"><img alt="NixOS: flake" src="https://img.shields.io/badge/NixOS-flake-222a35?logo=nixos&labelColor=12161d&logoColor=e6a54b"></a>
+</p>
+
 *aro* is Portuguese for the rim of a pair of glasses. It names the 1px
 accent ring just inside every focused border — the one thing on screen that
 says "this is the window you are in".
