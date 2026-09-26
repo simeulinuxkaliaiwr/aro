@@ -32,6 +32,17 @@ static char *trim(char *s)
 	return s;
 }
 
+/* 'a b' or "a b": names with spaces, quoted the way people write them */
+static char *unquote(char *s)
+{
+	size_t n = strlen(s);
+	if (n >= 2 && (s[0] == '"' || s[0] == '\'') && s[n - 1] == s[0]) {
+		s[n - 1] = '\0';
+		return s + 1;
+	}
+	return s;
+}
+
 static bool parse_bool(const char *v, bool *out)
 {
 	if (!strcasecmp(v, "true") || !strcasecmp(v, "yes") ||
@@ -1111,6 +1122,11 @@ bool config_load(struct aro_config *c, const char *path)
 		*eq = '\0';
 		char *key = trim(p);
 		char *value = trim(eq + 1);
+		/* commands and patterns keep their quotes; their own parsers read them */
+		if (strcasecmp(key, "bind") && strcasecmp(key, "exec") &&
+		    strcasecmp(key, "exec_always") && strcasecmp(key, "rule") &&
+		    strcasecmp(key, "workspace"))
+			value = unquote(value);
 
 		if (in_block) {
 			monitor_key(c, lineno,
