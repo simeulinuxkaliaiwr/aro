@@ -46,6 +46,17 @@ says "this is the window you are in".
   XWayland, session lock, idle inhibit, clipboard, drag and drop,
   screencopy and xdg-decoration all work.
 
+## Installing
+
+On Arch, from the AUR:
+
+```sh
+paru -S aro-git   # or: yay -S aro-git
+```
+
+It builds the latest commit and pulls in SceneFX itself. Elsewhere, build
+it from source as below.
+
 ## Building
 
 Needs **wlroots 0.20**, **SceneFX 0.5**, wayland-protocols, libxkbcommon,
