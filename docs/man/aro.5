@@ -366,6 +366,11 @@ is the same.
 .BR focus ", " move ", " resize " " left | right | up | down
 Across monitors too, by the same rule.
 .TP
+.BR move_workspace " " left | right | up | down
+Move the current workspace, with its windows and layout, to the monitor in
+that direction: to the same number there if it is free, otherwise to the
+first empty one.
+.TP
 .BI workspace " n"\fR,\fP " sendto" " n"
 Go to, or send the window to, workspace 1 to 32.
 .TP

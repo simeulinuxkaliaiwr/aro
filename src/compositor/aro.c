@@ -3500,6 +3500,65 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 	aro_arrange(s);
 }
 
+static bool ws_empty(struct aro_server *s, struct aro_output *o, int ws)
+{
+	if (o->ws[ws])
+		return false;
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link)
+		if (v->mapped && v->output == o && v->workspace == ws)
+			return false;
+	return true;
+}
+
+/* the current workspace, windows and layout, to the monitor in direction e */
+static void workspace_move_to_output(struct aro_server *s, ly_edge e)
+{
+	struct aro_output *o = aro_focused_output(s);
+	struct aro_output *dest = o ? output_toward(s, o, e) : NULL;
+	if (!dest)
+		return;
+
+	/* the same number there if it is free, else the first empty one */
+	const int from = o->cur_ws;
+	int to = ws_empty(s, dest, from) ? from : -1;
+	for (int i = 0; to < 0 && i < ARO_MAX_WS; i++)
+		if (ws_empty(s, dest, i))
+			to = i;
+	if (to < 0)
+		return;
+
+	dest->ws[to] = o->ws[from];
+	o->ws[from] = NULL;
+	dest->ws_layout[to] = o->ws_layout[from];
+	o->ws_layout[from] = Q_LAYOUT_INHERIT;
+
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link) {
+		if (v->output != o || v->workspace != from)
+			continue;
+		v->output = dest;
+		v->workspace = to;
+		if (v->floating) {
+			v->fbox.x += dest->box.x - o->box.x;
+			v->fbox.y += dest->box.y - o->box.y;
+		}
+	}
+
+	struct aro_view *keep = s->focused;
+	s->focused_output = dest;
+	if (dest->cur_ws != to) {
+		workspace_show(s, to);
+	} else {
+		wl_list_for_each(v, &s->views, link)
+			if (v->output == dest && v->workspace == to)
+				view_set_visible(v, true);
+	}
+	if (keep && keep->output == dest)
+		aro_focus(s, keep);
+	aro_arrange(s);
+}
+
 /* set current workspace layout; matching config clears override */
 static void layout_set(struct aro_server *s, int want)
 {
@@ -3576,6 +3635,9 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 	case Q_OVERVIEW:
 		if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
 			overview_toggle(s);
+		return;
+	case Q_MOVE_WS:
+		workspace_move_to_output(s, (ly_edge)b->num);
 		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);

@@ -42,9 +42,11 @@ foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'in
   )
 endforeach
 
-test('headless', find_program('run.sh'),
-  args: [aro_exe.full_path(), aroctl_exe.full_path(), meson.current_build_dir()],
+foreach mode : ['main', 'multi']
+test('headless-' + mode, find_program('run.sh'),
+  args: [aro_exe.full_path(), aroctl_exe.full_path(), meson.current_build_dir(), mode],
   depends: [aro_exe, aroctl_exe] + test_clients,
   timeout: 240,
   is_parallel: false,
 )
+endforeach

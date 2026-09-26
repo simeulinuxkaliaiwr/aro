@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# run.sh ARO AROCTL CLIENTDIR: start aro headless and run every test client against it
+# run.sh ARO AROCTL CLIENTDIR [multi]: start aro headless and run the test clients; multi uses two monitors
 
 set -u
-ARO=$1 CTL=$2 CLIENTS=$3
+ARO=$1 CTL=$2 CLIENTS=$3 MODE=${4:-main}
+OUTPUTS=1
+[ "$MODE" = multi ] && OUTPUTS=2
 
 # short on purpose: a unix socket path must fit in 108 bytes
 T=$(mktemp -d /tmp/aro-test.XXXXXX)
@@ -50,7 +52,7 @@ ctl() {
 start_aro() {
 	env -i PATH="$PATH" HOME="$T" DISPLAY=:aro-test \
 		XDG_CONFIG_HOME="$T/config" XDG_RUNTIME_DIR="$T/run" XDG_STATE_HOME="$T/state" \
-		WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 ${1:+WLR_RENDERER=$1} \
+		WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=$OUTPUTS ${1:+WLR_RENDERER=$1} \
 		ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 		"$ARO" -l "$T/aro.log" > "$T/aro.err" 2>&1 &
 	PID=$!
@@ -83,6 +85,8 @@ else
 	exit 1
 fi
 ctl version > /dev/null && ok "aroctl answers" || bad "aroctl answers"
+
+if [ "$MODE" = main ]; then
 
 # protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
 client globals > "$T/globals.out"
@@ -236,6 +240,41 @@ else
 	echo "skip  shortcut inhibiting (no wtype)"
 fi
 
+fi
+
+if [ "$MODE" = multi ]; then
+
+# 4d. a workspace moves to the next monitor with its windows, and back
+client window 2 4 > "$T/mv.out" 2>&1 &
+CV=$!
+if wait_for "$T/mv.out" "2 windows open"; then
+	on() { ctl -j windows | grep -o '"output":"[^"]*"' | sort -u | tr -d '\n'; }
+	start=$(on)
+	moved=
+	for dir in right left; do
+		ctl dispatch move_workspace $dir > /dev/null
+		sleep 0.3
+		[ "$(on)" != "$start" ] && { moved=$dir; break; }
+	done
+	if [ -n "$moved" ]; then
+		[ "$(ctl -j windows | grep -o '"output":"[^"]*"' | sort -u | wc -l)" -eq 1 ] \
+			&& ok "workspace moves to the other monitor with both windows" \
+			|| bad "workspace moves to the other monitor with both windows"
+		back=left; [ "$moved" = left ] && back=right
+		ctl dispatch move_workspace $back > /dev/null
+		sleep 0.3
+		[ "$(on)" = "$start" ] && ok "and moves back" || bad "and moves back"
+	else
+		bad "workspace moves to the other monitor"
+	fi
+fi
+wait "$CV"
+alive
+
+fi
+
+if [ "$MODE" = main ]; then
+
 # 5. saving the config while running: the reload freed strings still in use
 before=$(grep -c "config reloaded" "$T/aro.log")
 for c in "bar = false" "bar = true" "font = Monospace 11" "bar = auto" \
@@ -248,6 +287,8 @@ done
 after=$(grep -c "config reloaded" "$T/aro.log")
 [ $((after - before)) -ge 10 ] && ok "ten live config reloads" \
 	|| bad "ten live config reloads: only $((after - before)) happened"
+
+fi
 
 # 6. a clean shutdown, which runs every teardown step
 ctl dispatch quit > /dev/null

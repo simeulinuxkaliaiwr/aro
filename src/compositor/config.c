@@ -195,6 +195,13 @@ bool config_parse_action(const char *name, const char *arg,
 	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
 	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }
 
+	if (!strcasecmp(name, "move_workspace")) {
+		if (!arg || !parse_edge(arg, num))
+			return false;
+		*action = Q_MOVE_WS;
+		return true;
+	}
+
 	if (!strcasecmp(name, "focus") || !strcasecmp(name, "move") ||
 	    !strcasecmp(name, "resize")) {
 		if (!arg || !parse_edge(arg, num))
