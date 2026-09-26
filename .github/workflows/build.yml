@@ -2,11 +2,19 @@ name: build
 on:
   push:
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Using Arch because wlroots 0.20 and scenefx 0.5 are too new for standard GH runners.
     container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        xwayland: [enabled, disabled]
     steps:
       - name: dependencies
         run: |
@@ -16,17 +24,17 @@ jobs:
             libxkbcommon pixman pango cairo \
             gdk-pixbuf2
       - uses: actions/checkout@v4
-      # scenefx isn't in the Arch repos, so we build without it.
-      # this also verifies that the plain wlr_scene fallback in scene.h still works.
-      # wallpaper=enabled: with auto, a missing gdk-pixbuf would skip aropaper
-      # silently and CI would stay green without ever building it.
       - name: build
         run: |
-          meson setup build -Deffects=false -Dwallpaper=enabled
+          meson setup build --werror -Db_sanitize=address,undefined \
+            -Deffects=false -Dwallpaper=enabled \
+            -Dxwayland=${{ matrix.xwayland }}
           ninja -C build
-      # the layout tree is pure C (no wlroots deps), so we can run the test harness here.
       - name: layout harness
-        run: ./build/aro-layout
-      # links and starts; drawing needs a compositor, which CI doesn't have
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          printf 'vsvsvshjklHJKLHJKLhhjjkkllLLLLqvsqlkqh' | ./build/aro-layout > /dev/null
+          printf 'vvssvsqqqqqqq' | ./build/aro-layout > /dev/null
       - name: aropaper
         run: ./build/aropaper --version

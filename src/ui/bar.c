@@ -122,7 +122,7 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 		bool active = (i == o->cur_ws);
 		bool occupied = ws_occupied(o, i);
 
-		char label[4];
+		char label[12];
 		snprintf(label, sizeof label, "%d", i + 1);
 
 		uint32_t fg = active ? th->bar_bg : (occupied ? th->ink : th->dim);
