@@ -5306,6 +5306,8 @@ int main(int argc, char *argv[])
 	logfile_init(log_arg, nested, WLR_DEBUG);
 
 	struct aro_server s = { 0 };
+	s.cfg_fd = -1;          /* not stdin, if we give up before the watch starts */
+	int ret = 0;
 	config_defaults(&s.cfg);
 	config_load(&s.cfg, NULL);
 
@@ -5593,8 +5595,8 @@ int main(int argc, char *argv[])
 	const char *socket = wl_display_add_socket_auto(s.display);
 	if (!socket || !wlr_backend_start(s.backend)) {
 		wlr_log(WLR_ERROR, "could not start");
-		wl_display_destroy(s.display);
-		return 1;
+		ret = 1;
+		goto teardown;  /* every listener must go before the display does */
 	}
 
 	setenv("WAYLAND_DISPLAY", socket, true);
@@ -5635,6 +5637,7 @@ int main(int argc, char *argv[])
 	/* likewise its pidfds; and aropaper goes before the clients do */
 	wallpaper_finish(&s.wallpaper);
 
+teardown:
 	/* teardown order matters */
 	wl_display_destroy_clients(s.display);
 	ime_finish(&s);
@@ -5707,5 +5710,5 @@ int main(int argc, char *argv[])
 	}
 	wl_display_destroy(s.display);
 	logfile_finish();
-	return 0;
+	return ret;
 }
