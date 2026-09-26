@@ -181,6 +181,8 @@ if get_option('compositor')
     install: true,
   )
 
+  install_man('docs/man/aro.1', 'docs/man/aro.5', 'docs/man/aroctl.1')
+
   subdir('tests')
 endif
 
@@ -240,4 +242,5 @@ if build_wallpaper
     c_args: ['-DARO_WALLPAPER_DIR="@0@"'.format(wallpaper_dir)],
     install: true,
   )
+  install_man('docs/man/aropaper.1')
 endif

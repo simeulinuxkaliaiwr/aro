@@ -1,0 +1,92 @@
+.TH AROCTL 1 2026-09-26 "aro 0.2.0" "User Commands"
+.SH NAME
+aroctl \- query and control a running aro
+.SH SYNOPSIS
+.B aroctl
+.RB [ \-j ]
+.RB [ \-s
+.IR socket ]
+.I command
+.RI [ args ]
+.SH DESCRIPTION
+.B aroctl
+talks to a running
+.BR aro (1)
+over its socket: it lists windows, workspaces and monitors, runs any action
+a key binding can, and prints aro's log.
+Replies are aligned text for people, or one line of JSON with
+.BR \-j ,
+for scripts.
+.SH COMMANDS
+.TP
+.B monitors
+Every output, its mode, scale and workspaces.
+.B outputs
+is the same.
+.TP
+.B workspaces
+The workspaces in use or shown on the bar.
+.TP
+.B windows
+Every window;
+.B *
+marks the focused one.
+.TP
+.B focused
+The focused window; fails if there is none.
+.TP
+.B reload
+Read the config again and print any problems.
+.TP
+.BI dispatch " action " \fR[\fIargument\fR]
+Run an action, written as in a
+.B bind
+line of
+.BR aro (5),
+for example
+.BR "dispatch workspace 3" ,
+.BR "dispatch focus left" ,
+.BR "dispatch layout monocle" " or"
+.BR "dispatch spawn foot" .
+.TP
+.B version
+aro's version.
+.TP
+.BR log " [" \-f "] [" \-\-old "] [" \-\-path ]
+Print aro's log.
+.B \-f
+follows it as it is written, into the next session when aro restarts;
+.B \-\-old
+prints the previous session's, the one that crashed;
+.B \-\-path
+only prints where it is.
+With aro not running, the log file is read directly.
+.SH OPTIONS
+.TP
+.BR \-j ", " \-\-json
+Reply in JSON.
+.TP
+.BR \-s ", " \-\-socket " \fIpath\fP"
+The socket to use, instead of
+.BR $ARO_SOCKET .
+.TP
+.BR \-h ", " \-\-help
+Print a short usage message.
+.TP
+.B \-\-version
+aroctl's own version.
+.SH ENVIRONMENT
+.TP
+.B ARO_SOCKET
+Set by aro for every program it starts.
+.SH EXIT STATUS
+0 on success, 1 when the command failed or aro could not be reached.
+.SH EXAMPLES
+.nf
+aroctl -j monitors | jq '.[].name'
+aroctl dispatch spawn foot --server
+aroctl log -f
+.fi
+.SH SEE ALSO
+.BR aro (1),
+.BR aro (5)

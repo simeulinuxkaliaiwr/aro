@@ -1,0 +1,185 @@
+.TH ARO 1 2026-09-26 "aro 0.2.0" "User Commands"
+.SH NAME
+aro \- a minimal tiling Wayland compositor
+.SH SYNOPSIS
+.B aro
+.RB [ \-s
+.IR command ]
+.RB [ \-m
+.BR logo | alt ]
+.RB [ \-l
+.IR file | none ]
+.br
+.B aro \-c
+.RI [ file ]
+.SH DESCRIPTION
+.B aro
+is a tiling window manager for Wayland, built on wlroots: minimal, flat,
+one accent colour, spring-animated.
+New windows open beside the focused one, focus moves to the window that is
+actually in that direction on screen, and windows can be dragged into place.
+Each monitor has its own set of workspaces, created as you use them.
+.PP
+aro draws its own bar and runs
+.BR aropaper (1)
+for the wallpaper, so it is usable with no configuration.
+The bar steps aside when another bar such as waybar starts.
+Its configuration is described in
+.BR aro (5);
+saving the file applies it at once.
+.PP
+Run it from a text console, or pick it in a display manager.
+Started inside another Wayland session it runs nested, in a window.
+.SH OPTIONS
+.TP
+.BI \-s " command"
+Run
+.I command
+with
+.B /bin/sh
+once aro has started, after the
+.B exec
+lines of the config.
+.TP
+.BR \-m " logo" | alt
+The modifier for all bindings, overriding
+.B mod
+in the config.
+Use
+.B alt
+when running nested, where the outer compositor keeps the Super key.
+.TP
+.BI \-l " file" \fR|\fPnone
+Write the log to
+.I file
+instead of the default, or not at all.
+.TP
+.BR \-c " [" \fIfile\fP ]
+Check a config file, the default one if none is given, print every problem
+with its line number, and exit: 0 if it is valid, 1 if not, 2 if it cannot
+be read.
+.TP
+.BR \-h ", " \-\-help
+Print a short usage message.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/aro/config
+The configuration, by default
+.IR ~/.config/aro/config .
+See
+.BR aro (5).
+An annotated example is installed as
+.IR /usr/share/doc/aro/config.example .
+.TP
+.I $XDG_STATE_HOME/aro/aro.log
+This session's log, by default under
+.IR ~/.local/state/aro/ .
+The previous session's is kept as
+.IR aro.log.old ,
+so a crash is still explained after aro starts again.
+A nested aro writes
+.I aro-nested.log
+instead.
+.TP
+.I /usr/share/backgrounds/aro/
+aro's wallpapers, as SVG and PNG.
+.SH ENVIRONMENT
+aro sets these for the programs it starts:
+.TP
+.B WAYLAND_DISPLAY
+The socket clients connect to.
+.TP
+.B ARO_SOCKET
+The socket
+.BR aroctl (1)
+talks to.
+.TP
+.B XDG_CURRENT_DESKTOP
+Set to
+.B aro
+if not already set; it selects aro's portal configuration.
+.TP
+.BR XCURSOR_THEME ", " XCURSOR_SIZE
+The cursor theme and size in use.
+.PP
+When not nested, aro also hands
+.BR WAYLAND_DISPLAY ,
+.BR DISPLAY ,
+.B XDG_CURRENT_DESKTOP
+and the cursor variables to D-Bus and systemd, so portals started by them
+find this session.
+On systems without systemd, start aro inside a D-Bus session:
+.B dbus-run-session aro
+.PP
+aro reads
+.BR XCURSOR_THEME " and " XCURSOR_SIZE
+as defaults when the config does not set a cursor, and the
+.B XKB_DEFAULT_*
+variables when it does not set a keyboard layout.
+.SH DEFAULT BINDINGS
+.B mod
+is Super, or Alt with
+.BR "mod = alt" .
+The first
+.B bind
+line in the config replaces all of these.
+.TP
+.B mod+Return
+Open foot.
+.TP
+.B mod+d
+Open fuzzel.
+.TP
+.B mod+h/j/k/l
+Move focus left, down, up, right.
+.TP
+.B mod+shift+h/j/k/l
+Move the window.
+.TP
+.B mod+ctrl+h/j/k/l
+Resize the window.
+.TP
+.BR mod+v ", " mod+s
+Open the next window to the right of, or below, the focused one.
+.TP
+.BR mod+tab ", " mod+shift+tab
+Walk the window switcher, in recently-used order.
+.TP
+.B mod+o
+Overview: every workspace, zoomed out.
+.TP
+.B mod+t
+Cycle this workspace's layout: manual, dwindle, monocle.
+.TP
+.B mod+space
+Toggle floating.
+.TP
+.B mod+f
+Toggle fullscreen.
+.TP
+.B mod+1..4
+Go to a workspace.
+.TP
+.B mod+shift+1..4
+Send the window to a workspace.
+.TP
+.B mod+q
+Close the window.
+.TP
+.B mod+shift+e
+Quit, after asking.
+.TP
+.BR mod+drag ", " mod+right-drag
+Move or resize with the mouse; a tiled window tears out of the layout.
+.SH REPORTING BUGS
+Attach the output of
+.B aroctl log \-\-old
+if aro crashed and has been started again, or
+.B aroctl log
+otherwise, to an issue at
+.UR https://github.com/simeulinuxkaliaiwr/aro/issues
+.UE .
+.SH SEE ALSO
+.BR aro (5),
+.BR aroctl (1),
+.BR aropaper (1)

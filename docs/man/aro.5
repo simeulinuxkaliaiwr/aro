@@ -1,0 +1,375 @@
+'\" t
+.TH ARO 5 2026-09-26 "aro 0.2.0" "File Formats"
+.SH NAME
+aro \- configuration file for the aro Wayland compositor
+.SH SYNOPSIS
+.I $XDG_CONFIG_HOME/aro/config
+.RI ( ~/.config/aro/config )
+.SH DESCRIPTION
+The file is a list of
+.I key
+.B =
+.I value
+lines.
+Everything after
+.B #
+is a comment, and every key is optional: aro works with no file at all.
+Keys are case-insensitive.
+A value may be wrapped in single or double quotes, which is how names
+with spaces are written:
+.BR "cursor_theme = 'Some Theme'" .
+.PP
+Saving the file applies it immediately.
+A line that cannot be read is skipped and reported on screen with its line
+number; the rest of the file still applies.
+.B aro \-c
+checks a file without starting aro.
+.PP
+Values are written as:
+.TP
+.I bool
+.BR true / false ,
+.BR yes / no ,
+.BR on / off ,
+.BR 1 / 0 .
+.TP
+.I colour
+.BR 0x RRGGBBAA,
+.BR # RRGGBBAA
+or RRGGBBAA; the alpha pair is optional and defaults to ff.
+.TP
+.I ms
+A duration in milliseconds.
+.SH GENERAL
+.TP
+.BR mod " = " super | alt
+The modifier that
+.B mod
+means in bindings.
+Default: super.
+Use alt when running nested.
+.TP
+.BI "focus_follows_mouse = " bool
+Focus the window under the pointer.
+Default: false.
+.TP
+.BI "confirm_quit = " bool
+Ask before the quit binding ends the session.
+Default: true.
+.TP
+.BR layout " = " manual | dwindle | monocle
+How new windows are placed.
+.B manual
+splits beside the focused window, the way
+.B mod+v
+and
+.B mod+s
+last said;
+.B dwindle
+splits along the longer side, so the layout spirals;
+.B monocle
+shows one window at a time, filling the screen, with the splits kept
+underneath for when you leave it.
+Default: manual.
+.TP
+.BI "workspace = " "n " layout " name"
+The layout of workspace
+.IR n ,
+1 to 32, overriding
+.BR layout .
+.B mod+t
+changes it for the current workspace until the next config change.
+.TP
+.BI "workspaces = " n
+How many workspaces the bar, and bars using ext-workspace, show even when
+empty: 1 to 32.
+Default: 4.
+More appear as you use them.
+.TP
+.BR header " = " always | auto
+.B always
+draws aro's title header on every window;
+.B auto
+leaves it out for windows that draw their own.
+Default: always.
+.TP
+.BR workspace_slide " = " horizontal | vertical | off
+How switching workspaces moves.
+Default: horizontal.
+.SH INPUT
+.TP
+.BR keyboard_layout ", " keyboard_variant ", " keyboard_options ", " keyboard_model ", " keyboard_rules
+The XKB settings, for example
+.B keyboard_layout = us,br
+and
+.BR "keyboard_options = compose:ralt" .
+Unset ones come from the
+.B XKB_DEFAULT_*
+environment variables.
+.TP
+.BI "touchpad_tap = " bool
+Tap to click.
+Default: true.
+.TP
+.BI "touchpad_natural_scroll = " bool
+Default: false.
+.TP
+.BI "touchpad_disable_while_typing = " bool
+Default: true.
+.TP
+.BI "touchpad_speed = " number
+From \-1.0 to 1.0.
+Default: 0.
+.TP
+.BI "cursor_theme = " name
+The cursor theme; a theme that cannot be found is reported.
+Default:
+.BR $XCURSOR_THEME ,
+or the system default.
+Programs started afterwards get it through
+.BR XCURSOR_THEME ;
+GTK programs read the gsettings key
+.B org.gnome.desktop.interface cursor-theme
+instead.
+.TP
+.BI "cursor_size = " n
+From 8 to 256.
+Default:
+.BR $XCURSOR_SIZE ,
+or 24.
+.SH MONITORS
+A block configures every screen whose connector name (such as
+.BR HDMI-A-1 )
+or "make model serial" description matches a glob.
+aro logs both when a screen appears.
+Blocks that match all apply, later ones winning.
+.PP
+.nf
+monitor HDMI-A-1 {
+    mode = 2560x1440@144
+    position = 1920,0
+    scale = auto
+}
+.fi
+.TP
+.BR enabled " = " \fIbool\fP | auto
+Default: on.
+aro will not turn off its only screen.
+.TP
+.BR mode " = " \fIW\fP x \fIH\fP [ @\fIHz\fP "] | " auto
+A resolution, with an optional refresh rate; the closest rate is used.
+.B auto
+is the screen's preferred mode.
+.TP
+.BR position " = " \fIX\fP , \fIY\fP " | " auto
+In layout pixels, after scaling.
+.B auto
+places it to the right of the others.
+.TP
+.BR scale " = " \fInumber\fP " | " auto
+From 0 to 10;
+.B auto
+is 2 above 192 DPI, 1 otherwise.
+.TP
+.BR transform " = " normal | 90 | 180 | 270 | flipped | flipped-90 | flipped-180 | flipped-270 | auto
+Rotation.
+.TP
+.BR adaptive_sync " = " \fIbool\fP | auto
+Variable refresh rate.
+Default: off.
+.PP
+A key left out keeps whatever the screen has, so changes made with tools
+such as wlr-randr survive a reload;
+.B auto
+resets it.
+.SH BAR AND WALLPAPER
+.TP
+.BR bar " = " auto | true | false
+.B auto
+hides aro's bar on a screen where another bar, such as waybar, reserves
+space, and brings it back half a second after that bar goes.
+.B true
+always shows it,
+.B false
+never.
+Default: auto.
+.TP
+.BR wallpaper " = " auto | none | \fIpath\fP
+.B auto
+is aro's own wallpaper;
+.B none
+leaves the background to you;
+a path shows that image (PNG, JPEG, WebP, SVG with librsvg), covering the
+screen.
+.B ~
+is expanded.
+aro runs
+.BR aropaper (1)
+for it.
+Default: auto.
+.SH LOOK
+.TS
+tab(|);
+lb lb lb
+l l l.
+key|default|meaning
+gaps|9|between tiled windows, in pixels
+outer_gaps|9|between the layout and the screen edge
+border|2|window border width
+radius|5|corner radius; needs a SceneFX build
+min_size|80|smallest size of a tiled window
+header_height|26|title header; 0 hides it
+bar_height|30|0 hides the bar
+bar_padding|12|
+text_padding|10|
+float_min_width|240|smallest floating window
+float_min_height|120|
+float_scale|0.5|default floating size, as a share of the screen
+font|Sans 10|a Pango font description
+font_small|Sans 9|
+.TE
+.PP
+Colours, all
+.IR colour :
+.TS
+tab(|);
+lb lb lb
+l l l.
+key|default|used for
+background|0x0c0f13ff|what shows in the gaps
+frame|0x12161dff|window background
+frame_focus|0x161b23ff|focused window background
+border_color|0x222a35ff|unfocused border
+accent|0xe6a54bff|focused border and header text
+accent_soft|0xe6a54b4d|the 1px ring inside the focused border
+text|0xd7dfe9ff|
+text_dim|0x6b7788ff|
+bar_color|0x0a0d11ff|
+urgent|0xc0566bff|
+drop_fill|0xe6a54b1f|drag-and-drop preview
+drop_line|0xe6a54bcc|
+notify_color|0x12161deb|on-screen messages
+scrim_color|0x0c0f13b3|behind the quit prompt
+overview_tint|0x0c0f1366|over the wallpaper in the overview
+.TE
+.SH MOTION
+.TS
+tab(|);
+lb lb lb
+l l l.
+key|default|meaning
+anim_ms|340|window movement, with spring overshoot
+fullscreen_anim_ms|220|into and out of fullscreen
+focus_anim_ms|160|
+drop_anim_ms|160|
+workspace_slide_ms|220|0 is the same as workspace_slide = off
+open_scale|0.88|starting size of a new window
+overview_zoom|0.5|
+overview_ms|250|
+switcher_delay_ms|150|a quicker tap swaps without showing the switcher
+switcher_debounce_ms|750|how long focus must stay to count as used
+switcher_preview_height|260|
+notify_ms|6000|how long messages stay
+notify_max_width|520|
+drag_threshold|12|pixels before a dragged tiled window tears out
+resize_zone|8|border grab area, in pixels
+resize_step|0.04|resize per key press, as a share
+.TE
+.SH STARTUP
+.TP
+.BI "exec = " command
+Run once when aro starts, with
+.BR /bin/sh .
+.TP
+.BI "exec_always = " command
+Run at start and again on every reload; earlier copies are not stopped.
+.SH RULES
+.B rule =
+.IR match ...
+.IR action ...
+.PP
+A match is
+.BI app_id: pattern\fR,
+.BI title: pattern
+or
+.BI type: pattern\fR;
+patterns are case-insensitive globs with
+.B *
+and
+.BR ? ,
+quoted when they contain spaces.
+Every match on a line must hold.
+.B app_id
+is WM_CLASS for X11 windows;
+.B type
+is normal, dialog, splash, utility, toolbar, menu and so on.
+Dialogs, utilities, toolbars and splash screens float without a rule.
+.PP
+An action is
+.BR float ,
+.BR tile ,
+.B fullscreen
+or
+.BI workspace " n"\fR.
+Rules apply top to bottom, the last one winning, whenever a window opens,
+changes title or app_id, or the config is reloaded.
+.PP
+.nf
+rule = app_id:mpv  workspace 3
+rule = app_id:firefox  title:Picture-in-Picture  float
+rule = type:dialog  app_id:gimp*  tile
+.fi
+.SH BINDINGS
+.B bind =
+.IB combo ", " action\fR[\fB, \fIargument\fR]
+.PP
+A combo is modifiers and a key joined by
+.BR + :
+.BR mod ,
+.BR super " (or " logo ),
+.BR alt ,
+.BR ctrl " (or " control ),
+.BR shift ,
+and an XKB key name such as
+.BR Return ,
+.B Tab
+or
+.BR h .
+The first
+.B bind
+line replaces all default bindings; see
+.BR aro (1).
+.TP
+.BI spawn " command"
+Run a command.
+.B exec
+is the same.
+.TP
+.BR close ", " quit ", " float ", " fullscreen ", " overview
+.TP
+.BR focus ", " move ", " resize " " left | right | up | down
+Across monitors too, by the same rule.
+.TP
+.BI workspace " n"\fR,\fP " sendto" " n"
+Go to, or send the window to, workspace 1 to 32.
+.TP
+.BR split " " right | down
+Where the next window opens.
+.TP
+.BR switch " " next | prev
+The window switcher.
+.TP
+.BR layout " " toggle | manual | dwindle | monocle
+.B toggle
+cycles the three.
+.PP
+The same actions work from the command line, as
+.BR "aroctl dispatch" .
+.SH FILES
+.TP
+.I /usr/share/doc/aro/config.example
+An annotated example with every setting.
+.SH SEE ALSO
+.BR aro (1),
+.BR aroctl (1),
+.BR aropaper (1)

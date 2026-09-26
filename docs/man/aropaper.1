@@ -1,0 +1,50 @@
+.TH AROPAPER 1 2026-09-26 "aro 0.2.0" "User Commands"
+.SH NAME
+aropaper \- draw a wallpaper on every screen
+.SH SYNOPSIS
+.B aropaper
+.RI [ file ]
+.SH DESCRIPTION
+.B aropaper
+draws
+.I file
+as the wallpaper on every screen, at each screen's exact resolution,
+covering it and cropping what does not fit.
+It reads anything gdk-pixbuf can: PNG, JPEG, WebP, and SVG when librsvg is
+installed.
+With no
+.IR file ,
+it draws aro's own wallpaper: the SVG when an SVG loader is available,
+otherwise the bundled 4K PNG.
+.PP
+.BR aro (1)
+runs it by itself, following the
+.B wallpaper
+setting in
+.BR aro (5),
+so there is rarely a reason to start it by hand there.
+It is an ordinary layer-shell client, so it also works on other compositors
+with wlr-layer-shell, such as sway, Hyprland, niri and river.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print a short usage message.
+.TP
+.BR \-v ", " \-\-version
+Print the version.
+.SH FILES
+.TP
+.I /usr/share/backgrounds/aro/
+aro's wallpapers:
+.BR aro-wallpaper ,
+.BR aro-wallpaper-dwindle ,
+.B aro-wallpaper-rim
+and
+.BR aro-wallpaper-lenses ,
+each as an SVG and as PNGs at 1920x1080, 2560x1440 and 3840x2160.
+.SH EXIT STATUS
+0 when it was stopped normally, 1 when the file is missing or unreadable,
+or no compositor could be reached.
+.SH SEE ALSO
+.BR aro (1),
+.BR aro (5)
