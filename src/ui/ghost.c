@@ -246,6 +246,8 @@ bool ghost_tick(struct aro_server *s, struct aro_output *o, uint32_t now)
 			ghost_free(g);
 			continue;
 		}
+		/* focusing the next window raises it; in monocle it would cover us */
+		wlr_scene_node_raise_to_top(&g->tree->node);
 		ghost_place(g, (double)el / g->dur_ms);
 		if (g->output == o)
 			more = true;
