@@ -345,7 +345,8 @@ static void cmd_workspaces(struct req *r)
 
 static const char *view_state(struct aro_view *v)
 {
-	return v->fullscreen ? "fullscreen" : v->floating ? "floating" : "tiled";
+	return v->fullscreen ? "fullscreen" : v->sticky ? "sticky"
+	     : v->floating ? "floating" : "tiled";
 }
 
 static const char *view_shell(struct aro_view *v)
@@ -369,10 +370,11 @@ static void view_json(struct req *r, struct aro_view *v)
 	sb_puts(b, ",\"output\":");
 	sb_json_str(b, v->output ? v->output->wlr_output->name : NULL);
 	sb_printf(b, ",\"workspace\":%d,\"state\":\"%s\","
-	          "\"floating\":%s,\"fullscreen\":%s,\"focused\":%s,"
+	          "\"floating\":%s,\"sticky\":%s,\"fullscreen\":%s,\"focused\":%s,"
 	          "\"visible\":%s,\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}",
 	          v->workspace + 1, view_state(v),
 	          v->floating ? "true" : "false",
+	          v->sticky ? "true" : "false",
 	          v->fullscreen ? "true" : "false",
 	          v == r->s->focused ? "true" : "false",
 	          v->output && v->workspace == v->output->cur_ws ? "true" : "false",

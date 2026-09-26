@@ -434,8 +434,8 @@ static ly_box view_draw_box(struct aro_view *v, uint32_t now)
 {
 	ly_box b = v->geo.cur;
 	struct aro_output *o = v->output;
-	if (!o || !o->slide.active)
-		return b;
+	if (!o || !o->slide.active || v->sticky)
+		return b;               /* a sticky window is on both workspaces: it stays put */
 
 	int off;
 	if (view_visible(v))
@@ -648,6 +648,12 @@ static void workspace_show(struct aro_server *s, int ws)
 	slide_start(o, o->cur_ws, ws);
 	o->cur_ws = ws;
 
+	/* sticky windows come along */
+	struct aro_view *sv;
+	wl_list_for_each(sv, &s->views, link)
+		if (sv->sticky && sv->output == o)
+			sv->workspace = ws;
+
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
 		if (v->output != o)
@@ -705,6 +711,7 @@ static void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 {
 	if (!v || ws < 0 || ws >= ARO_MAX_WS || ws == v->workspace)
 		return;
+	v->sticky = false;              /* sent to one workspace on purpose */
 
 	ly_node *next = NULL;
 
@@ -1141,6 +1148,8 @@ static void view_set_floating(struct aro_server *s, struct aro_view *v,
 {
 	if (!v || v->floating == floating)
 		return;
+	if (!floating)
+		v->sticky = false;      /* only floating windows can be sticky */
 
 	if (floating) {
 		if (v->node) {
@@ -3535,7 +3544,7 @@ static void workspace_move_to_output(struct aro_server *s, ly_edge e)
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (v->output != o || v->workspace != from)
+		if (v->output != o || v->workspace != from || v->sticky)
 			continue;
 		v->output = dest;
 		v->workspace = to;
@@ -3638,6 +3647,15 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	case Q_MOVE_WS:
 		workspace_move_to_output(s, (ly_edge)b->num);
+		return;
+	case Q_STICKY:
+		if (f && !f->fullscreen) {
+			if (!f->sticky)
+				view_set_floating(s, f, true);
+			f->sticky = !f->sticky;
+			wlr_log(WLR_INFO, "sticky: %s %s", view_app_id(f) ? view_app_id(f) : "?",
+			        f->sticky ? "on" : "off");
+		}
 		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);

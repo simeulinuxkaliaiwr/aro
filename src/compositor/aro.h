@@ -105,6 +105,7 @@ struct aro_view {
 
 	/* floating windows are outside the tree. fullscreen is separate. */
 	bool floating;
+	bool sticky;            /* floating, and on every workspace of its output */
 	bool fullscreen;
 
 	/* float_follow: client controls floating size after initial configure */

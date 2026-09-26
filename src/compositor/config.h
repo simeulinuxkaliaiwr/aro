@@ -61,6 +61,7 @@ enum q_action {
 	Q_LAYOUT,       /* num: enum q_layout, or Q_LAYOUT_TOGGLE */
 	Q_OVERVIEW,
 	Q_MOVE_WS,      /* num: ly_edge; the current workspace to that monitor */
+	Q_STICKY,
 };
 
 struct q_bind {

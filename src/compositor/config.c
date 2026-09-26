@@ -191,6 +191,7 @@ bool config_parse_action(const char *name, const char *arg,
 	}
 	if (!strcasecmp(name, "close"))      { *action = Q_CLOSE;      return true; }
 	if (!strcasecmp(name, "overview"))   { *action = Q_OVERVIEW;   return true; }
+	if (!strcasecmp(name, "sticky"))     { *action = Q_STICKY;     return true; }
 	if (!strcasecmp(name, "quit"))       { *action = Q_QUIT;       return true; }
 	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
 	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }

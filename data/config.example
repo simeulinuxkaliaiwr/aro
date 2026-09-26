@@ -218,6 +218,7 @@ resize_step = 0.04          # resize amount per keypress
 # actions: spawn <cmd> | close | quit | float | fullscreen
 #          focus|move|resize left|right|up|down
 #          move_workspace left|right|up|down   (to the monitor in that direction)
+#          sticky   (floating, on every workspace of its monitor)
 #          workspace|sendto 1..32
 #          split right|down
 #          switch next|prev

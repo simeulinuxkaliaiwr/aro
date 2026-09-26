@@ -196,6 +196,23 @@ fi
 wait "$CM"
 alive
 
+# 4e. a sticky window follows workspace switches until it is tiled again
+client window 1 4 modal > "$T/sticky.out" 2>&1 &
+CS=$!
+if wait_for "$T/sticky.out" "1 windows open"; then
+	wsof() { ctl -j windows | grep -o '"workspace":[0-9]*,"state":"[a-z]*"' | head -n 1; }
+	ctl dispatch sticky > /dev/null
+	ctl dispatch workspace 3 > /dev/null; sleep 0.3
+	[ "$(wsof)" = '"workspace":3,"state":"sticky"' ] && ok "sticky window follows to workspace 3" \
+		|| bad "sticky window follows to workspace 3: $(wsof)"
+	ctl dispatch float > /dev/null
+	ctl dispatch workspace 1 > /dev/null; sleep 0.3
+	[ "$(wsof)" = '"workspace":3,"state":"tiled"' ] && ok "tiling it ends stickiness" \
+		|| bad "tiling it ends stickiness: $(wsof)"
+fi
+wait "$CS"
+alive
+
 # 4c. a fullscreen game asking to tear, with tearing allowed: the frame path must hold
 config "allow_tearing = true"
 sleep 0.3
