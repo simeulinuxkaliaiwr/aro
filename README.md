@@ -265,6 +265,14 @@ replaces this table entirely.
 | `mod+right-drag` | resize |
 | drag a header / a border | move / resize, no modifier |
 
+## Getting help
+
+Questions, ideas and setups you want to show off go in
+[Discussions](https://github.com/simeulinuxkaliaiwr/aro/discussions).
+Bugs go in [issues](https://github.com/simeulinuxkaliaiwr/aro/issues), with the log
+attached: `aroctl log --old` if aro crashed and you have started it
+again, `aroctl log` otherwise.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -4,6 +4,10 @@ Pull requests are welcome, no issue needed first. For a bug, a clear
 description in the PR is enough; for a behaviour change, say what it was
 like before and why the new way is better.
 
+Not sure whether an idea fits, or stuck on something? Ask in
+[Discussions](https://github.com/simeulinuxkaliaiwr/aro/discussions)
+first; bugs go in issues.
+
 ## Scope
 
 aro is meant to stay small: minimal, flat, one accent colour. A feature
