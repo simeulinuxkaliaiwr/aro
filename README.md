@@ -152,6 +152,8 @@ mod = super
 gaps = 9
 accent = 0xe6a54bff
 wallpaper = ~/pictures/wallpaper.jpg
+cursor_theme = Adwaita
+cursor_size = 24
 bar = false
 monitor eDP-1 {
     scale = auto
