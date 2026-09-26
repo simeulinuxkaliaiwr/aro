@@ -304,6 +304,7 @@ struct aro_server {
 	/* protocols.c: apps that take aro's shortcuts while focused */
 	struct wlr_keyboard_shortcuts_inhibit_manager_v1 *inhibit_mgr;
 	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
+	struct wlr_tearing_control_manager_v1 *tearing_mgr;    /* games that skip vsync */
 	struct aro_gestures gestures;   /* gestures.c */
 	struct aro_tablets tablets;     /* tablet.c */
 	struct wl_listener new_kb_inhibitor;

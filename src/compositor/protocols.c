@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_security_context_v1.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/util/log.h>
 #ifdef ARO_XWAYLAND
@@ -156,6 +157,7 @@ void protocols_init(struct aro_server *s)
 	shortcuts_init(s);
 	security_init(s);
 	wlr_xdg_wm_dialog_v1_create(s->display, 1);     /* modal dialogs; see xdg_type */
+	s->tearing_mgr = wlr_tearing_control_manager_v1_create(s->display, 1);
 }
 
 void protocols_finish(struct aro_server *s)

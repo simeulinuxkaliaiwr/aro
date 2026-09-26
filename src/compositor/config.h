@@ -148,6 +148,7 @@ struct aro_config {
 
 	bool focus_follows_mouse;
 	bool confirm_quit;      /* ask before the quit bind ends the session */
+	bool allow_tearing;     /* fullscreen apps that ask may skip vsync */
 	enum q_layout layout;
 	/* per-workspace layout */
 	int ws_layout[ARO_MAX_WS];

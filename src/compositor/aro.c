@@ -83,6 +83,7 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #ifdef ARO_XWAYLAND
@@ -2495,6 +2496,41 @@ static void new_decoration(struct wl_listener *l, void *data)
 
 /* ── output ────────────────────────────────────────────────────────────── */
 
+/* a fullscreen app that asked for it presents at once, tearing, instead of waiting for vsync */
+static bool output_wants_tearing(struct aro_server *s, struct aro_output *o)
+{
+	if (!s->cfg.allow_tearing || !s->tearing_mgr)
+		return false;
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link) {
+		if (!v->fullscreen || v->output != o || !view_visible(v))
+			continue;
+		struct wlr_surface *surf = view_surface(v);
+		return surf && wlr_tearing_control_manager_v1_surface_hint_from_surface(
+			s->tearing_mgr, surf) == WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC;
+	}
+	return false;
+}
+
+/* one frame; a tearing flip when wanted, a normal one if the output refuses it */
+static void output_commit(struct aro_server *s, struct aro_output *o,
+                          struct wlr_scene_output *so)
+{
+	if (!output_wants_tearing(s, o)) {
+		wlr_scene_output_commit(so, NULL);
+		return;
+	}
+	struct wlr_output_state st;
+	wlr_output_state_init(&st);
+	if (wlr_scene_output_build_state(so, &st, NULL)) {
+		st.tearing_page_flip = true;
+		if (!wlr_output_test_state(o->wlr_output, &st))
+			st.tearing_page_flip = false;
+		wlr_output_commit_state(o->wlr_output, &st);
+	}
+	wlr_output_state_finish(&st);
+}
+
 static void output_frame(struct wl_listener *l, void *data)
 {
 	struct aro_output *o = wl_container_of(l, o, frame);
@@ -2534,7 +2570,7 @@ static void output_frame(struct wl_listener *l, void *data)
 	struct wlr_scene_output *so =
 		wlr_scene_get_scene_output(s->scene, o->wlr_output);
 	if (so) {
-		wlr_scene_output_commit(so, NULL);
+		output_commit(s, o, so);
 		struct timespec ts;
 		clock_gettime(CLOCK_MONOTONIC, &ts);
 		wlr_scene_output_send_frame_done(so, &ts);

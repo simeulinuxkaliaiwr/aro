@@ -57,6 +57,13 @@ Default: false.
 Ask before the quit binding ends the session.
 Default: true.
 .TP
+.BI "allow_tearing = " bool
+Let a fullscreen app that asks for it, usually a game, show each frame at
+once instead of waiting for the screen's refresh.
+Input lag drops, at the cost of visible tearing.
+Only that app is affected, and only while it is fullscreen.
+Default: false.
+.TP
 .BR layout " = " manual | dwindle | monocle
 How new windows are placed.
 .B manual

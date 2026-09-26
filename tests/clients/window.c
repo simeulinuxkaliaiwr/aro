@@ -1,8 +1,9 @@
-/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" marks the first one a modal dialog */
+/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
 #include "xdg-dialog-v1-client-protocol.h"
+#include "tearing-control-v1-client-protocol.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,12 +23,15 @@ struct win {
 static struct globals g;
 static struct win wins[MAX_WINDOWS];
 static struct xdg_wm_dialog_v1 *dialogs;
+static struct wp_tearing_control_manager_v1 *tearing;
 
 static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t v)
 {
 	(void)d; (void)v;
 	if (!strcmp(iface, xdg_wm_dialog_v1_interface.name))
 		dialogs = wl_registry_bind(r, name, &xdg_wm_dialog_v1_interface, 1);
+	else if (!strcmp(iface, wp_tearing_control_manager_v1_interface.name))
+		tearing = wl_registry_bind(r, name, &wp_tearing_control_manager_v1_interface, 1);
 }
 
 static void reg_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
@@ -67,6 +71,7 @@ int main(int argc, char **argv)
 	int n = argc > 1 ? atoi(argv[1]) : 3;
 	int hold = argc > 2 ? atoi(argv[2]) : 3;
 	int modal = argc > 3 && !strcmp(argv[3], "modal");
+	int tear = argc > 3 && !strcmp(argv[3], "tear");
 	if (n < 1 || n > MAX_WINDOWS)
 		fail("usage: window N HOLD [modal], N from 1 to %d", MAX_WINDOWS);
 	connect_globals(&g);
@@ -74,6 +79,8 @@ int main(int argc, char **argv)
 	roundtrip(&g);
 	if (modal && !dialogs)
 		fail("aro does not offer xdg-dialog");
+	if (tear && !tearing)
+		fail("aro does not offer tearing-control");
 
 	for (int i = 0; i < n; i++) {
 		struct win *w = &wins[i];
@@ -85,6 +92,12 @@ int main(int argc, char **argv)
 		xdg_toplevel_set_app_id(w->top, "aro-test");
 		if (modal && i == 0)
 			xdg_dialog_v1_set_modal(xdg_wm_dialog_v1_get_xdg_dialog(dialogs, w->top));
+		if (tear && i == 0) {
+			xdg_toplevel_set_fullscreen(w->top, NULL);
+			wp_tearing_control_v1_set_presentation_hint(
+				wp_tearing_control_manager_v1_get_tearing_control(tearing, w->surf),
+				WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC);
+		}
 		wl_surface_commit(w->surf);
 		roundtrip(&g);
 	}
@@ -100,6 +113,13 @@ int main(int argc, char **argv)
 	fflush(stdout);
 
 	for (int i = 0; i < hold * 10; i++) {
+		/* a game draws all the time: new frames keep the tearing path busy */
+		if (tear && wins[0].drawn) {
+			wl_surface_attach(wins[0].surf, solid_buffer(&g, wins[0].w > 0 ? wins[0].w : 400,
+				wins[0].h > 0 ? wins[0].h : 300, i & 1 ? 0xff400000 : 0xff004000), 0, 0);
+			wl_surface_damage_buffer(wins[0].surf, 0, 0, INT32_MAX, INT32_MAX);
+			wl_surface_commit(wins[0].surf);
+		}
 		roundtrip(&g);
 		usleep(100000);
 	}

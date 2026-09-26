@@ -86,7 +86,7 @@ ctl version > /dev/null && ok "aroctl answers" || bad "aroctl answers"
 
 # protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
 client globals > "$T/globals.out"
-for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 \
+for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 wp_tearing_control_manager_v1 \
 	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1; do
 	grep -q "^$p " "$T/globals.out" && ok "offers $p" || bad "offers $p"
 done
@@ -178,6 +178,21 @@ if wait_for "$T/plain.out" "1 windows open"; then
 	ctl windows | grep -q "tiled.*aro-test" && ok "plain window tiles" || bad "plain window tiles"
 fi
 wait "$CM"
+alive
+
+# 4c. a fullscreen game asking to tear, with tearing allowed: the frame path must hold
+config "allow_tearing = true"
+sleep 0.3
+client window 1 2 tear > "$T/tear.out" 2>&1 &
+CT=$!
+if wait_for "$T/tear.out" "1 windows open"; then
+	sleep 0.3
+	ctl windows | grep -q "fullscreen.*aro-test" && ok "tearing game goes fullscreen" \
+		|| bad "tearing game goes fullscreen"
+fi
+wait "$CT" && ok "frames keep coming with tearing allowed" || bad "frames keep coming with tearing allowed"
+config
+sleep 0.3
 alive
 
 # 4b. an app that takes the shortcuts gets them while focused, and only then

@@ -11,6 +11,9 @@ focus_follows_mouse = false
 # kills all open windows if you say yes.
 confirm_quit = true
 
+# a fullscreen game that asks for it may skip vsync: lower input lag, visible tearing.
+allow_tearing = false
+
 # manual: new windows split next to the focused one (i3 style).
 # dwindle: splits follow the longer axis of the frame, spiraling automatically (Hyprland style).
 # monocle: one window at a time, filling the screen; mod+hjkl steps through

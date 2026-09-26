@@ -1209,6 +1209,8 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->focus_follows_mouse);
 		} else if (!strcasecmp(key, "confirm_quit")) {
 			ok = parse_bool(value, &c->confirm_quit);
+		} else if (!strcasecmp(key, "allow_tearing")) {
+			ok = parse_bool(value, &c->allow_tearing);
 		} else if (!strcasecmp(key, "bar")) {
 			bool b;
 			if (!strcasecmp(value, "auto"))
