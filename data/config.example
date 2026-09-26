@@ -31,6 +31,12 @@ keyboard_layout = us
 # keyboard_model =
 # keyboard_rules =
 
+# === touchpad ===
+touchpad_tap = true
+touchpad_natural_scroll = false
+touchpad_disable_while_typing = true
+touchpad_speed = 0.0            # -1.0 to 1.0
+
 # === monitors ===
 # one block per screen. the name is a glob matched against the connector
 # name (e.g. HDMI-A-1) and the "make model serial" string.
@@ -136,6 +142,12 @@ switcher_preview_height = 260   # capped at half the screen; with many
                                 # windows previews shrink (to 60% at most)
                                 # so the row fits the screen width
 
+# === overview (mod+o) ===
+# every workspace, zoomed out along the workspace_slide axis.
+overview_zoom = 0.5
+overview_ms = 250
+overview_tint = 0x0c0f1366      # over the wallpaper, which is blurred with effects
+
 # === pointer ===
 drag_threshold = 12         # pixels to drag before a tiled window detaches
 resize_zone = 8             # edge grab area in pixels
@@ -207,6 +219,7 @@ bind = mod+f, fullscreen
 bind = mod+Tab, switch, next
 bind = mod+shift+Tab, switch, prev
 bind = mod+t, layout, toggle
+bind = mod+o, overview
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

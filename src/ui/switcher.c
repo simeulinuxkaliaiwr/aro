@@ -175,47 +175,6 @@ static void tile_colors(struct aro_server *s, struct switcher_tile *t,
 	          t->title.scale, t->title.max_w);
 }
 
-/* the window's last frame, cropped to its geometry (no CSD shadow) */
-static struct wlr_scene_buffer *preview_create(struct wlr_scene_tree *parent,
-                                               struct aro_view *v, int w, int h,
-                                               int radius)
-{
-	struct wlr_surface *surf = view_surface(v);
-	if (!surf || !surf->buffer)
-		return NULL;
-
-	/* the scene locks the buffer: it stays as it is now, a snapshot */
-	struct wlr_buffer *buf = &surf->buffer->base;
-	struct wlr_scene_buffer *b = wlr_scene_buffer_create(parent, buf);
-	if (!b)
-		return NULL;
-
-	struct wlr_box g = { 0 };
-	view_geometry(v, &g);
-	float sc = surf->current.scale > 0 ? (float)surf->current.scale : 1.0f;
-	if (g.width > 0 && g.height > 0) {
-		struct wlr_fbox src = { g.x * sc, g.y * sc, g.width * sc, g.height * sc };
-		if (src.x < 0)
-			src.x = 0;
-		if (src.y < 0)
-			src.y = 0;
-		if (src.x + src.width > buf->width)
-			src.width = buf->width - src.x;
-		if (src.y + src.height > buf->height)
-			src.height = buf->height - src.y;
-		if (src.width > 0 && src.height > 0)
-			wlr_scene_buffer_set_source_box(b, &src);
-	}
-	wlr_scene_buffer_set_dest_size(b, w, h);
-#ifdef ARO_EFFECTS
-	if (radius > 0)
-		wlr_scene_buffer_set_corner_radius(b, radius);
-#else
-	(void)radius;
-#endif
-	return b;
-}
-
 /* width a preview wants at height h: the window's own shape, within reason */
 static int preview_width(struct aro_view *v, int h)
 {
@@ -325,7 +284,7 @@ static bool card_build(struct aro_server *s)
 		set_radius(t->edge, th->radius);
 		set_radius(t->bg, inner_radius(th));
 
-		t->preview = preview_create(w->tree, v, pw, ph, inner_radius(th));
+		t->preview = ui_snapshot_create(w->tree, v, pw, ph, inner_radius(th));
 		t->ring = rect(w->tree, th->accent_soft);   /* over the preview */
 		if (!t->ring || !qtext_init(&t->title, w->tree, th->font_small)) {
 			tiles_free(w);
@@ -448,7 +407,7 @@ static bool collect(struct aro_server *s)
 void switcher_step(struct aro_server *s, int dir)
 {
 	struct aro_switcher *w = &s->switcher;
-	if (aro_locked(s) || prompt_active(s))
+	if (aro_locked(s) || prompt_active(s) || overview_shown(s))
 		return;
 
 	if (!w->active) {

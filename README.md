@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/wallpaper/aro-wallpaper-1920x1080.png" alt="aro" width="100%">
+  <img src="docs/aro-banner.svg" alt="aro" width="100%">
 </p>
 
 <p align="center">
@@ -57,7 +57,7 @@ pacman -S --needed base-devel meson ninja wayland wayland-protocols \
 ```
 
 `librsvg` is only what lets `aropaper` read SVG. Without it the default
-wallpaper falls back to a 4K PNG.
+wallpaper falls back to the default wallpaper.
 
 ```sh
 # installing it system-wide
@@ -84,19 +84,16 @@ Options:
 From a TTY:
 
 ```sh
-./build/aro
+aro # if installed, if not: ./build/aro
 ```
 
 Nested inside another compositor, to try it out:
 
 ```sh
-./build/aro -m alt -s foot
+aro -m alt -s foot # If not installed, ./build/aro
 ```
 
-`-m alt` matters: a host compositor grabs Super before aro ever sees it, so
-Super bindings never arrive. `-s` runs a command once the session is up.
-Do not debug a crashing build on a TTY — it holds DRM master, and you end
-up rebooting.
+`-m alt` because your main compositor is already using the SUPER key.
 
 ## Configuration
 
@@ -130,8 +127,7 @@ aro runs `aropaper` itself, so there is a wallpaper with no config at all.
 SVG, covering the screen and cropping the overflow), and `wallpaper = none`
 leaves the background to you — `exec = swaybg -i …`, for instance.
 
-`aropaper` is an ordinary layer-shell client, so it also works on sway,
-Hyprland and other wlroots compositors:
+`aropaper` is an ordinary layer-shell client, so it also works on any compositor that has layer shell — sway, Hyprland, niri and river among them, though not GNOME
 
 ```sh
 aropaper ~/pictures/wallpaper.jpg

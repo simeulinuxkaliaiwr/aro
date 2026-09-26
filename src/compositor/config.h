@@ -51,6 +51,7 @@ enum q_action {
 	Q_SPLIT,        /* num: ly_dir */
 	Q_SWITCH,       /* num: +1 next, -1 previous */
 	Q_LAYOUT,       /* num: enum q_layout, or Q_LAYOUT_TOGGLE */
+	Q_OVERVIEW,
 };
 
 struct q_bind {
@@ -121,6 +122,9 @@ struct q_theme {
 	uint32_t scrim;                 /* behind a prompt */
 	int notify_ms, notify_max_w;
 	int switch_delay_ms, switch_debounce_ms, switch_preview_h;
+	double overview_zoom;
+	int overview_ms;
+	uint32_t overview_tint;
 
 	char *font, *font_small;        /* owned */
 };
@@ -152,6 +156,10 @@ struct aro_config {
 
 	enum q_wallpaper wallpaper;
 	char *wallpaper_file;   /* Q_WALLPAPER_FILE only; owned, `~` unexpanded */
+
+	/* touchpad (libinput) */
+	bool tp_tap, tp_natural_scroll, tp_dwt;
+	double tp_speed;        /* -1..1 */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;

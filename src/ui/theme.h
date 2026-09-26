@@ -102,6 +102,11 @@
 #define TH_SWITCH_PREVIEW_H   260       /* preview height; half the screen
                                            at most */
 
+/* overview */
+#define TH_OVERVIEW_ZOOM 0.5    /* workspace size, of the screen */
+#define TH_OVERVIEW_MS   250
+#define TH_OVERVIEW_TINT 0x0c0f1366     /* over the blurred wallpaper */
+
 /* confirm quit default */
 #define TH_CONFIRM_QUIT 1
 

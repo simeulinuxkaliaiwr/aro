@@ -35,6 +35,11 @@
 
 #include <wlr/backend.h>
 #include <wlr/backend/session.h>
+#include <wlr/config.h>
+#if WLR_HAS_LIBINPUT_BACKEND
+#include <libinput.h>
+#include <wlr/backend/libinput.h>
+#endif
 #include <wlr/render/allocator.h>
 #ifdef ARO_EFFECTS
 #include <scenefx/render/fx_renderer/fx_renderer.h>
@@ -186,6 +191,11 @@ static ly_box usable_area(struct aro_output *o)
 		u = o->box;
 	u.h -= o->server->cfg.theme.bar_h;
 	return u;
+}
+
+ly_box aro_output_usable(struct aro_output *o)
+{
+	return usable_area(o);
 }
 
 /* final target geometry */
@@ -401,7 +411,7 @@ static void slide_start(struct aro_output *o, int old, int ws)
 	const uint32_t now = aro_now_ms();
 
 	if (s->cfg.ws_slide == Q_SLIDE_OFF || s->cfg.theme.ws_slide_ms <= 0 ||
-	    !o->wlr_output->enabled) {
+	    !o->wlr_output->enabled || overview_shown(s)) {
 		o->slide.active = false;
 		return;
 	}
@@ -1754,6 +1764,7 @@ static void view_map(struct wl_listener *l, void *data)
 	ui_frame_clip_content(v);
 	ftl_create(v);
 	mru_add(s, v);
+	overview_rebuild(s);
 
 	/* don't focus hidden windows */
 	view_set_visible(v, here);
@@ -1775,6 +1786,7 @@ static void view_unmap(struct wl_listener *l, void *data)
 	grab_forget(s, v);
 	ftl_destroy(v);
 	mru_remove(s, v);
+	overview_rebuild(s);
 
 	/* drop tiled resize grab if windows close */
 	if (s->cursor_mode == ARO_CURSOR_RESIZE_TILE)
@@ -1821,6 +1833,7 @@ static void view_commit(struct wl_listener *l, void *data)
 
 	/* clip rounded corners */
 	ui_frame_clip_content(v);
+	overview_view_commit(v->server, v);
 }
 
 static void view_set_title(struct wl_listener *l, void *data)
@@ -2054,6 +2067,7 @@ static void layer_map(struct wl_listener *listener, void *data)
 
 	arrange_layers(l->server);
 	aro_arrange(l->server);
+	overview_rebuild(l->server);
 
 	/* focus interactive layer surfaces */
 	if (l->layer_surface->current.keyboard_interactive)
@@ -2070,6 +2084,7 @@ static void layer_unmap(struct wl_listener *listener, void *data)
 
 	arrange_layers(l->server);
 	aro_arrange(l->server);
+	overview_rebuild(l->server);
 }
 
 static void layer_commit(struct wl_listener *listener, void *data)
@@ -2089,6 +2104,7 @@ static void layer_commit(struct wl_listener *listener, void *data)
 		arrange_layers(l->server);
 		aro_arrange(l->server);
 	}
+	overview_layer_commit(l->server, ls->surface);
 }
 
 static void layer_destroy(struct wl_listener *listener, void *data)
@@ -2253,6 +2269,8 @@ static void output_frame(struct wl_listener *l, void *data)
 		moving = true;
 	if (prompt_tick(s, now))
 		moving = true;
+	if (overview_tick(s, now))
+		moving = true;
 
 	/* animate drop preview */
 	if (s->preview.active) {
@@ -2268,6 +2286,7 @@ static void output_frame(struct wl_listener *l, void *data)
 		struct timespec ts;
 		clock_gettime(CLOCK_MONOTONIC, &ts);
 		wlr_scene_output_send_frame_done(so, &ts);
+		overview_frame_done(s, o, &ts);
 	}
 
 	if (moving)
@@ -2485,6 +2504,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 	/* dismiss prompt on output loss */
 	prompt_output_gone(s, o);
 	switcher_output_gone(s, o);
+	overview_output_gone(s, o);
 
 	/* clear grabs on output loss */
 	if (s->grabbed && s->grabbed->output == o)
@@ -3237,6 +3257,10 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 	case Q_LAYOUT:
 		layout_set(s, b->num);
 		return;
+	case Q_OVERVIEW:
+		if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
+			overview_toggle(s);
+		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);
 		return;
@@ -3371,6 +3395,14 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		return;
 	}
 
+	/* overview owns key presses; releases still reach the client */
+	if (!handled && !aro_locked(s) && overview_active(s) &&
+	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		for (int i = 0; i < nraw && overview_active(s); i++)
+			overview_key(s, mods, raw[i]);
+		return;
+	}
+
 	/*
 	 * The switcher owns key presses while it is open, so mod+q on the way
 	 * to a window cannot close another. Releases still reach the client:
@@ -3493,6 +3525,57 @@ static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev,
 	wl_list_insert(&s->keyboards, &kb->link);
 }
 
+/* touchpad settings; tap finger count tells a touchpad from a mouse */
+static void pointer_configure(struct aro_server *s,
+                              struct wlr_input_device *dev)
+{
+#if WLR_HAS_LIBINPUT_BACKEND
+	if (!wlr_input_device_is_libinput(dev))
+		return;
+	struct libinput_device *li = wlr_libinput_get_device_handle(dev);
+	if (!li || libinput_device_config_tap_get_finger_count(li) <= 0)
+		return;
+
+	const struct aro_config *c = &s->cfg;
+	libinput_device_config_tap_set_enabled(li, c->tp_tap
+		? LIBINPUT_CONFIG_TAP_ENABLED : LIBINPUT_CONFIG_TAP_DISABLED);
+	if (libinput_device_config_scroll_has_natural_scroll(li))
+		libinput_device_config_scroll_set_natural_scroll_enabled(li,
+			c->tp_natural_scroll);
+	if (libinput_device_config_dwt_is_available(li))
+		libinput_device_config_dwt_set_enabled(li, c->tp_dwt
+			? LIBINPUT_CONFIG_DWT_ENABLED : LIBINPUT_CONFIG_DWT_DISABLED);
+	if (libinput_device_config_accel_is_available(li))
+		libinput_device_config_accel_set_speed(li, c->tp_speed);
+#else
+	(void)s;
+	(void)dev;
+#endif
+}
+
+static void pointer_destroy(struct wl_listener *l, void *data)
+{
+	(void)data;
+	struct aro_pointer *p = wl_container_of(l, p, destroy);
+	wl_list_remove(&p->destroy.link);
+	wl_list_remove(&p->link);
+	free(p);
+}
+
+static void new_pointer(struct aro_server *s, struct wlr_input_device *dev)
+{
+	pointer_configure(s, dev);
+
+	struct aro_pointer *p = calloc(1, sizeof *p);
+	if (!p)
+		return;         /* works, just not re-read on reload */
+	p->server = s;
+	p->dev = dev;
+	p->destroy.notify = pointer_destroy;
+	wl_signal_add(&dev->events.destroy, &p->destroy);
+	wl_list_insert(&s->pointers, &p->link);
+}
+
 static void new_input(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_input);
@@ -3502,6 +3585,7 @@ static void new_input(struct wl_listener *l, void *data)
 		new_keyboard(s, dev, false);
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
+		new_pointer(s, dev);
 
 		/* map absolute pointers to their output */
 		struct wlr_pointer *p = wlr_pointer_from_input_device(dev);
@@ -3776,6 +3860,8 @@ static void cursor_motion(struct wl_listener *l, void *data)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && overview_active(s))
+		return;
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_motion(s);
 	else
@@ -3804,6 +3890,8 @@ static void cursor_motion_abs(struct wl_listener *l, void *data)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && overview_active(s))
+		return;
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_motion(s);
 	else
@@ -3821,6 +3909,16 @@ static void cursor_button(struct wl_listener *l, void *data)
 		prompt_pointer_button(s, s->cursor->x, s->cursor->y,
 		                      ev->state == WL_POINTER_BUTTON_STATE_PRESSED);
 		prompt_after(s, true);
+		return;
+	}
+
+	if (!aro_locked(s) && overview_active(s)) {
+		bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
+		/* a client that saw the press gets the release */
+		if (!down && s->seat->pointer_state.button_count > 0)
+			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
+			                               ev->button, ev->state);
+		overview_pointer_button(s, s->cursor->x, s->cursor->y, down);
 		return;
 	}
 
@@ -3895,6 +3993,10 @@ static void cursor_axis(struct wl_listener *l, void *data)
 	struct wlr_pointer_axis_event *ev = data;
 	if (!aro_locked(s) && prompt_active(s))
 		return;                 /* no scrolling the window under the card */
+	if (!aro_locked(s) && overview_active(s)) {
+		overview_pointer_axis(s, ev->delta, ev->delta_discrete);
+		return;
+	}
 	wlr_seat_pointer_notify_axis(s->seat, ev->time_msec, ev->orientation,
 	                             ev->delta, ev->delta_discrete, ev->source,
 	                             ev->relative_direction);
@@ -4377,6 +4479,7 @@ static void xwl_commit(struct wl_listener *l, void *data)
 	(void)data;
 	/* new buffers arrive square; round them as they come */
 	ui_frame_clip_content(v);
+	overview_view_commit(v->server, v);
 }
 
 /* answer unmapped X11 configure */
@@ -4655,6 +4758,11 @@ static void config_reload(struct aro_server *s)
 		if (!kb->is_virtual)
 			apply_keymap(s, kb->wlr_keyboard);
 
+	/* reapply touchpad settings */
+	struct aro_pointer *ptr;
+	wl_list_for_each(ptr, &s->pointers, link)
+		pointer_configure(s, ptr->dev);
+
 	/* update background color */
 	if (s->root_bg) {
 		float bg[4];
@@ -4684,6 +4792,7 @@ static void config_reload(struct aro_server *s)
 	notify_retheme(s);
 	prompt_retheme(s);
 	switcher_retheme(s);
+	overview_rebuild(s);
 	notify_config_errors(s);
 
 	/* reapply monitor blocks after errors */
@@ -4904,6 +5013,7 @@ int main(int argc, char *argv[])
 	wl_list_init(&s.outputs_off);
 	wl_list_init(&s.views);
 	wl_list_init(&s.keyboards);
+	wl_list_init(&s.pointers);
 	wl_list_init(&s.layers);
 	wl_list_init(&s.notifications);
 
@@ -5004,6 +5114,7 @@ int main(int argc, char *argv[])
 	s.l_tiled      = wlr_scene_tree_create(&s.scene->tree);
 	s.l_preview    = wlr_scene_tree_create(&s.scene->tree);
 	s.l_float      = wlr_scene_tree_create(&s.scene->tree);
+	s.l_overview   = wlr_scene_tree_create(&s.scene->tree);
 	s.l_unmanaged  = wlr_scene_tree_create(&s.scene->tree);
 	s.l_bar        = wlr_scene_tree_create(&s.scene->tree);
 	s.l_top        = wlr_scene_tree_create(&s.scene->tree);
@@ -5011,7 +5122,7 @@ int main(int argc, char *argv[])
 	s.l_notify     = wlr_scene_tree_create(&s.scene->tree);
 	s.l_overlay    = wlr_scene_tree_create(&s.scene->tree);
 	if (!s.root_bg || !s.l_background || !s.l_bottom || !s.l_tiled ||
-	    !s.l_preview || !s.l_float || !s.l_unmanaged || !s.l_bar || !s.l_top || !s.l_fullscreen || !s.l_notify ||
+	    !s.l_preview || !s.l_float || !s.l_overview || !s.l_unmanaged || !s.l_bar || !s.l_top || !s.l_fullscreen || !s.l_notify ||
 	    !s.l_overlay) {
 		wlr_log(WLR_ERROR, "could not build the scene layers");
 		return 1;
@@ -5201,6 +5312,7 @@ int main(int argc, char *argv[])
 	ui_preview_finish(&s.preview);
 	notify_finish(&s);
 	prompt_finish(&s);
+	overview_finish(&s);
 	switcher_finish(&s);
 	config_watch_stop(&s);
 	config_finish(&s.cfg);

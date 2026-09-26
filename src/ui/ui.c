@@ -8,7 +8,8 @@
 
 #include <stdlib.h>
 
-
+#include <wlr/types/wlr_buffer.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/util/box.h>
 
 void ui_color(uint32_t rgba, float out[4])
@@ -267,6 +268,71 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 	          scale, avail);
 	qtext_move(&v->title, th->border + th->text_pad,
 	           th->border + (th->header_h - v->title.h) / 2);
+}
+
+/* ── snapshots ─────────────────────────────────────────────────────────── */
+
+/* buffer crop to the window geometry (no CSD shadow); false: no buffer */
+bool ui_snapshot_src(struct aro_view *v, struct wlr_fbox *out)
+{
+	struct wlr_surface *surf = view_surface(v);
+	if (!surf || !surf->buffer)
+		return false;
+	struct wlr_buffer *buf = &surf->buffer->base;
+	*out = (struct wlr_fbox){ 0, 0, buf->width, buf->height };
+
+	struct wlr_box g = { 0 };
+	view_geometry(v, &g);
+	float sc = surf->current.scale > 0 ? (float)surf->current.scale : 1.0f;
+	if (g.width <= 0 || g.height <= 0)
+		return true;
+	struct wlr_fbox src = { g.x * sc, g.y * sc, g.width * sc, g.height * sc };
+	if (src.x < 0)
+		src.x = 0;
+	if (src.y < 0)
+		src.y = 0;
+	if (src.x + src.width > buf->width)
+		src.width = buf->width - src.x;
+	if (src.y + src.height > buf->height)
+		src.height = buf->height - src.y;
+	if (src.width > 0 && src.height > 0)
+		*out = src;
+	return true;
+}
+
+/* the window's current buffer; the scene holds a lock on it */
+struct wlr_scene_buffer *ui_snapshot_create(struct wlr_scene_tree *parent,
+                                            struct aro_view *v, int w, int h,
+                                            int radius)
+{
+	struct wlr_surface *surf = view_surface(v);
+	if (!surf || !surf->buffer)
+		return NULL;
+
+	struct wlr_buffer *buf = &surf->buffer->base;
+	struct wlr_scene_buffer *b = wlr_scene_buffer_create(parent, buf);
+	if (!b)
+		return NULL;
+
+	struct wlr_fbox src;
+	if (ui_snapshot_src(v, &src))
+		wlr_scene_buffer_set_source_box(b, &src);
+	wlr_scene_buffer_set_dest_size(b, w, h);
+#ifdef ARO_EFFECTS
+	if (radius > 0)
+		wlr_scene_buffer_set_corner_radius(b, radius);
+#else
+	(void)radius;
+#endif
+	return b;
+}
+
+/* after a commit: show the new buffer */
+void ui_snapshot_update(struct wlr_scene_buffer *b, struct aro_view *v)
+{
+	struct wlr_surface *surf = view_surface(v);
+	if (b && surf && surf->buffer)
+		wlr_scene_buffer_set_buffer_with_damage(b, &surf->buffer->base, NULL);
 }
 
 /* ── the drop indicator ────────────────────────────────────────────────── */

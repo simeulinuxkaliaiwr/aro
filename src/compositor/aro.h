@@ -17,6 +17,7 @@
 #include "ime.h"
 #include "lock.h"
 #include "notify.h"
+#include "overview.h"
 #include "prompt.h"
 #include "switcher.h"
 #include "layout.h"
@@ -25,6 +26,8 @@
 
 struct wlr_scene_tree;
 struct wlr_scene_rect;
+struct wlr_scene_buffer;
+struct wlr_fbox;
 struct wlr_scene_layer_surface_v1;
 struct wlr_layer_surface_v1;
 struct wlr_surface;
@@ -222,6 +225,14 @@ struct aro_keyboard {
 	struct wl_listener destroy;
 };
 
+/* kept so a reload can reconfigure it */
+struct aro_pointer {
+	struct wl_list link;
+	struct aro_server *server;
+	struct wlr_input_device *dev;
+	struct wl_listener destroy;
+};
+
 /* one per pointer constraint, so its destroy can be seen */
 struct aro_constraint {
 	struct aro_server *server;
@@ -249,6 +260,7 @@ struct aro_server {
 	struct wlr_scene_tree *l_tiled;         /* our windows */
 	struct wlr_scene_tree *l_preview;       /* drop indicator, over the tiles */
 	struct wlr_scene_tree *l_float;         /* dialogs, pickers, toggled */
+	struct wlr_scene_tree *l_overview;      /* under the bar */
 	struct wlr_scene_tree *l_unmanaged;     /* X11 override-redirect */
 	struct wlr_scene_tree *l_bar;           /* our bar */
 	struct wlr_scene_tree *l_top;
@@ -286,10 +298,12 @@ struct aro_server {
 	struct wl_list outputs_off;     /* disabled by config or wlr-randr */
 	struct wl_list views;
 	struct wl_list keyboards;
+	struct wl_list pointers;
 	struct wl_list layers;
 	struct wl_list notifications;
 	struct aro_prompt prompt;            /* the modal yes/no card */
 	struct aro_switcher switcher;        /* mod+tab */
+	struct aro_overview overview;
 	struct wl_list inhibitors;
 
 	/* per-output state lives in aro_output */
@@ -391,6 +405,8 @@ struct aro_output *aro_focused_output(struct aro_server *s);
 /* for ipc.c: the same paths the keyboard and the config watch take */
 void aro_run_action(struct aro_server *s, const struct q_bind *b);
 void aro_config_reload(struct aro_server *s);
+/* tiling area: usable minus our bar */
+ly_box aro_output_usable(struct aro_output *o);
 /* where the frame is going (view_target): output box, fbox or leaf box */
 ly_box aro_view_box(struct aro_view *v);
 const char *aro_view_type(struct aro_view *v);
@@ -418,6 +434,13 @@ void ui_frame_clip_content(struct aro_view *v);
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen);
 void ui_frame_retheme(struct aro_view *v);
 void ui_color(uint32_t rgba, float out[4]);
+
+/* a window's buffer as a scene node; shared by switcher and overview */
+bool ui_snapshot_src(struct aro_view *v, struct wlr_fbox *out);
+struct wlr_scene_buffer *ui_snapshot_create(struct wlr_scene_tree *parent,
+                                            struct aro_view *v, int w, int h,
+                                            int radius);
+void ui_snapshot_update(struct wlr_scene_buffer *b, struct aro_view *v);
 
 /* drop preview */
 bool ui_preview_create(struct aro_preview *p, struct aro_server *s);

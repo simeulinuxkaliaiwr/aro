@@ -104,9 +104,15 @@ if get_option('compositor')
     deps += dependency('scenefx-0.5')  # needs to come before wlroots
   endif
 
+  wlroots = dependency('wlroots-0.20')
+  # touchpad settings; only when wlroots has the libinput backend
+  libinput = dependency('libinput',
+    required: wlroots.get_variable('have_libinput_backend') == 'true')
+
   # wlroots itself must have XWayland support built in.
   deps += [
-    dependency('wlroots-0.20'),
+    wlroots,
+    libinput,
     dependency('wayland-server'),
     dependency('xkbcommon'),
     dependency('pixman-1'),
@@ -148,6 +154,7 @@ if get_option('compositor')
     'src/ui/ui.c',
     'src/ui/bar.c',
     'src/ui/notify.c',
+    'src/ui/overview.c',
     'src/ui/prompt.c',
     'src/ui/switcher.c',
     'src/ui/text.c',

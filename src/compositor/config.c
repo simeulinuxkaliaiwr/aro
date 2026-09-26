@@ -179,6 +179,7 @@ bool config_parse_action(const char *name, const char *arg,
 		return true;
 	}
 	if (!strcasecmp(name, "close"))      { *action = Q_CLOSE;      return true; }
+	if (!strcasecmp(name, "overview"))   { *action = Q_OVERVIEW;   return true; }
 	if (!strcasecmp(name, "quit"))       { *action = Q_QUIT;       return true; }
 	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
 	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }
@@ -304,6 +305,7 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_Tab, Q_SWITCH, 1, NULL);
 	bind_add(c, M | S, XKB_KEY_Tab, Q_SWITCH, -1, NULL);
 	bind_add(c, M, XKB_KEY_t, Q_LAYOUT, Q_LAYOUT_TOGGLE, NULL);
+	bind_add(c, M, XKB_KEY_o, Q_OVERVIEW, 0, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -349,6 +351,8 @@ void config_defaults(struct aro_config *c)
 	c->workspaces = TH_WORKSPACES;
 	c->focus_follows_mouse = TH_FOCUS_FOLLOWS_MOUSE;
 	c->confirm_quit = TH_CONFIRM_QUIT;
+	c->tp_tap = true;
+	c->tp_dwt = true;
 	c->bar = TH_BAR;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
@@ -384,6 +388,8 @@ void config_defaults(struct aro_config *c)
 		.switch_delay_ms = TH_SWITCH_DELAY_MS,
 		.switch_debounce_ms = TH_SWITCH_DEBOUNCE_MS,
 		.switch_preview_h = TH_SWITCH_PREVIEW_H,
+		.overview_zoom = TH_OVERVIEW_ZOOM, .overview_ms = TH_OVERVIEW_MS,
+		.overview_tint = TH_OVERVIEW_TINT,
 	};
 	c->theme.font = strdup(TH_FONT);
 	c->theme.font_small = strdup(TH_FONT_SMALL);
@@ -966,6 +972,9 @@ static const struct theme_key theme_keys[] = {
 	{ "switcher_debounce_ms",   K_INT, T(switch_debounce_ms), 0, 5000 },
 	{ "switcher_preview_height",K_INT, T(switch_preview_h),   40, 1000 },
 	{ "scrim_color",     K_COLOR, T(scrim),        0, 0 },
+	{ "overview_zoom",   K_DOUBLE, T(overview_zoom), 0, 0 },
+	{ "overview_ms",     K_INT,   T(overview_ms),  0, 2000 },
+	{ "overview_tint",   K_COLOR, T(overview_tint), 0, 0 },
 
 	{ "font",       K_STR, T(font),       0, 0 },
 	{ "font_small", K_STR, T(font_small), 0, 0 },
@@ -1149,6 +1158,17 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = set_str(&c->xkb_model, value);
 		} else if (!strcasecmp(key, "keyboard_rules")) {
 			ok = set_str(&c->xkb_rules, value);
+		} else if (!strcasecmp(key, "touchpad_tap")) {
+			ok = parse_bool(value, &c->tp_tap);
+		} else if (!strcasecmp(key, "touchpad_natural_scroll")) {
+			ok = parse_bool(value, &c->tp_natural_scroll);
+		} else if (!strcasecmp(key, "touchpad_disable_while_typing")) {
+			ok = parse_bool(value, &c->tp_dwt);
+		} else if (!strcasecmp(key, "touchpad_speed")) {
+			double d;
+			ok = parse_double(value, &d) && d >= -1.0 && d <= 1.0;
+			if (ok)
+				c->tp_speed = d;
 		} else if (!strcasecmp(key, "focus_follows_mouse")) {
 			ok = parse_bool(value, &c->focus_follows_mouse);
 		} else if (!strcasecmp(key, "confirm_quit")) {

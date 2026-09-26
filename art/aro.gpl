@@ -1,0 +1,13 @@
+GIMP Palette
+Name: aro
+Columns: 3
+# colours from src/ui/theme.h
+ 12  15  19	TH_BG background #0c0f13
+ 10  13  17	TH_BAR_BG #0a0d11
+ 18  22  29	TH_FRAME #12161d
+ 22  27  35	TH_FRAME_ON #161b23
+ 34  42  53	TH_LINE #222a35
+107 119 136	TH_DIM #6b7788
+215 223 233	TH_INK #d7dfe9
+230 165  75	TH_ACCENT #e6a54b
+192  86 107	TH_URGENT #c0566b
