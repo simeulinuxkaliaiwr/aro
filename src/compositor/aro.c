@@ -5734,6 +5734,12 @@ teardown:
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;
 
+	/* output_destroy runs later, from wlr_backend_destroy: leave it no scene work */
+	struct aro_output *o;
+	wl_list_for_each(o, &s.outputs, link) {
+		bar_finish(&o->bar);
+		o->enabled = false;
+	}
 	wlr_scene_node_destroy(&s.scene->tree.node);
 	wlr_xcursor_manager_destroy(s.xcursor_mgr);
 	free(s.xcursor_theme);
