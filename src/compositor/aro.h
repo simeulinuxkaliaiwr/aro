@@ -13,6 +13,7 @@
 #include "anim.h"
 #include "bar.h"
 #include "config.h"
+#include "extws.h"
 #include "ghost.h"
 #include "idle.h"
 #include "ime.h"
@@ -202,6 +203,10 @@ struct aro_output {
 	} slide;
 
 	struct aro_bar bar;          /* one bar per output */
+	/* ext-workspace handles for bars; NULL past the last one shown */
+	struct wlr_ext_workspace_group_handle_v1 *extws_group;
+	struct wlr_ext_workspace_handle_v1 *extws[ARO_MAX_WS];
+	bool extws_active[ARO_MAX_WS];  /* last state sent */
 	/* bar = auto: pending return timer */
 	struct wl_event_source *bar_return;
 	/* next arrange places instead of springing */
@@ -292,6 +297,8 @@ struct aro_server {
 	struct aro_ime *ime;                    /* ime.c; NULL if unavailable */
 	struct wlr_foreign_toplevel_manager_v1 *ftl_mgr;
 	struct wlr_ext_foreign_toplevel_list_v1 *ext_ftl_list;
+	struct wlr_ext_workspace_manager_v1 *extws_mgr;  /* extws.c; NULL if unavailable */
+	struct wl_listener extws_commit;
 	struct aro_view *ftl_activated;         /* last view reported focused */
 	struct wlr_virtual_keyboard_manager_v1 *virtual_kbd_mgr;
 	struct wlr_virtual_pointer_manager_v1 *virtual_ptr_mgr;

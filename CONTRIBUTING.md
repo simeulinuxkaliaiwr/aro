@@ -74,8 +74,8 @@ behind `ARO_EFFECTS`, build with it locally too.
 src/layout/      the tiling tree (layout.c) and spring animation (anim.c)
 src/compositor/  aro.c is the compositor proper: views, focus, workspaces,
                  outputs, input, grabs, config reload, main(). Also
-                 config, ipc (aroctl's server side), lock, idle, ime,
-                 logfile, wallpaper.
+                 config, ipc (aroctl's server side), extws (workspaces
+                 for bars), lock, idle, ime, logfile, wallpaper.
 src/ui/          everything aro draws: frames (ui.c), bar, overview,
                  switcher, exit prompt, notifications, drop preview, text
 src/aroctl/      the command-line client; talks to aro over a unix socket

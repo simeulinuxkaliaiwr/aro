@@ -121,6 +121,7 @@ if get_option('compositor')
     dependency('xkbcommon'),
     dependency('pixman-1'),
     dependency('libdrm'),      # drm_fourcc.h in text.c
+    wayland_protos,            # wlroots' ext-workspace header includes its enums
     dependency('pangocairo'),  # text rendering; wlroots doesn't provide it
     cc.find_library('m', required: false),  # sqrt for scale = auto
   ]
@@ -151,6 +152,7 @@ if get_option('compositor')
   aro_sources = [
     'src/compositor/aro.c',
     'src/compositor/config.c',
+    'src/compositor/extws.c',
     'src/compositor/idle.c',
     'src/compositor/ime.c',
     'src/compositor/ipc.c',

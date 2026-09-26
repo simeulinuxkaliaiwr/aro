@@ -623,6 +623,7 @@ void aro_arrange(struct aro_server *s)
 	struct aro_view *fv;
 	wl_list_for_each(fv, &s->views, link)
 		ftl_sync_view(fv);
+	extws_sync(s);
 }
 
 static void view_set_visible(struct aro_view *v, bool visible)
@@ -2558,6 +2559,7 @@ static void output_destroy(struct wl_listener *l, void *data)
 
 	struct aro_output *dest = NULL;
 	bar_return_cancel(o);   /* before free */
+	extws_output_gone(o);
 	if (o->enabled) {
 		dest = output_evacuate(s, o);
 		bar_finish(&o->bar);
@@ -2834,6 +2836,7 @@ static void output_disable(struct aro_output *o)
 	bar_return_cancel(o);
 	bar_finish(&o->bar);
 	memset(&o->bar, 0, sizeof o->bar);
+	extws_output_gone(o);
 	o->bar_snap = false;
 
 	/* remove scene/layout entries */
@@ -5614,6 +5617,7 @@ int main(int argc, char *argv[])
 	/* window lists: waybar's taskbar, and ext-foreign-toplevel readers */
 	s.ftl_mgr = wlr_foreign_toplevel_manager_v1_create(s.display);
 	s.ext_ftl_list = wlr_ext_foreign_toplevel_list_v1_create(s.display, 1);
+	extws_init(&s);
 
 	/* synthetic input: wtype, ydotool-style tools, remote desktop */
 	s.virtual_kbd_mgr = wlr_virtual_keyboard_manager_v1_create(s.display);
@@ -5726,6 +5730,7 @@ teardown:
 	wl_list_remove(&s.request_activate.link);
 	wl_list_remove(&s.new_virtual_keyboard.link);
 	wl_list_remove(&s.new_virtual_pointer.link);
+	extws_finish(&s);
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;
 

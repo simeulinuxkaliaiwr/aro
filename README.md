@@ -237,8 +237,17 @@ bar beside the other one, which is what you want when the thing reserving
 space is a dock or an on-screen keyboard rather than a bar; `bar = false`
 never draws it.
 
-Workspace indicators in waybar and quickshell do not know aro yet, so for
-now the workspace pills only exist in aro's own bar.
+aro publishes its workspaces through the standard ext-workspace protocol,
+so a bar can show them and switch on click. In waybar, use the
+`ext/workspaces` module:
+
+```jsonc
+"modules-left": ["ext/workspaces"],
+"ext/workspaces": { "format": "{name}", "on-click": "activate" }
+```
+
+It lists the same workspaces as aro's own bar: the configured count, plus
+the current one and any with windows on it.
 
 ### Default bindings
 
