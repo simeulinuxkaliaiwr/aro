@@ -213,6 +213,22 @@ fi
 wait "$CS"
 alive
 
+# 4f. a bound mouse button runs its action: the back button goes to workspace 3
+config "bind = mouse_back, workspace, 3" "bind = mod+Return, spawn, foot"
+sleep 0.3
+client click back
+sleep 0.3
+[ "$(ctl workspaces | awk '$NF == "focused" { print $2 }')" = 3 ] && ok "mouse_back binding switches workspace" \
+	|| bad "mouse_back binding switches workspace"
+client click forward
+sleep 0.2
+[ "$(ctl workspaces | awk '$NF == "focused" { print $2 }')" = 3 ] && ok "an unbound button does nothing" \
+	|| bad "an unbound button does nothing"
+ctl dispatch workspace 1 > /dev/null
+config
+sleep 0.3
+alive
+
 # 4c. a fullscreen game asking to tear, with tearing allowed: the frame path must hold
 config "allow_tearing = true"
 sleep 0.3

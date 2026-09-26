@@ -350,7 +350,19 @@ and an XKB key name such as
 .BR Return ,
 .B Tab
 or
-.BR h .
+.BR h ,
+or a mouse button:
+.BR mouse_left ,
+.BR mouse_right ,
+.BR mouse_middle ,
+.B mouse_back
+or
+.BR mouse_forward .
+A bound mouse button runs its action and the app under the pointer sees
+neither the press nor the release; such bindings take precedence over
+.B mod+drag
+and
+.BR mod+right-drag .
 The first
 .B bind
 line replaces all default bindings; see

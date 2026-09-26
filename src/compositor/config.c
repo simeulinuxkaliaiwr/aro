@@ -6,6 +6,7 @@
 #include "theme.h"
 
 #include <ctype.h>
+#include <linux/input-event-codes.h>
 #include <stddef.h>   /* offsetof */
 #include <stdarg.h>
 #include <stdio.h>
@@ -120,6 +121,7 @@ static bool bind_add(struct aro_config *c, uint32_t mods, xkb_keysym_t sym,
 	struct q_bind *b = &c->binds[c->nbinds];
 	b->mods = mods;
 	b->sym = sym;
+	b->button = 0;
 	b->action = action;
 	b->num = num;
 	b->arg = arg ? strdup(arg) : NULL;
@@ -131,11 +133,18 @@ static bool bind_add(struct aro_config *c, uint32_t mods, xkb_keysym_t sym,
 }
 
 /* parse "mod+shift+h" into mods + level-0 keysym */
+static const struct { const char *name; uint32_t button; } mouse_buttons[] = {
+	{ "mouse_left", BTN_LEFT }, { "mouse_right", BTN_RIGHT },
+	{ "mouse_middle", BTN_MIDDLE }, { "mouse_back", BTN_SIDE },
+	{ "mouse_forward", BTN_EXTRA },
+};
+
 static bool parse_combo(struct aro_config *c, char *spec,
-                        uint32_t *mods, xkb_keysym_t *sym)
+                        uint32_t *mods, xkb_keysym_t *sym, uint32_t *button)
 {
 	*mods = 0;
 	*sym = XKB_KEY_NoSymbol;
+	*button = 0;
 
 	char *save = NULL;
 	for (char *tok = strtok_r(spec, "+", &save); tok;
@@ -154,10 +163,15 @@ static bool parse_combo(struct aro_config *c, char *spec,
 			*mods |= WLR_MODIFIER_CTRL;
 		else if (!strcasecmp(tok, "shift"))
 			*mods |= WLR_MODIFIER_SHIFT;
-		else
-			*sym = xkb_keysym_from_name(tok, XKB_KEYSYM_CASE_INSENSITIVE);
+		else {
+			for (size_t i = 0; i < sizeof mouse_buttons / sizeof mouse_buttons[0]; i++)
+				if (!strcasecmp(tok, mouse_buttons[i].name))
+					*button = mouse_buttons[i].button;
+			if (!*button)
+				*sym = xkb_keysym_from_name(tok, XKB_KEYSYM_CASE_INSENSITIVE);
+		}
 	}
-	return *sym != XKB_KEY_NoSymbol;
+	return (*sym != XKB_KEY_NoSymbol) != (*button != 0);
 }
 
 static bool parse_edge(const char *s, int *out)
@@ -300,16 +314,19 @@ static bool parse_bind(struct aro_config *c, char *value)
 	action = trim(action);
 	char *arg = value ? trim(value) : NULL;
 
-	uint32_t mods;
+	uint32_t mods, button;
 	xkb_keysym_t sym;
-	if (!parse_combo(c, combo, &mods, &sym))
+	if (!parse_combo(c, combo, &mods, &sym, &button))
 		return false;
 
 	enum q_action a;
 	int num;
 	if (!config_parse_action(action, arg, &a, &num))
 		return false;
-	return bind_add(c, mods, sym, a, num, a == Q_SPAWN ? arg : NULL);
+	if (!bind_add(c, mods, sym, a, num, a == Q_SPAWN ? arg : NULL))
+		return false;
+	c->binds[c->nbinds - 1].button = button;
+	return true;
 }
 
 /* defaults */

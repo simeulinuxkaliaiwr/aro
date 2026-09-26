@@ -67,6 +67,7 @@ enum q_action {
 struct q_bind {
 	uint32_t mods;          /* WLR_MODIFIER_*, with `mod` already resolved */
 	xkb_keysym_t sym;       /* level-0 keysym, as the key handler compares */
+	uint32_t button;        /* a mouse button (BTN_*) instead of a key; else 0 */
 	enum q_action action;
 	char *arg;              /* Q_SPAWN only; owned */
 	int num;

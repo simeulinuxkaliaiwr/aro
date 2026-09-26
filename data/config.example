@@ -214,6 +214,9 @@ resize_step = 0.04          # resize amount per keypress
 # bind = <combo>, <action>[, <argument>]
 #
 # adding your first `bind` line completely replaces the default keybindings.
+# a combo can end in a mouse button instead of a key:
+#   mouse_left, mouse_right, mouse_middle, mouse_back, mouse_forward
+#   bind = mod+mouse_back, workspace, 1
 #
 # actions: spawn <cmd> | close | quit | float | fullscreen
 #          focus|move|resize left|right|up|down

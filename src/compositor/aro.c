@@ -3737,7 +3737,7 @@ static bool handle_bind(struct aro_server *s, uint32_t mods, xkb_keysym_t sym)
 
 	for (int i = 0; i < s->cfg.nbinds; i++) {
 		const struct q_bind *b = &s->cfg.binds[i];
-		if (b->sym == sym && b->mods == mods) {
+		if (!b->button && b->sym == sym && b->mods == mods) {
 			run_action(s, b);
 			return true;
 		}
@@ -4305,6 +4305,33 @@ static void cursor_motion_abs(struct wl_listener *l, void *data)
 		pointer_motion_common(s, ev->time_msec);
 }
 
+/* a bound mouse button runs its action; neither press nor release reaches the app */
+static bool mouse_bind(struct aro_server *s, struct wlr_pointer_button_event *ev)
+{
+	uint32_t bit = ev->button >= BTN_MOUSE && ev->button < BTN_MOUSE + 32
+	             ? 1u << (ev->button - BTN_MOUSE) : 0;
+	if (ev->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+		bool held = s->mouse_binds_held & bit;
+		s->mouse_binds_held &= ~bit;
+		return held;
+	}
+	if (!bit || aro_locked(s) || shortcuts_inhibited(s))
+		return false;
+
+	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
+	uint32_t mods = kb ? wlr_keyboard_get_modifiers(kb) : 0;
+	mods &= WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO;
+	for (int i = 0; i < s->cfg.nbinds; i++) {
+		const struct q_bind *b = &s->cfg.binds[i];
+		if (b->button == ev->button && b->mods == mods) {
+			s->mouse_binds_held |= bit;
+			run_action(s, b);
+			return true;
+		}
+	}
+	return false;
+}
+
 static void cursor_button(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, cursor_button);
@@ -4335,6 +4362,9 @@ static void cursor_button(struct wl_listener *l, void *data)
 		grab_end(s);
 		return;
 	}
+
+	if (mouse_bind(s, ev))
+		return;
 
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
