@@ -2160,17 +2160,10 @@ static void popup_destroy(struct wl_listener *l, void *data)
 	free(p);
 }
 
-static void new_xdg_popup(struct wl_listener *l, void *data)
+/* give a popup its scene node under parent_tree, and keep it on screen */
+static void popup_track(struct aro_server *s, struct wlr_xdg_popup *popup,
+                        struct wlr_scene_tree *parent_tree)
 {
-	struct aro_server *s = wl_container_of(l, s, new_xdg_popup);
-	struct wlr_xdg_popup *popup = data;
-
-	struct wlr_xdg_surface *parent =
-		wlr_xdg_surface_try_from_wlr_surface(popup->parent);
-	if (!parent || !parent->data)
-		return;
-
-	struct wlr_scene_tree *parent_tree = parent->data;
 	struct wlr_scene_tree *tree =
 		wlr_scene_xdg_surface_create(parent_tree, popup->base);
 	if (!tree)
@@ -2188,6 +2181,22 @@ static void new_xdg_popup(struct wl_listener *l, void *data)
 	wl_signal_add(&popup->base->surface->events.commit, &p->commit);
 	p->destroy.notify = popup_destroy;
 	wl_signal_add(&popup->base->events.destroy, &p->destroy);
+}
+
+static void new_xdg_popup(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, new_xdg_popup);
+	struct wlr_xdg_popup *popup = data;
+
+	/* no parent yet: a layer surface adopts it, see layer_new_popup */
+	if (!popup->parent)
+		return;
+
+	struct wlr_xdg_surface *parent =
+		wlr_xdg_surface_try_from_wlr_surface(popup->parent);
+	if (!parent || !parent->data)
+		return;
+	popup_track(s, popup, parent->data);
 }
 
 static void new_xdg_toplevel(struct wl_listener *l, void *data)
@@ -2338,6 +2347,7 @@ static void layer_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&l->unmap.link);
 	wl_list_remove(&l->commit.link);
 	wl_list_remove(&l->destroy.link);
+	wl_list_remove(&l->new_popup.link);
 	wl_list_remove(&l->link);
 
 	struct aro_server *s = l->server;
@@ -2345,6 +2355,12 @@ static void layer_destroy(struct wl_listener *listener, void *data)
 
 	arrange_layers(s);
 	aro_arrange(s);
+}
+
+static void layer_new_popup(struct wl_listener *listener, void *data)
+{
+	struct aro_layer *l = wl_container_of(listener, l, new_popup);
+	popup_track(l->server, data, l->scene->tree);
 }
 
 static void new_layer_surface(struct wl_listener *listener, void *data)
@@ -2383,6 +2399,8 @@ static void new_layer_surface(struct wl_listener *listener, void *data)
 	wl_signal_add(&ls->surface->events.commit, &l->commit);
 	l->destroy.notify = layer_destroy;
 	wl_signal_add(&ls->events.destroy, &l->destroy);
+	l->new_popup.notify = layer_new_popup;
+	wl_signal_add(&ls->events.new_popup, &l->new_popup);
 
 	wl_list_insert(&s->layers, &l->link);
 
