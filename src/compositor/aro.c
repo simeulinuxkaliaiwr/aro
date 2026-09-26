@@ -3432,6 +3432,7 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	case Q_SENDTO:
 		view_send_to(s, f, b->num);
+		view_raise_and_focus(s, f);     /* follow it there */
 		return;
 	case Q_FOCUS:
 	case Q_MOVE:

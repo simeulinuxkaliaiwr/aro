@@ -931,8 +931,6 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 	}
 }
 
-/* ── dragging ──────────────────────────────────────────────────────────── */
-
 /* where a drop at x, y would land; false: nowhere new */
 static bool drop_find(struct aro_server *s, double x, double y, ly_box *show)
 {
@@ -1120,6 +1118,8 @@ static void drop_finish(struct aro_server *s, double x, double y)
 		at[i] = ov->outs[i].c_to;
 	}
 
+	struct aro_output *was_out = v->output;
+	const int was_ws = v->workspace;
 	if (ok)
 		aro_view_drop(s, v, o, ws, target, side, have_fb ? &fb : NULL);
 	overview_rebuild(s);            /* ends the drag, draws it anew */
@@ -1135,6 +1135,10 @@ static void drop_finish(struct aro_server *s, double x, double y)
 	}
 	free(outs);
 	free(at);
+
+	/* it went elsewhere: follow it, as mod+shift+N does */
+	if (ok && (v->output != was_out || v->workspace != was_ws))
+		ov_commit(s);
 }
 
 void overview_pointer_motion(struct aro_server *s, double x, double y)
