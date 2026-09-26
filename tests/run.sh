@@ -86,7 +86,7 @@ ctl version > /dev/null && ok "aroctl answers" || bad "aroctl answers"
 
 # protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
 client globals > "$T/globals.out"
-for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 wp_tearing_control_manager_v1 \
+for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 wp_tearing_control_manager_v1 ext_image_copy_capture_manager_v1 \
 	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1; do
 	grep -q "^$p " "$T/globals.out" && ok "offers $p" || bad "offers $p"
 done
@@ -154,6 +154,18 @@ if wait_for "$T/win.out" "3 windows open"; then
 		alive
 	done
 	ok "layouts, focus and workspace switches with windows open"
+
+	# screen sharing: the captured frame shows the windows' colour, 203040
+	c=$(client capture output 2>&1)
+	case $c in *"pixel 203040"*) ok "screen capture shows the windows" ;;
+		*) bad "screen capture shows the windows: $c" ;; esac
+	if grep -q "^ext_foreign_toplevel_image_capture_source_manager_v1 " "$T/globals.out"; then
+		c=$(client capture window aro-test 2>&1)
+		case $c in *"pixel 203040"*) ok "single-window capture" ;;
+			*) bad "single-window capture: $c" ;; esac
+	else
+		echo "skip  single-window capture (not offered with SceneFX)"
+	fi
 else
 	bad "three windows mapped"
 	cat "$T/win.out"

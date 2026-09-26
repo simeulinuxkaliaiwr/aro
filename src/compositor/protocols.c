@@ -6,6 +6,9 @@
 
 #include <wlr/backend.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_keyboard_shortcuts_inhibit_v1.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_seat.h>
@@ -151,6 +154,61 @@ static void security_init(struct aro_server *s)
 		wl_display_set_global_filter(s->display, global_filter, s);
 }
 
+/* screen capture through ext-image-copy-capture; whole outputs on every build */
+static void capture_src_destroy(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, capture_src_destroy);
+	(void)data;
+	wl_list_remove(&v->capture_src_destroy.link);
+	v->capture_src = NULL;
+}
+
+#ifndef ARO_EFFECTS
+/* one window, captured from its scene node; SceneFX's scene is not wlroots' */
+static void new_capture_request(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, new_capture_request);
+	struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request *req = data;
+
+	struct aro_view *v, *found = NULL;
+	wl_list_for_each(v, &s->views, link)
+		if (v->ext_ftl && v->ext_ftl == req->toplevel_handle) {
+			found = v;
+			break;
+		}
+	if (!found || !found->surface_tree)
+		return;
+	if (!found->capture_src) {
+		found->capture_src = wlr_ext_image_capture_source_v1_create_with_scene_node(
+			&found->surface_tree->node, s->loop, s->allocator, s->renderer);
+		if (!found->capture_src)
+			return;
+		found->capture_src_destroy.notify = capture_src_destroy;
+		wl_signal_add(&found->capture_src->events.destroy, &found->capture_src_destroy);
+	}
+	wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(req,
+		found->capture_src);
+}
+#endif
+
+static void capture_init(struct aro_server *s)
+{
+	wlr_ext_image_copy_capture_manager_v1_create(s->display, 1);
+	wlr_ext_output_image_capture_source_manager_v1_create(s->display, 1);
+#ifndef ARO_EFFECTS
+	struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1 *m =
+		wlr_ext_foreign_toplevel_image_capture_source_manager_v1_create(s->display, 1);
+	if (m) {
+		s->new_capture_request.notify = new_capture_request;
+		wl_signal_add(&m->events.new_request, &s->new_capture_request);
+		s->capture_toplevels = true;
+	}
+#else
+	(void)capture_src_destroy;
+	wlr_log(WLR_INFO, "window capture: not with SceneFX yet; whole screens only");
+#endif
+}
+
 void protocols_init(struct aro_server *s)
 {
 	syncobj_init(s);
@@ -158,6 +216,7 @@ void protocols_init(struct aro_server *s)
 	security_init(s);
 	wlr_xdg_wm_dialog_v1_create(s->display, 1);     /* modal dialogs; see xdg_type */
 	s->tearing_mgr = wlr_tearing_control_manager_v1_create(s->display, 1);
+	capture_init(s);
 }
 
 void protocols_finish(struct aro_server *s)
@@ -165,4 +224,7 @@ void protocols_finish(struct aro_server *s)
 	if (s->inhibit_mgr)
 		wl_list_remove(&s->new_kb_inhibitor.link);
 	s->inhibit_mgr = NULL;
+	if (s->capture_toplevels)
+		wl_list_remove(&s->new_capture_request.link);
+	s->capture_toplevels = false;
 }

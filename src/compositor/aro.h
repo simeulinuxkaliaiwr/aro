@@ -138,6 +138,9 @@ struct aro_view {
 	/* foreign toplevel handles (taskbars, window lists); mapped only */
 	struct wlr_foreign_toplevel_handle_v1 *ftl;
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_ftl;
+	/* for sharing just this window; made on first request, gone with the window */
+	struct wlr_ext_image_capture_source_v1 *capture_src;
+	struct wl_listener capture_src_destroy;
 	struct wlr_output *ftl_output;  /* the output last reported */
 	bool ftl_fullscreen;            /* the fullscreen state last reported */
 	struct wl_listener ftl_activate;
@@ -305,6 +308,8 @@ struct aro_server {
 	struct wlr_keyboard_shortcuts_inhibit_manager_v1 *inhibit_mgr;
 	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
 	struct wlr_tearing_control_manager_v1 *tearing_mgr;    /* games that skip vsync */
+	struct wl_listener new_capture_request;  /* sharing one window; not with SceneFX */
+	bool capture_toplevels;
 	struct aro_gestures gestures;   /* gestures.c */
 	struct aro_tablets tablets;     /* tablet.c */
 	struct wl_listener new_kb_inhibitor;

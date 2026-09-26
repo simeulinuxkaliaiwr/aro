@@ -12,6 +12,9 @@ foreach xml : [
   wl_protocol_dir / 'staging/security-context/security-context-v1.xml',
   wl_protocol_dir / 'staging/xdg-dialog/xdg-dialog-v1.xml',
   wl_protocol_dir / 'staging/tearing-control/tearing-control-v1.xml',
+  wl_protocol_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
+  wl_protocol_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
+  wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
   '../protocols/wlr-layer-shell-unstable-v1.xml',
 ]
   test_proto += custom_target(
@@ -32,7 +35,7 @@ test_common = static_library('aro-test-common',
 )
 
 test_clients = []
-foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox']
+foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox', 'capture']
   test_clients += executable(name, 'clients' / name + '.c', test_proto,
     link_with: test_common,
     dependencies: test_client_dep,
