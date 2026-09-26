@@ -5166,6 +5166,23 @@ static int config_check(const char *arg)
 	return n ? 1 : 0;
 }
 
+/* hand our display to systemd and dbus, so portals started by them find it */
+static void session_env_export(void)
+{
+	static const char *const vars[] = {
+		"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP",
+		"XCURSOR_THEME", "XCURSOR_SIZE",
+	};
+	char cmd[256] = "dbus-update-activation-environment --systemd";
+	size_t len = strlen(cmd);
+	for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
+		if (!getenv(vars[i]))
+			continue;       /* DISPLAY, without XWayland */
+		len += snprintf(cmd + len, sizeof cmd - len, " %s", vars[i]);
+	}
+	config_spawn(cmd);
+}
+
 static void usage(const char *argv0)
 {
 	fprintf(stderr,
@@ -5511,6 +5528,10 @@ int main(int argc, char *argv[])
 
 	/* aroctl; before autostart, so every child inherits ARO_SOCKET */
 	ipc_init(&s, socket);
+
+	/* a nested aro would steal the host session's portals */
+	if (!nested)
+		session_env_export();
 
 	/* spawn after environment is ready */
 	config_watch_start(&s);

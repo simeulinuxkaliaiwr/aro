@@ -167,13 +167,6 @@ resize_step = 0.04          # resize amount per keypress
 #
 # exec_always = pkill waybar; waybar
 
-# fix for xdg-desktop-portal on systemd:
-# portals need to know which compositor to talk to, otherwise things like
-# GTK file pickers or screen sharing will hang indefinitely.
-# uncomment these if your portals aren't working properly.
-# exec = systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
-# exec = systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk
-
 # === window rules ===
 # rule = <match>... <action>...
 #
