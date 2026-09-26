@@ -67,7 +67,22 @@ emerge -av gui-wm/aro
 ```
 
 Rounded corners need `USE=effects` and SceneFX from GURU; the overlay's
-README has the details. Elsewhere, build it from source as below.
+README has the details.
+
+On NixOS, from this repository's flake:
+
+```nix
+# flake.nix
+inputs.aro.url = "github:simeulinuxkaliaiwr/aro";
+
+# configuration.nix, with aro passed in as a module argument
+imports = [ aro.nixosModules.default ];
+programs.aro.enable = true;
+```
+
+That installs aro, lists it in your display manager and sets up the
+portals. To just try it: `nix run github:simeulinuxkaliaiwr/aro`.
+Elsewhere, build it from source as below.
 
 ## Building
 
