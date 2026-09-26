@@ -36,8 +36,8 @@ static void set_radius(struct wlr_scene_rect *rect, int radius)
 /* hollow out border ring */
 static void clip_border(struct aro_view *v, int inner_w, int inner_h)
 {
-	const struct q_theme *th = &v->server->cfg.theme;
 #ifdef ARO_EFFECTS
+	const struct q_theme *th = &v->server->cfg.theme;
 	wlr_scene_rect_set_clipped_region(v->frame, (struct clipped_region){
 		.area = { th->border, th->border, inner_w, inner_h },
 		.corners = corner_radii_all(th->radius - th->border > 0
@@ -60,8 +60,8 @@ static void round_buffer(struct wlr_scene_buffer *buffer, int sx, int sy,
 /* round client content corners */
 void ui_frame_clip_content(struct aro_view *v)
 {
-	const struct q_theme *th = &v->server->cfg.theme;
 #ifdef ARO_EFFECTS
+	const struct q_theme *th = &v->server->cfg.theme;
 	int radius = th->radius - th->border > 0 ? th->radius - th->border : 0;
 	if (radius > 0)
 		wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
@@ -115,7 +115,6 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 /* hide chrome in fullscreen */
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 {
-	const struct q_theme *th = &v->server->cfg.theme;
 	wlr_scene_node_set_enabled(&v->frame->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->bg->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->header->node, !fullscreen);
@@ -124,6 +123,7 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 	                           !fullscreen && v->server->focused == v);
 
 #ifdef ARO_EFFECTS
+	const struct q_theme *th = &v->server->cfg.theme;
 	/* no rounded corners in fullscreen */
 	int radius = fullscreen ? 0 : th->radius - th->border;
 	if (radius < 0)
