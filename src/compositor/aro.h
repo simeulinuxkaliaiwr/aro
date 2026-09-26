@@ -14,6 +14,8 @@
 #include "bar.h"
 #include "config.h"
 #include "extws.h"
+#include "gestures.h"
+#include "tablet.h"
 #include "protocols.h"
 #include "ghost.h"
 #include "idle.h"
@@ -302,6 +304,8 @@ struct aro_server {
 	/* protocols.c: apps that take aro's shortcuts while focused */
 	struct wlr_keyboard_shortcuts_inhibit_manager_v1 *inhibit_mgr;
 	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
+	struct aro_gestures gestures;   /* gestures.c */
+	struct aro_tablets tablets;     /* tablet.c */
 	struct wl_listener new_kb_inhibitor;
 	struct wl_list kb_inhibitors;
 	struct wl_listener extws_commit;
@@ -429,6 +433,13 @@ struct aro_output *aro_focused_output(struct aro_server *s);
 
 /* for ipc.c: the same paths the keyboard and the config watch take */
 void aro_run_action(struct aro_server *s, const struct q_bind *b);
+
+/* for tablet.c: the cursor has moved, a button changed, what lies under it */
+void aro_pointer_moved(struct aro_server *s, uint32_t time);
+void aro_pointer_button(struct aro_server *s, uint32_t time, uint32_t button,
+                        bool pressed);
+struct wlr_surface *aro_surface_at(struct aro_server *s, double *sx, double *sy);
+void aro_focus_at_cursor(struct aro_server *s);
 void aro_config_reload(struct aro_server *s);
 /* tiling area: usable minus our bar */
 ly_box aro_output_usable(struct aro_output *o);

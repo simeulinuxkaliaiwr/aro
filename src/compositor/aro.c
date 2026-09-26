@@ -3859,6 +3859,8 @@ static void new_input(struct wl_listener *l, void *data)
 
 	if (dev->type == WLR_INPUT_DEVICE_KEYBOARD) {
 		new_keyboard(s, dev, false);
+	} else if (dev->type == WLR_INPUT_DEVICE_TABLET) {
+		tablet_add(s, dev);
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
 		new_pointer(s, dev);
@@ -4264,6 +4266,52 @@ static void cursor_button(struct wl_listener *l, void *data)
 	}
 
 	wlr_seat_pointer_notify_button(s->seat, ev->time_msec, ev->button, ev->state);
+}
+
+/* for tablet.c: a pen used as a mouse goes through the same paths as one */
+void aro_pointer_moved(struct aro_server *s, uint32_t time)
+{
+	idle_activity(s);
+	if (!aro_locked(s) && prompt_active(s)) {
+		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (!aro_locked(s) && overview_active(s)) {
+		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
+		grab_motion(s);
+	else
+		pointer_motion_common(s, time);
+}
+
+void aro_pointer_button(struct aro_server *s, uint32_t time, uint32_t button,
+                        bool pressed)
+{
+	struct wlr_pointer_button_event ev = {
+		.time_msec = time,
+		.button = button,
+		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+		                 : WL_POINTER_BUTTON_STATE_RELEASED,
+	};
+	cursor_button(&s->cursor_button, &ev);
+}
+
+struct wlr_surface *aro_surface_at(struct aro_server *s, double *sx, double *sy)
+{
+	struct wlr_surface *surface = NULL;
+	view_at(s, s->cursor->x, s->cursor->y, &surface, sx, sy);
+	return surface;
+}
+
+void aro_focus_at_cursor(struct aro_server *s)
+{
+	struct wlr_surface *surface;
+	double sx, sy;
+	struct aro_view *v = view_at(s, s->cursor->x, s->cursor->y, &surface, &sx, &sy);
+	if (v && v != s->focused)
+		aro_focus(s, v);
 }
 
 static void cursor_axis(struct wl_listener *l, void *data)
@@ -5597,6 +5645,8 @@ int main(int argc, char *argv[])
 
 	/* games: raw motion and pointer lock/confine */
 	s.relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(s.display);
+	gestures_init(&s);
+	tablet_init(&s);
 	s.pointer_constraints = wlr_pointer_constraints_v1_create(s.display);
 	s.new_constraint.notify = new_constraint;
 	wl_signal_add(&s.pointer_constraints->events.new_constraint,
@@ -5744,6 +5794,8 @@ teardown:
 	wl_list_remove(&s.new_virtual_pointer.link);
 	extws_finish(&s);
 	protocols_finish(&s);
+	gestures_finish(&s);
+	tablet_finish(&s);
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;
 

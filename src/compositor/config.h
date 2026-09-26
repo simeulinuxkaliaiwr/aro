@@ -167,6 +167,7 @@ struct aro_config {
 
 	/* touchpad (libinput) */
 	bool tp_tap, tp_natural_scroll, tp_dwt;
+	int gesture_fingers;    /* a swipe with this many changes workspace; 0 = off */
 	double tp_speed;        /* -1..1 */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */

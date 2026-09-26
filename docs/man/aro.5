@@ -121,6 +121,15 @@ Default: true.
 From \-1.0 to 1.0.
 Default: 0.
 .TP
+.BI "gesture_fingers = " n
+A touchpad swipe with this many fingers, 3 to 5, changes workspace on the
+screen under the pointer when the fingers lift: to the left for the next
+one, to the right for the previous, or up and down with
+.BR "workspace_slide = vertical" .
+0 leaves every gesture to apps.
+Other gestures, such as pinching, always go to the app under the pointer.
+Default: 3.
+.TP
 .BI "cursor_theme = " name
 The cursor theme; a theme that cannot be found is reported.
 Default:

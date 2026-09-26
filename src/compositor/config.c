@@ -371,6 +371,7 @@ void config_defaults(struct aro_config *c)
 	c->confirm_quit = TH_CONFIRM_QUIT;
 	c->tp_tap = true;
 	c->tp_dwt = true;
+	c->gesture_fingers = 3;
 	c->bar = TH_BAR;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
@@ -1194,6 +1195,11 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->tp_natural_scroll);
 		} else if (!strcasecmp(key, "touchpad_disable_while_typing")) {
 			ok = parse_bool(value, &c->tp_dwt);
+		} else if (!strcasecmp(key, "gesture_fingers")) {
+			int n;
+			ok = parse_int(value, &n) && (n == 0 || (n >= 3 && n <= 5));
+			if (ok)
+				c->gesture_fingers = n;
 		} else if (!strcasecmp(key, "touchpad_speed")) {
 			double d;
 			ok = parse_double(value, &d) && d >= -1.0 && d <= 1.0;

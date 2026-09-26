@@ -86,7 +86,7 @@ ctl version > /dev/null && ok "aroctl answers" || bad "aroctl answers"
 
 # protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
 client globals > "$T/globals.out"
-for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 \
+for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 \
 	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1; do
 	grep -q "^$p " "$T/globals.out" && ok "offers $p" || bad "offers $p"
 done
