@@ -531,6 +531,11 @@ int main(int argc, char **argv)
 	wl_list_init(&p.outputs);
 
 	if (optind < argc) {
+		/* gdk-pixbuf says "can't read" for a missing file too; say what is wrong */
+		if (access(argv[optind], R_OK) != 0) {
+			LOG("%s: %s\n", argv[optind], strerror(errno));
+			return 1;
+		}
 		if (!probe(&p, argv[optind])) {
 			LOG("%s: not an image gdk-pixbuf can read\n", argv[optind]);
 			return 1;
