@@ -5086,7 +5086,7 @@ static void config_reload(struct aro_server *s)
 	notify_retheme(s);
 	prompt_retheme(s);
 	switcher_retheme(s);
-	ghost_drop(s, NULL);    /* titles borrowed the old font */
+	ghost_drop(s, NULL);    /* drawn with the old theme */
 	overview_rebuild(s);
 	notify_config_errors(s);
 

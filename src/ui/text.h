@@ -10,7 +10,7 @@ struct wlr_scene_buffer;
 
 struct qtext {
 	struct wlr_scene_buffer *node;
-	const char *font;               /* pango description, e.g. "Sans 10" */
+	char *font;                     /* own copy: a config reload frees its strings */
 
 	char *text;                     /* what is currently drawn */
 	uint32_t color;
@@ -26,7 +26,7 @@ bool qtext_init(struct qtext *t, struct wlr_scene_tree *parent, const char *font
 void qtext_set(struct qtext *t, const char *text, uint32_t color,
                float scale, int max_w);
 
-/* font is borrowed from config */
+/* font is copied */
 void qtext_set_font(struct qtext *t, const char *font);
 
 void qtext_move(struct qtext *t, int x, int y);

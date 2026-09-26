@@ -144,10 +144,10 @@ static struct wlr_buffer *render(const char *text, const char *font,
 bool qtext_init(struct qtext *t, struct wlr_scene_tree *parent, const char *font)
 {
 	memset(t, 0, sizeof *t);
-	t->font = font;
+	t->font = font ? strdup(font) : NULL;
 	t->scale = 1.0f;
 	t->node = wlr_scene_buffer_create(parent, NULL);
-	return t->node != NULL;
+	return t->node != NULL && (t->font || !font);
 }
 
 /* changing font forces re-render */
@@ -155,7 +155,11 @@ void qtext_set_font(struct qtext *t, const char *font)
 {
 	if (!font || (t->font && strcmp(t->font, font) == 0))
 		return;
-	t->font = font;
+	char *copy = strdup(font);
+	if (!copy)
+		return;         /* keep the old font rather than none */
+	free(t->font);
+	t->font = copy;
 	free(t->text);
 	t->text = NULL;
 }
@@ -218,6 +222,8 @@ void qtext_finish(struct qtext *t)
 	if (t->node)
 		wlr_scene_node_destroy(&t->node->node);
 	free(t->text);
+	free(t->font);
 	t->node = NULL;
 	t->text = NULL;
+	t->font = NULL;
 }
