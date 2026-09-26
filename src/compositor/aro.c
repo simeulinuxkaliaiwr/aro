@@ -194,6 +194,32 @@ ly_box aro_output_usable(struct aro_output *o)
 	return usable_area(o);
 }
 
+static enum q_layout ws_layout(struct aro_server *s, struct aro_output *o,
+                               int ws)
+{
+	if (o && ws >= 0 && ws < ARO_MAX_WS &&
+	    o->ws_layout[ws] != Q_LAYOUT_INHERIT)
+		return (enum q_layout)o->ws_layout[ws];
+	return config_ws_layout(&s->cfg, ws);
+}
+
+static bool ws_monocle(struct aro_server *s, struct aro_output *o, int ws)
+{
+	return o && ws_layout(s, o, ws) == Q_LAYOUT_MONOCLE;
+}
+
+/* what a lone tiled window gets: the usable area inside the outer gap */
+static ly_box monocle_box(struct aro_output *o)
+{
+	ly_box b = usable_area(o);
+	int g = o->server->cfg.theme.outer_gap;
+	b.x += g;
+	b.y += g;
+	b.w = b.w > 2 * g ? b.w - 2 * g : 1;
+	b.h = b.h > 2 * g ? b.h - 2 * g : 1;
+	return b;
+}
+
 /* final target geometry */
 static ly_box view_target(struct aro_view *v)
 {
@@ -201,6 +227,8 @@ static ly_box view_target(struct aro_view *v)
 		return v->output ? v->output->box : (ly_box){ 0, 0, 1, 1 };
 	if (v->floating)
 		return v->fbox;
+	if (v->node && ws_monocle(v->server, v->output, v->workspace))
+		return monocle_box(v->output);
 	if (v->node)
 		return v->node->box;
 	return (ly_box){ 0, 0, 1, 1 };
@@ -215,15 +243,6 @@ static ly_node **view_ws_root(struct aro_view *v)
 }
 
 /* runtime override, else config */
-static enum q_layout ws_layout(struct aro_server *s, struct aro_output *o,
-                               int ws)
-{
-	if (o && ws >= 0 && ws < ARO_MAX_WS &&
-	    o->ws_layout[ws] != Q_LAYOUT_INHERIT)
-		return (enum q_layout)o->ws_layout[ws];
-	return config_ws_layout(&s->cfg, ws);
-}
-
 /* insert into a workspace tree; forced dir beats dwindle */
 static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
                             int ws, struct aro_view *v, ly_node *target,
@@ -503,6 +522,40 @@ static void slide_start(struct aro_output *o, int old, int ws)
 	o->slide.dur_ms = (uint32_t)s->cfg.theme.ws_slide_ms;
 }
 
+/* monocle draws one tiled window: the focused one, else whichever was shown */
+static void monocle_sync(struct aro_server *s, struct aro_output *o)
+{
+	if (!o)
+		return;
+	const int ws = o->cur_ws;
+	const bool mono = ws_monocle(s, o, ws);
+	struct aro_view *top = NULL, *v;
+
+	if (mono) {
+		struct aro_view *f = s->focused;
+		if (f && f->node && f->output == o && f->workspace == ws)
+			top = f;
+		else
+			wl_list_for_each(v, &s->views, link)
+				if (v->mapped && v->node && v->output == o &&
+				    v->workspace == ws && v->frame_tree->node.enabled) {
+					top = v;
+					break;
+				}
+		if (!top && o->ws[ws]) {
+			ly_node *first = ly_first_leaf(o->ws[ws]);
+			top = first ? first->user : NULL;
+		}
+	}
+
+	wl_list_for_each(v, &s->views, link) {
+		if (!v->mapped || !v->node || v->output != o || v->workspace != ws)
+			continue;
+		wlr_scene_node_set_enabled(&v->frame_tree->node,
+		                           !mono || v == top || v->fullscreen);
+	}
+}
+
 void aro_arrange(struct aro_server *s)
 {
 	const ly_metrics m = {
@@ -518,6 +571,7 @@ void aro_arrange(struct aro_server *s)
 		ly_node *root = o->ws[o->cur_ws];
 		if (root)
 			ly_arrange(root, usable_area(o), &m);
+		monocle_sync(s, o);
 	}
 
 	/* retarget visible views */
@@ -592,10 +646,13 @@ static void workspace_show(struct aro_server *s, int ws)
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (v->output == o)
-			view_set_visible(v, v->workspace == ws ||
-			                    (o->slide.active &&
-			                     v->workspace == o->slide.out_ws));
+		if (v->output != o)
+			continue;
+		if (v->workspace == ws)
+			view_set_visible(v, true);
+		else if (!o->slide.active || v->workspace != o->slide.out_ws)
+			view_set_visible(v, false);
+		/* sliding out keeps its state: hidden monocle windows stay hidden */
 	}
 
 	ly_node *root = o->ws[ws];
@@ -609,7 +666,7 @@ static void workspace_show(struct aro_server *s, int ws)
 		for (int i = 0; i < n; i++) {
 			struct aro_view *iv = leaves[i]->user;
 			if (iv && iv->mapped)
-				anim_box_set(&iv->geo, leaves[i]->box);
+				anim_box_set(&iv->geo, view_target(iv));
 		}
 	}
 
@@ -684,6 +741,8 @@ static void keyboard_focus_changed(struct aro_server *s)
 void aro_focus(struct aro_server *s, struct aro_view *v)
 {
 	focus_apply(s, v);
+	if (v)
+		monocle_sync(s, v->output);
 	keyboard_focus_changed(s);
 	ftl_sync_activated(s);
 	mru_focus(s, s->focused);
@@ -3372,9 +3431,11 @@ static void layout_set(struct aro_server *s, int want)
 		return;
 	const int ws = o->cur_ws;
 	enum q_layout cur = ws_layout(s, o, ws);
+	/* toggle cycles manual, dwindle, monocle */
 	enum q_layout next = want == Q_LAYOUT_TOGGLE
-	                   ? (cur == Q_LAYOUT_DWINDLE ? Q_LAYOUT_MANUAL
-	                                              : Q_LAYOUT_DWINDLE)
+	                   ? (cur == Q_LAYOUT_MANUAL  ? Q_LAYOUT_DWINDLE
+	                   :  cur == Q_LAYOUT_DWINDLE ? Q_LAYOUT_MONOCLE
+	                   :                            Q_LAYOUT_MANUAL)
 	                   : (enum q_layout)want;
 
 	o->ws_layout[ws] = next == config_ws_layout(&s->cfg, ws)
@@ -3384,6 +3445,18 @@ static void layout_set(struct aro_server *s, int want)
 	if (next != cur)
 		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
 		       config_layout_name(next));
+}
+
+/* monocle focus: h/k previous, j/l next, in tree order; NULL at the ends */
+static ly_node *monocle_step(ly_node *root, ly_node *from, ly_edge e)
+{
+	ly_node *leaves[256];
+	int n = ly_collect(root, leaves, 256);
+	int step = e == LY_LEFT || e == LY_UP ? -1 : 1;
+	for (int i = 0; i < n; i++)
+		if (leaves[i] == from)
+			return i + step >= 0 && i + step < n ? leaves[i + step] : NULL;
+	return NULL;
 }
 
 static void run_action(struct aro_server *s, const struct q_bind *b)
@@ -3452,8 +3525,11 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 
 	ly_edge e = (ly_edge)b->num;
 	struct aro_output *o = f->output;
+	const bool mono = ws_monocle(s, o, o->cur_ws);
 
 	if (b->action == Q_RESIZE) {
+		if (mono)
+			return;         /* would move boundaries nobody can see */
 		if (ly_resize(f->node, e, s->cfg.theme.resize_step))
 			aro_arrange(s);
 		return;
@@ -3473,7 +3549,8 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	}
 
-	ly_node *next = ly_focus(o->ws[o->cur_ws], f->node, e);
+	ly_node *next = mono ? monocle_step(o->ws[o->cur_ws], f->node, e)
+	                     : ly_focus(o->ws[o->cur_ws], f->node, e);
 	if (next) {
 		aro_focus(s, next->user);
 		cursor_warp_to_view(s, next->user);

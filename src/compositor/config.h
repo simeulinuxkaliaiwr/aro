@@ -25,6 +25,7 @@ enum q_slide {
 enum q_layout {
 	Q_LAYOUT_MANUAL = 0,
 	Q_LAYOUT_DWINDLE,
+	Q_LAYOUT_MONOCLE,       /* one window at a time, the tree kept underneath */
 };
 #define Q_LAYOUT_INHERIT (-1)   /* use global layout */
 #define Q_LAYOUT_TOGGLE  (-1)

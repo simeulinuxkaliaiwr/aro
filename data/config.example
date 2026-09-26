@@ -13,11 +13,15 @@ confirm_quit = true
 
 # manual: new windows split next to the focused one (i3 style).
 # dwindle: splits follow the longer axis of the frame, spiraling automatically (Hyprland style).
+# monocle: one window at a time, filling the screen; mod+hjkl steps through
+#   them. the split layout is kept underneath and comes back when you leave.
 # mod+v / mod+s will temporarily override either mode for the next window.
 layout = dwindle
 
-# per-workspace layout. mod+t toggles it for the current workspace.
+# per-workspace layout. mod+t cycles manual, dwindle and monocle for the
+# current workspace; bind `layout, monocle` to jump straight to one.
 # workspace = 3 layout manual
+# workspace = 4 layout monocle
 
 # workspaces are created on demand. this just sets how many pills the bar
 # shows by default so it isn't empty on startup.

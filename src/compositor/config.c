@@ -234,6 +234,8 @@ bool config_parse_action(const char *name, const char *arg,
 			*num = Q_LAYOUT_MANUAL;
 		else if (!strcasecmp(arg, "dwindle"))
 			*num = Q_LAYOUT_DWINDLE;
+		else if (!strcasecmp(arg, "monocle"))
+			*num = Q_LAYOUT_MONOCLE;
 		else
 			return false;
 		*action = Q_LAYOUT;
@@ -247,12 +249,17 @@ static bool parse_layout(const char *s, enum q_layout *out)
 {
 	if (!strcasecmp(s, "manual"))  { *out = Q_LAYOUT_MANUAL;  return true; }
 	if (!strcasecmp(s, "dwindle")) { *out = Q_LAYOUT_DWINDLE; return true; }
+	if (!strcasecmp(s, "monocle")) { *out = Q_LAYOUT_MONOCLE; return true; }
 	return false;
 }
 
 const char *config_layout_name(enum q_layout l)
 {
-	return l == Q_LAYOUT_DWINDLE ? "dwindle" : "manual";
+	switch (l) {
+	case Q_LAYOUT_DWINDLE: return "dwindle";
+	case Q_LAYOUT_MONOCLE: return "monocle";
+	default:               return "manual";
+	}
 }
 
 enum q_layout config_ws_layout(const struct aro_config *c, int ws)
@@ -551,8 +558,8 @@ static void parse_workspace(struct aro_config *c, int lineno, char *value)
 			char *l = next_word(&cur, &bad_quote);
 			enum q_layout ql;
 			if (!l || !parse_layout(l, &ql)) {
-				config_err(c, lineno, "workspace %d: layout is manual "
-				           "or dwindle", ws);
+				config_err(c, lineno, "workspace %d: layout is manual, "
+				           "dwindle or monocle", ws);
 				return;
 			}
 			layout = ql;
