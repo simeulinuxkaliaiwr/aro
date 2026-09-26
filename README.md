@@ -72,6 +72,10 @@ pacman -S --needed base-devel meson ninja wayland wayland-protocols \
 wallpaper falls back to the bundled 4K PNG, and SVG wallpapers of your
 own will not load.
 
+Screen sharing and screenshots go through `xdg-desktop-portal-wlr`, and
+file pickers through `xdg-desktop-portal-gtk`. aro hands its display to
+the portals itself, so installing them is all it takes.
+
 ```sh
 # installing it system-wide
 meson setup build --prefix=/usr --buildtype=release
