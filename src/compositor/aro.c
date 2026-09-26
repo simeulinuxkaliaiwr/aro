@@ -1394,6 +1394,75 @@ static void view_tile_into(struct aro_server *s, struct aro_view *v,
 		view_swap(v, target);
 }
 
+/* overview drop: beside target on edge e, else where mod+shift+N puts it */
+void aro_view_drop(struct aro_server *s, struct aro_view *v,
+                   struct aro_output *o, int ws, struct aro_view *target,
+                   ly_edge e, const ly_box *fbox)
+{
+	if (!v || !v->mapped || !v->output || !o || ws < 0 || ws >= ARO_MAX_WS)
+		return;
+	if (target && (target == v || !target->mapped || !target->node ||
+	               target->floating || target->fullscreen ||
+	               target->output != o || target->workspace != ws))
+		target = NULL;
+	if (!target && o == v->output && ws == v->workspace &&
+	    !(v->floating && fbox))
+		return;                 /* dropped where it already is */
+
+	struct aro_output *src = v->output;
+	ly_node *next = NULL;
+	if (v->node) {
+		next = ly_close(&src->ws[v->workspace], v->node);
+		v->node = NULL;
+	}
+	v->output = o;
+	v->workspace = ws;
+
+	/* floating boxes are in layout coordinates */
+	if (o != src) {
+		int dx = o->box.x - src->box.x, dy = o->box.y - src->box.y;
+		v->fbox.x += dx;
+		v->fbox.y += dy;
+		v->pre_fs.x += dx;
+		v->pre_fs.y += dy;
+	}
+	if (v->floating && fbox && !v->fullscreen)
+		v->fbox = *fbox;
+
+	if (!v->floating) {
+		if (target && !v->fullscreen)
+			view_tile_into(s, v, target, e);
+		if (!v->node)
+			v->node = tree_insert(s, o, ws, v, NULL, LY_ROW, false);
+		if (!v->node) {
+			/* out of memory: floating beats being nowhere */
+			wlr_log(WLR_ERROR, "out of memory dropping a window");
+			v->floating = true;
+			v->fbox = float_box_for(v);
+			if (!v->fullscreen)
+				wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
+		}
+	}
+
+	view_set_visible(v, ws == o->cur_ws);
+	if (s->focused == v && !view_visible(v)) {
+		s->focused = NULL;
+		aro_focus(s, next ? next->user : NULL);
+	}
+	aro_arrange(s);
+	anim_box_set(&v->geo, view_target(v));  /* placed, not sprung */
+}
+
+ly_box aro_drop_slot(ly_box t, ly_edge e)
+{
+	return drop_slot_box(t, e);
+}
+
+ly_edge aro_nearest_edge(ly_box b, double x, double y)
+{
+	return nearest_edge(b, x, y);
+}
+
 /* ── resizing a shared boundary ────────────────────────────────────────── */
 
 static void grab_end(struct aro_server *s);
@@ -3957,8 +4026,10 @@ static void cursor_motion(struct wl_listener *l, void *data)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
-	if (!aro_locked(s) && overview_active(s))
+	if (!aro_locked(s) && overview_active(s)) {
+		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
+	}
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_motion(s);
 	else
@@ -3987,8 +4058,10 @@ static void cursor_motion_abs(struct wl_listener *l, void *data)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
-	if (!aro_locked(s) && overview_active(s))
+	if (!aro_locked(s) && overview_active(s)) {
+		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
+	}
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_motion(s);
 	else

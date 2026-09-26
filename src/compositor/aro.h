@@ -419,6 +419,13 @@ const char *aro_view_type(struct aro_view *v);
 /* effective workspace layout */
 enum q_layout aro_ws_layout(struct aro_output *o, int ws);
 
+/* for overview.c: dropping a dragged window, and the main drag's geometry */
+void aro_view_drop(struct aro_server *s, struct aro_view *v,
+                   struct aro_output *o, int ws, struct aro_view *target,
+                   ly_edge e, const ly_box *fbox);
+ly_box aro_drop_slot(ly_box t, ly_edge e);
+ly_edge aro_nearest_edge(ly_box b, double x, double y);
+
 /* shell wrappers */
 void view_configure(struct aro_view *v, int x, int y, int w, int h);
 void view_geometry(struct aro_view *v, struct wlr_box *out);

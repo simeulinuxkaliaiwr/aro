@@ -7,6 +7,7 @@
 #include <time.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "anim.h"
 #include "config.h"
 #include "layout.h"
 #include "text.h"
@@ -77,7 +78,26 @@ struct aro_overview {
 	struct aro_output *press_out;
 	int press_ws;
 	bool pressed;
+	double press_x, press_y;
 	double scroll;
+
+	/* dragging a window to another slot, workspace or output */
+	bool dragging;
+	struct aro_view *drag_view;
+	ly_box drag_from;               /* its thumbnail when it tore loose */
+	double grab_dx, grab_dy;        /* pointer inside that thumbnail */
+	double drag_x, drag_y;
+	struct wlr_scene_tree *drop_tree;       /* the indicator, under... */
+	struct wlr_scene_tree *drag_tree;       /* ...the thumbnail */
+	struct wlr_scene_rect *drop_edge, *drop_fill;
+	anim_box drop_geo;
+	bool drop_shown;
+
+	/* where a drop now would land */
+	struct aro_output *drop_out;
+	int drop_ws;
+	struct aro_view *drop_target;   /* NULL: the workspace itself */
+	ly_edge drop_side;
 };
 
 void overview_toggle(struct aro_server *s);
@@ -91,6 +111,7 @@ void overview_frame_done(struct aro_server *s, struct aro_output *o,
 void overview_key(struct aro_server *s, uint32_t mods, xkb_keysym_t sym);
 void overview_pointer_button(struct aro_server *s, double x, double y,
                              bool pressed);
+void overview_pointer_motion(struct aro_server *s, double x, double y);
 void overview_pointer_axis(struct aro_server *s, double delta, int discrete);
 
 void overview_view_commit(struct aro_server *s, struct aro_view *v);

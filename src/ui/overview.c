@@ -85,6 +85,35 @@ static ly_box ov_map(const struct ov_geom *g, ly_box b, double slot, double p)
 	return (ly_box){ x0, y0, x1 - x0, y1 - y0 };
 }
 
+/* ov_map backwards, for a point */
+static void ov_unmap(const struct ov_geom *g, double x, double y, double slot,
+                     double p, double *lx, double *ly)
+{
+	const double sc = 1.0 + (g->z - 1.0) * p;
+	const double cx = lerp(g->ob.w / 2.0, g->ub.x - g->ob.x + g->ub.w / 2.0, p);
+	const double cy = lerp(g->ob.h / 2.0, g->ub.y - g->ob.y + g->ub.h / 2.0, p);
+	const double step = (g->vertical ? g->ob.h : g->ob.w) * sc + g->gap * p;
+	const double ox = g->vertical ? 0 : slot * step;
+	const double oy = g->vertical ? slot * step : 0;
+	*lx = g->ob.x + g->ob.w / 2.0 + (x - g->ob.x - cx - ox) / sc;
+	*ly = g->ob.y + g->ob.h / 2.0 + (y - g->ob.y - cy - oy) / sc;
+}
+
+/* inner, a box inside outer, carried along when outer is drawn as dst */
+static ly_box carry(ly_box outer, ly_box inner, ly_box dst)
+{
+	double sx = outer.w > 0 ? (double)dst.w / outer.w : 1.0;
+	double sy = outer.h > 0 ? (double)dst.h / outer.h : 1.0;
+	int x0 = dst.x + round_i((inner.x - outer.x) * sx);
+	int y0 = dst.y + round_i((inner.y - outer.y) * sy);
+	int x1 = dst.x + round_i((inner.x + inner.w - outer.x) * sx);
+	int y1 = dst.y + round_i((inner.y + inner.h - outer.y) * sy);
+	return (ly_box){ x0, y0, x1 - x0, y1 - y0 };
+}
+
+/* a clip that clips nothing: the dragged thumbnail may cross screens */
+static const ly_box ANYWHERE = { -(1 << 28), -(1 << 28), 1 << 29, 1 << 29 };
+
 static ly_box inset(ly_box b, int d)
 {
 	return (ly_box){ b.x + d, b.y + d, b.w - 2 * d, b.h - 2 * d };
@@ -267,8 +296,23 @@ static void out_free(struct ov_output *oo)
 	oo->tree = NULL;
 }
 
+/* the drag's own trees; its thumbnail nodes go with them */
+static void drag_reset(struct aro_overview *ov)
+{
+	if (ov->drag_tree)
+		wlr_scene_node_destroy(&ov->drag_tree->node);
+	if (ov->drop_tree)
+		wlr_scene_node_destroy(&ov->drop_tree->node);
+	ov->drag_tree = ov->drop_tree = NULL;
+	ov->drop_edge = ov->drop_fill = NULL;
+	ov->dragging = ov->drop_shown = false;
+	ov->drag_view = ov->drop_target = NULL;
+	ov->drop_out = NULL;
+}
+
 static void all_free(struct aro_overview *ov)
 {
+	drag_reset(ov);
 	for (int i = 0; i < ov->nouts; i++)
 		out_free(&ov->outs[i]);
 	free(ov->outs);
@@ -558,9 +602,12 @@ static void step_ws(struct aro_server *s, int dir)
 
 /* ── open and close ────────────────────────────────────────────────────── */
 
+static void drag_stop(struct aro_server *s);
+
 static void close_begin(struct aro_server *s)
 {
 	struct aro_overview *ov = &s->overview;
+	drag_stop(s);
 	uint32_t now = aro_now_ms();
 	ov->open = false;
 	ov->pressed = false;
@@ -663,6 +710,9 @@ void overview_rebuild(struct aro_server *s)
 	struct aro_overview *ov = &s->overview;
 	if (!ov->shown)
 		return;
+
+	if (ov->dragging)
+		wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "default");
 
 	/* strip positions survive a rebuild */
 	int n = ov->nouts;
@@ -774,6 +824,14 @@ static void shadow_place(struct aro_server *s, struct wlr_scene_shadow *sh,
 }
 #endif
 
+/* the dragged thumbnail: its size when it tore loose, under the pointer */
+static ly_box drag_box(const struct aro_overview *ov)
+{
+	return (ly_box){ round_i(ov->drag_x - ov->grab_dx),
+	                 round_i(ov->drag_y - ov->grab_dy),
+	                 ov->drag_from.w, ov->drag_from.h };
+}
+
 static void draw_output(struct aro_server *s, struct ov_output *oo)
 {
 	const struct q_theme *th = &s->cfg.theme;
@@ -843,31 +901,264 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 			continue;
 		}
 
+		const bool dragged = ov->dragging && v == ov->drag_view;
+		const ly_box cl = dragged ? ANYWHERE : clip;
 		ly_box real = aro_view_box(v);
-		ly_box b = ov_map(&g, real, slot - oo->c, p);
-		it->drawn = b;
+		ly_box b = dragged ? drag_box(ov) : ov_map(&g, real, slot - oo->c, p);
+		it->drawn = dragged ? (ly_box){ 0 } : b;        /* not a drop target */
 		if (!it->chrome) {
 			if (it->snap)
-				snap_place(it->snap, v, b, clip);
+				snap_place(it->snap, v, b, cl);
 			continue;
 		}
 
 		bool sel = ov->sel_view == v;
 		rect_color(it->edge, sel ? th->accent : th->line);
 		rect_color(it->bg, sel ? th->frame_on : th->frame);
-		rect_place(it->edge, b, clip);
-		rect_place(it->bg, inset(b, bw), clip);
+		rect_place(it->edge, b, cl);
+		rect_place(it->bg, inset(b, bw), cl);
 
 		ly_box cb;
 		ui_frame_content_box(v, real, &cb);
 		if (it->snap)
-			snap_place(it->snap, v, ov_map(&g, cb, slot - oo->c, p), clip);
+			snap_place(it->snap, v, dragged ? carry(real, cb, b)
+			           : ov_map(&g, cb, slot - oo->c, p), cl);
 
 		ly_box in = inset(b, bw);
 		wlr_scene_node_set_enabled(&it->ring->node, sel);
 		if (sel)
-			rect_place(it->ring, (ly_box){ in.x, in.y, in.w, 1 }, clip);
+			rect_place(it->ring, (ly_box){ in.x, in.y, in.w, 1 }, cl);
 	}
+}
+
+/* ── dragging ──────────────────────────────────────────────────────────── */
+
+/* where a drop at x, y would land; false: nowhere new */
+static bool drop_find(struct aro_server *s, double x, double y, ly_box *show)
+{
+	struct aro_overview *ov = &s->overview;
+	struct aro_view *v = ov->drag_view;
+	ov->drop_out = NULL;
+	ov->drop_target = NULL;
+	if (!v)
+		return false;
+
+	for (int i = 0; i < ov->nouts; i++) {
+		struct ov_output *oo = &ov->outs[i];
+		if (!in_box(oo->output->box, x, y))
+			continue;
+		for (int j = 0; j < oo->ncards; j++) {
+			struct ov_card *c = &oo->cards[j];
+			if (!in_box(c->drawn, x, y))
+				continue;
+			ov->drop_out = oo->output;
+			ov->drop_ws = c->ws;
+
+			/* tiled: beside the window under the pointer */
+			const bool tiled = !v->floating && !v->fullscreen;
+			for (int k = 0; tiled && k < oo->nitems; k++) {
+				struct ov_item *it = &oo->items[k];
+				struct aro_view *t = it->view;
+				if (t == v || t->workspace != c->ws || t->floating ||
+				    t->fullscreen || !t->node || !in_box(it->drawn, x, y))
+					continue;
+				ov->drop_target = t;
+				ov->drop_side = aro_nearest_edge(it->drawn, x, y);
+				*show = aro_drop_slot(it->drawn, ov->drop_side);
+				return true;
+			}
+			/* its own workspace, off any window: stays put */
+			if (tiled && oo->output == v->output && c->ws == v->workspace)
+				return false;
+			*show = c->drawn;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+/* the indicator: the same hairline and wash as outside the overview */
+static bool drop_draw(struct aro_server *s, uint32_t now)
+{
+	const struct q_theme *th = &s->cfg.theme;
+	struct aro_overview *ov = &s->overview;
+	ly_box to;
+	if (!drop_find(s, ov->drag_x, ov->drag_y, &to)) {
+		wlr_scene_node_set_enabled(&ov->drop_tree->node, false);
+		ov->drop_shown = false;
+		return false;
+	}
+	if (!ov->drop_shown) {
+		anim_box_set(&ov->drop_geo, to);
+		ov->drop_shown = true;
+		wlr_scene_node_set_enabled(&ov->drop_tree->node, true);
+	} else {
+		anim_box_to(&ov->drop_geo, to, now, th->drop_ms, &OV_EASE);
+	}
+	bool moving = anim_box_tick(&ov->drop_geo, now);
+
+	const ly_box b = ov->drop_geo.cur, clip = ov->drop_out->box;
+	const int bw = th->border;
+	rect_place(ov->drop_edge, b, clip);
+	rect_place(ov->drop_fill, inset(b, bw), clip);
+#ifdef ARO_EFFECTS
+	/* hollow; the region is relative to what rect_place kept */
+	ly_box vis;
+	if (clip_box(b, clip, &vis))
+		wlr_scene_rect_set_clipped_region(ov->drop_edge, (struct clipped_region){
+			.area = { b.x + bw - vis.x, b.y + bw - vis.y,
+			          b.w - 2 * bw, b.h - 2 * bw },
+			.corners = corner_radii_all(th->radius - bw > 0
+			                            ? th->radius - bw : 0),
+		});
+#endif
+	return moving;
+}
+
+static bool drag_begin(struct aro_server *s)
+{
+	const struct q_theme *th = &s->cfg.theme;
+	struct aro_overview *ov = &s->overview;
+	struct aro_view *v = ov->press_view;
+	struct ov_output *oo = v && v->mapped ? ov_find(s, v->output) : NULL;
+	struct ov_item *it = NULL;
+	for (int i = 0; oo && i < oo->nitems; i++)
+		if (oo->items[i].view == v)
+			it = &oo->items[i];
+	if (!it || it->drawn.w < 1 || it->drawn.h < 1)
+		return false;
+
+	const int ri = th->radius - th->border > 0 ? th->radius - th->border : 0;
+	ov->drop_tree = wlr_scene_tree_create(s->l_overview);
+	ov->drag_tree = wlr_scene_tree_create(s->l_overview);
+	if (ov->drop_tree) {
+		ov->drop_edge = rect(ov->drop_tree, th->drop_line, th->radius);
+		ov->drop_fill = rect(ov->drop_tree, th->drop_fill, ri);
+	}
+	if (!ov->drag_tree || !ov->drop_edge || !ov->drop_fill) {
+		drag_reset(ov);
+		return false;
+	}
+	wlr_scene_node_set_enabled(&ov->drop_tree->node, false);
+
+	/* over every card and every screen; same order as before */
+	if (it->edge)
+		wlr_scene_node_reparent(&it->edge->node, ov->drag_tree);
+	if (it->bg)
+		wlr_scene_node_reparent(&it->bg->node, ov->drag_tree);
+	if (it->snap)
+		wlr_scene_node_reparent(&it->snap->node, ov->drag_tree);
+	if (it->ring)
+		wlr_scene_node_reparent(&it->ring->node, ov->drag_tree);
+
+	ov->dragging = true;
+	ov->drag_view = v;
+	ov->drag_from = it->drawn;
+	ov->grab_dx = ov->press_x - it->drawn.x;
+	ov->grab_dy = ov->press_y - it->drawn.y;
+	ov->drag_x = ov->press_x;
+	ov->drag_y = ov->press_y;
+	/* selected, but the strip does not scroll to it */
+	ov->sel_view = v;
+	ov->sel_out = v->output;
+	ov->sel_ws = v->workspace;
+	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "grabbing");
+	return true;
+}
+
+/* cut short: the rebuild puts the thumbnail back */
+static void drag_stop(struct aro_server *s)
+{
+	if (s->overview.dragging)
+		overview_rebuild(s);
+}
+
+static void drop_finish(struct aro_server *s, double x, double y)
+{
+	struct aro_overview *ov = &s->overview;
+	struct aro_view *v = ov->drag_view;
+	ov->drag_x = x;
+	ov->drag_y = y;
+
+	ly_box show;
+	const bool ok = drop_find(s, x, y, &show);
+	struct aro_output *o = ov->drop_out;
+	const int ws = ov->drop_ws;
+	struct aro_view *target = ov->drop_target;
+	const ly_edge side = ov->drop_side;
+
+	/* floating: lands where its thumbnail was let go */
+	ly_box fb = { 0 };
+	bool have_fb = false;
+	struct ov_output *to = ok ? ov_find(s, o) : NULL;
+	if (to && v->floating && !v->fullscreen) {
+		const struct ov_geom g = geom_for(s, o);
+		const ly_box b = drag_box(ov);
+		const ly_box ub = aro_output_usable(o);
+		const int keep = 48;            /* enough of it stays reachable */
+		double lx, ly;
+		ov_unmap(&g, b.x, b.y, card_slot(to, ws) - to->c, ov->p, &lx, &ly);
+		fb = (ly_box){ round_i(lx), round_i(ly), v->fbox.w, v->fbox.h };
+		if (fb.x > ub.x + ub.w - keep)
+			fb.x = ub.x + ub.w - keep;
+		if (fb.x + fb.w < ub.x + keep)
+			fb.x = ub.x + keep - fb.w;
+		if (fb.y > ub.y + ub.h - keep)
+			fb.y = ub.y + ub.h - keep;
+		if (fb.y < ub.y)
+			fb.y = ub.y;
+		have_fb = true;
+	}
+
+	/* the strip stays put: another drop may follow */
+	const int n = ov->nouts;
+	struct aro_output **outs = calloc(n > 0 ? n : 1, sizeof *outs);
+	double *at = calloc(n > 0 ? n : 1, sizeof *at);
+	for (int i = 0; outs && at && i < n; i++) {
+		outs[i] = ov->outs[i].output;
+		at[i] = ov->outs[i].c_to;
+	}
+
+	if (ok)
+		aro_view_drop(s, v, o, ws, target, side, have_fb ? &fb : NULL);
+	overview_rebuild(s);            /* ends the drag, draws it anew */
+
+	for (int i = 0; outs && at && i < n; i++) {
+		struct ov_output *oo = ov_find(s, outs[i]);
+		if (!oo || oo->ncards < 1)
+			continue;
+		double c = at[i] < oo->ncards - 1 ? at[i] : oo->ncards - 1;
+		oo->c_from = oo->c;
+		oo->c_to = c;
+		oo->c_start = aro_now_ms();
+	}
+	free(outs);
+	free(at);
+}
+
+void overview_pointer_motion(struct aro_server *s, double x, double y)
+{
+	struct aro_overview *ov = &s->overview;
+	if (!ov->open || !ov->pressed)
+		return;
+	if (!ov->dragging) {
+		const double tear = s->cfg.theme.drag_tear;
+		double ax = x - ov->press_x, ay = y - ov->press_y;
+		if (ax < 0)
+			ax = -ax;
+		if (ay < 0)
+			ay = -ay;
+		if (!ov->press_view || (ax < tear && ay < tear))
+			return;
+		if (!drag_begin(s)) {
+			ov->press_view = NULL;  /* not a click any more either */
+			return;
+		}
+	}
+	ov->drag_x = x;
+	ov->drag_y = y;
+	schedule_all(s);
 }
 
 bool overview_tick(struct aro_server *s, uint32_t now)
@@ -890,6 +1181,8 @@ bool overview_tick(struct aro_server *s, uint32_t now)
 	}
 	for (int i = 0; i < ov->nouts; i++)
 		draw_output(s, &ov->outs[i]);
+	if (ov->dragging && drop_draw(s, now))
+		moving = true;
 	return moving;
 }
 
@@ -1055,11 +1348,17 @@ void overview_pointer_button(struct aro_server *s, double x, double y,
 		ov->press_out = on ? o : NULL;
 		ov->press_view = v;
 		ov->press_ws = ws;
+		ov->press_x = x;
+		ov->press_y = y;
 		return;
 	}
 	if (!ov->pressed)
 		return;
 	ov->pressed = false;
+	if (ov->dragging) {
+		drop_finish(s, x, y);
+		return;
+	}
 	if (!on) {
 		if (!ov->press_out)
 			close_begin(s);         /* backdrop to backdrop */
