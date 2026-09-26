@@ -52,19 +52,27 @@ bool bar_create(struct aro_bar *b, struct aro_output *o)
 	return b->bg != NULL;
 }
 
+int bar_height(const struct aro_bar *b)
+{
+	if (!b->tree || b->yielded)
+		return 0;
+	int h = b->output->server->cfg.theme.bar_h;
+	return h > 0 ? h : 0;
+}
+
 void bar_place(struct aro_bar *b, int x, int y, int w, float scale)
 {
 	const struct q_theme *th = &b->output->server->cfg.theme;
+	const int h = bar_height(b);
 	b->x = x;
 	b->y = y;
 	b->w = w;
 	b->scale = scale > 0 ? scale : 1.0f;
 
-	/* bar_h is 0 with `bar = false`: hidden, not destroyed, so turning it
-	 * back on is just this call again on the next reload */
-	wlr_scene_node_set_enabled(&b->tree->node, th->bar_h > 0);
+	/* hidden, not destroyed */
+	wlr_scene_node_set_enabled(&b->tree->node, h > 0);
 	wlr_scene_node_set_position(&b->tree->node, x, y);
-	if (th->bar_h > 0)
+	if (h > 0)
 		wlr_scene_rect_set_size(b->bg, w, th->bar_h);
 }
 
@@ -89,7 +97,7 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	const struct q_theme *th = &s->cfg.theme;
 
 	/* hidden: skip the text passes, the clock ticks here every minute */
-	if (!b->tree || b->w <= 0 || th->bar_h <= 0)
+	if (!b->tree || b->w <= 0 || bar_height(b) <= 0)
 		return;
 
 	const int mid = th->bar_h / 2;

@@ -20,6 +20,7 @@
 #include "ipc.h"
 #include "aro.h"
 #include "config.h"
+#include "logfile.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -572,6 +573,24 @@ static void cmd_version(struct req *r)
 		sb_puts(r->body, "aro " ARO_VERSION "\n");
 }
 
+/* log path only; aroctl reads the file */
+static void cmd_log(struct req *r)
+{
+	const char *path = logfile_path();
+	if (!path) {
+		req_fail(r, "aro is writing no log file (started with -l none, "
+		         "or it could not open one; see its stderr)");
+		return;
+	}
+	if (r->json) {
+		sb_puts(r->body, "{\"path\":");
+		sb_json_str(r->body, path);
+		sb_puts(r->body, "}\n");
+	} else {
+		sb_printf(r->body, "%s\n", path);
+	}
+}
+
 static const struct {
 	const char *name;
 	void (*fn)(struct req *r);
@@ -584,6 +603,7 @@ static const struct {
 	{ "focused",    cmd_focused,    false },
 	{ "reload",     cmd_reload,     false },
 	{ "dispatch",   cmd_dispatch,   true },
+	{ "log",        cmd_log,        false },
 	{ "version",    cmd_version,    false },
 };
 

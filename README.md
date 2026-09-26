@@ -39,7 +39,8 @@ says "this is the window you are in".
 - **Live config.** Saving the file applies immediately; a line that does
   not parse says so on screen, with its line number.
 - **Its own wallpaper**, drawn by `aropaper` at each screen's exact
-  resolution, and a status bar you can turn off.
+  resolution, and a status bar that steps aside on its own when waybar or
+  quickshell starts.
 - **Window rules**, monitor configuration, an exit prompt, and rounded
   corners through [SceneFX](https://github.com/wlrfx/scenefx). Layer shell,
   XWayland, session lock, idle inhibit, clipboard, drag and drop,
@@ -95,6 +96,39 @@ aro -m alt -s foot # If not installed, ./build/aro
 
 `-m alt` because your main compositor is already using the SUPER key.
 
+### Logs
+
+aro writes its log to `~/.local/state/aro/aro.log` (under
+`$XDG_STATE_HOME` if you set it), and the previous session's to
+`aro.log.old` — a crash is explained by the log of the session that
+crashed, and the next start must not overwrite it. A nested aro writes
+`aro-nested.log` instead, so trying a build never pushes your real
+session's log aside. Everything also still goes to stderr.
+
+`aroctl log` prints it, so there is no path to remember:
+
+```sh
+aroctl log
+aroctl log -f
+aroctl log --old
+aroctl log --path
+```
+
+`-f` follows it as it is written, and carries on into the next session
+when aro restarts. `--old` is the previous session's log. `--path` only
+says where the file is. With aro not running — after a crash, say — there
+is nobody to ask, so `aroctl` reads `aro.log` directly and says so.
+
+A different file, or none at all:
+
+```sh
+aro -l /tmp/aro.log
+aro -l none
+```
+
+For a bug report, attach the output of `aroctl log --old` if aro crashed
+and you have started it again, and `aroctl log` otherwise.
+
 ## Configuration
 
 `~/.config/aro/config`, `key = value`, watched: saving applies it. Copy
@@ -133,6 +167,23 @@ leaves the background to you — `exec = swaybg -i …`, for instance.
 aropaper ~/pictures/wallpaper.jpg
 ```
 
+### Using another bar
+
+aro's bar hides itself on any screen where another bar is running, so
+waybar, quickshell or yambar need no config at all. A bar is recognised by
+what it asks for rather than by its name: any layer-shell client that
+reserves space along a screen edge counts, which covers bars nobody has
+written yet. When the other bar goes, aro's comes back half a second later
+— long enough that restarting waybar does not flash it.
+
+`bar = auto` is that behaviour, and the default. `bar = true` keeps aro's
+bar beside the other one, which is what you want when the thing reserving
+space is a dock or an on-screen keyboard rather than a bar; `bar = false`
+never draws it.
+
+Workspace indicators in waybar and quickshell do not know aro yet, so for
+now the workspace pills only exist in aro's own bar.
+
 ### Default bindings
 
 Mod is Super, or Alt with `mod = alt`. The first `bind` line in your config
@@ -146,6 +197,8 @@ replaces this table entirely.
 | `mod+shift+hjkl` | move the window |
 | `mod+ctrl+hjkl` | resize |
 | `mod+tab` / `mod+shift+tab` | window switcher, recently used order |
+| `mod+o` | overview: every workspace, zoomed out |
+| `mod+t` | toggle this workspace between manual and dwindle |
 | `mod+space` | toggle floating |
 | `mod+f` | toggle fullscreen |
 | `mod+1..4` | workspace |

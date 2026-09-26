@@ -29,6 +29,13 @@ enum q_layout {
 #define Q_LAYOUT_INHERIT (-1)   /* use global layout */
 #define Q_LAYOUT_TOGGLE  (-1)
 
+/* bar = auto | true | false */
+enum q_bar {
+	Q_BAR_OFF = 0,
+	Q_BAR_ON = 1,
+	Q_BAR_AUTO = 2,         /* hidden while another bar is up */
+};
+
 /* `wallpaper = auto | none | <path>`; aro runs aropaper (wallpaper.c) */
 enum q_wallpaper {
 	Q_WALLPAPER_AUTO = 0,   /* aro's own art */
@@ -152,7 +159,7 @@ struct aro_config {
 	 * room for the bar stops doing so without knowing why. bar_height = 0
 	 * means the same thing.
 	 */
-	bool bar;
+	enum q_bar bar;
 
 	enum q_wallpaper wallpaper;
 	char *wallpaper_file;   /* Q_WALLPAPER_FILE only; owned, `~` unexpanded */

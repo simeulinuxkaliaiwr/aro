@@ -17,6 +17,7 @@
 #include "aro.h"
 #include "idle.h"
 #include "ipc.h"
+#include "logfile.h"
 #include "text.h"
 #include "theme.h"
 
@@ -169,14 +170,9 @@ static void update_backdrop(struct aro_server *s)
 	wlr_scene_rect_set_size(s->root_bg, box.width, box.height);
 
 	struct aro_output *o;
-	wl_list_for_each(o, &s->outputs, link) {
+	wl_list_for_each(o, &s->outputs, link)
 		output_refresh_box(o);
-		if (o->bar.tree) {
-			bar_place(&o->bar, o->box.x,
-			          o->box.y + o->box.h - s->cfg.theme.bar_h, o->box.w, o->scale);
-			bar_update(&o->bar, o);
-		}
-	}
+	/* also places the bars */
 	arrange_layers(s);
 
 	/* lock uses refreshed boxes too */
@@ -189,7 +185,7 @@ static ly_box usable_area(struct aro_output *o)
 	ly_box u = o->usable;
 	if (u.w <= 0 || u.h <= 0)
 		u = o->box;
-	u.h -= o->server->cfg.theme.bar_h;
+	u.h -= bar_height(&o->bar);
 	return u;
 }
 
@@ -255,6 +251,66 @@ static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
 	return leaf;
 }
 
+/* bar = auto: hide while another client reserves space */
+static void bar_return_cancel(struct aro_output *o)
+{
+	if (o->bar_return) {
+		wl_event_source_remove(o->bar_return);
+		o->bar_return = NULL;
+	}
+}
+
+static void bar_set_yielded(struct aro_output *o, bool yielded)
+{
+	if (o->bar.yielded == yielded)
+		return;
+	o->bar.yielded = yielded;
+	o->bar_snap = true;
+	wlr_log(WLR_INFO, "bar: %s on %s", yielded
+	        ? "hidden, another bar reserved space" : "shown",
+	        o->wlr_output->name);
+}
+
+static int bar_return_fire(void *data)
+{
+	struct aro_output *o = data;
+	struct aro_server *s = o->server;
+
+	bar_return_cancel(o);
+	bar_set_yielded(o, false);
+	arrange_layers(s);
+	aro_arrange(s);
+	overview_rebuild(s);
+	return 0;
+}
+
+static void bar_yield_update(struct aro_output *o, bool other)
+{
+	struct aro_server *s = o->server;
+
+	/* not auto, or no bar */
+	if (s->cfg.bar != Q_BAR_AUTO || !o->bar.tree) {
+		bar_return_cancel(o);
+		bar_set_yielded(o, false);
+		return;
+	}
+	if (other) {
+		/* hide now, cancel a pending return */
+		bar_return_cancel(o);
+		bar_set_yielded(o, true);
+		return;
+	}
+	if (!o->bar.yielded || o->bar_return)
+		return;
+	o->bar_return = wl_event_loop_add_timer(s->loop, bar_return_fire, o);
+	if (!o->bar_return ||
+	    wl_event_source_timer_update(o->bar_return, TH_BAR_RETURN_MS) < 0) {
+		/* no timer: show now */
+		bar_return_cancel(o);
+		bar_set_yielded(o, false);
+	}
+}
+
 /* configure layer surfaces and update usable area */
 static void arrange_layers(struct aro_server *s)
 {
@@ -285,6 +341,19 @@ static void arrange_layers_output(struct aro_output *o)
 	}
 
 	o->usable = (ly_box){ usable.x, usable.y, usable.width, usable.height };
+
+	/* an exclusive zone means another bar */
+	bar_yield_update(o, usable.x != full.x || usable.y != full.y ||
+	                    usable.width != full.width ||
+	                    usable.height != full.height);
+
+	/* bottom of the usable area */
+	if (o->bar.tree) {
+		bar_place(&o->bar, usable.x,
+		          usable.y + usable.height - bar_height(&o->bar),
+		          usable.width, o->scale);
+		bar_update(&o->bar, o);
+	}
 }
 
 static bool box_eq(ly_box a, ly_box b)
@@ -473,6 +542,20 @@ void aro_arrange(struct aro_server *s)
 			ui_frame_title(v, t.w, v->output->scale);
 	}
 
+	/* bar came or went: place, do not spring */
+	wl_list_for_each(o, &s->outputs, link) {
+		if (!o->bar_snap)
+			continue;
+		o->bar_snap = false;
+		wl_list_for_each(v, &s->views, link) {
+			if (v->output != o || !view_visible(v))
+				continue;
+			if (s->grabbed == v && s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
+				continue;
+			anim_box_set(&v->geo, view_target(v));
+		}
+	}
+
 	wl_list_for_each(o, &s->outputs, link) {
 		if (o->bar.tree)
 			bar_update(&o->bar, o);
@@ -499,6 +582,8 @@ static void workspace_show(struct aro_server *s, int ws)
 	struct aro_output *o = aro_focused_output(s);
 	if (!o || ws < 0 || ws >= ARO_MAX_WS || ws == o->cur_ws)
 		return;
+
+	ghost_drop(s, o);       /* it would not slide with its workspace */
 
 	/* the old workspace stays drawn while it slides out; anything left
 	 * over from an earlier slide that is neither of these two is hidden */
@@ -1781,6 +1866,12 @@ static void view_unmap(struct wl_listener *l, void *data)
 
 	if (!v->mapped)
 		return;
+
+	/* before anything moves: it starts where the frame is drawn */
+	if (view_visible(v) && !v->output->slide.active && !aro_locked(s) &&
+	    !overview_shown(s))
+		ghost_spawn(s, v, view_draw_box(v, aro_now_ms()));
+
 	v->mapped = false;
 	view_set_visible(v, false);
 	grab_forget(s, v);
@@ -2271,6 +2362,8 @@ static void output_frame(struct wl_listener *l, void *data)
 		moving = true;
 	if (overview_tick(s, now))
 		moving = true;
+	if (ghost_tick(s, o, now))
+		moving = true;
 
 	/* animate drop preview */
 	if (s->preview.active) {
@@ -2318,6 +2411,7 @@ static void output_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&o->link);
 
 	struct aro_output *dest = NULL;
+	bar_return_cancel(o);   /* before free */
 	if (o->enabled) {
 		dest = output_evacuate(s, o);
 		bar_finish(&o->bar);
@@ -2505,6 +2599,7 @@ static struct aro_output *output_evacuate(struct aro_server *s,
 	prompt_output_gone(s, o);
 	switcher_output_gone(s, o);
 	overview_output_gone(s, o);
+	ghost_drop(s, o);
 
 	/* clear grabs on output loss */
 	if (s->grabbed && s->grabbed->output == o)
@@ -2590,8 +2685,10 @@ static void output_disable(struct aro_output *o)
 			wlr_layer_surface_v1_destroy(l->layer_surface);
 	}
 
+	bar_return_cancel(o);
 	bar_finish(&o->bar);
 	memset(&o->bar, 0, sizeof o->bar);
+	o->bar_snap = false;
 
 	/* remove scene/layout entries */
 	struct wlr_scene_output *so = wlr_scene_get_scene_output(s->scene, wo);
@@ -4792,6 +4889,7 @@ static void config_reload(struct aro_server *s)
 	notify_retheme(s);
 	prompt_retheme(s);
 	switcher_retheme(s);
+	ghost_drop(s, NULL);    /* titles borrowed the old font */
 	overview_rebuild(s);
 	notify_config_errors(s);
 
@@ -4951,7 +5049,7 @@ static int config_check(const char *arg)
 static void usage(const char *argv0)
 {
 	fprintf(stderr,
-	        "usage: %s [-s startup-command] [-m logo|alt]\n"
+	        "usage: %s [-s startup-command] [-m logo|alt] [-l log-file|none]\n"
 	        "       %s -c [config-file]    check a config and exit\n",
 	        argv0, argv0);
 }
@@ -4960,6 +5058,7 @@ int main(int argc, char *argv[])
 {
 	const char *startup = NULL;
 	const char *modkey_override = NULL;      /* -m beats the config file */
+	const char *log_arg = NULL;              /* -l; NULL = the default file */
 	bool check = false;
 	const char *check_path = NULL;
 	for (int i = 1; i < argc; i++) {
@@ -4967,6 +5066,8 @@ int main(int argc, char *argv[])
 			startup = argv[++i];
 		else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
 			modkey_override = argv[++i];
+		else if (strcmp(argv[i], "-l") == 0 && i + 1 < argc)
+			log_arg = argv[++i];
 		else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--check")) {
 			check = true;
 			if (i + 1 < argc && argv[i + 1][0] != '-')
@@ -4985,7 +5086,10 @@ int main(int argc, char *argv[])
 		return config_check(check_path);
 	}
 
-	wlr_log_init(WLR_DEBUG, NULL);
+	/* before we set WAYLAND_DISPLAY ourselves */
+	const bool nested = getenv("WAYLAND_DISPLAY") ||
+	                    getenv("WAYLAND_SOCKET") || getenv("DISPLAY");
+	logfile_init(log_arg, nested, WLR_DEBUG);
 
 	struct aro_server s = { 0 };
 	config_defaults(&s.cfg);
@@ -5131,6 +5235,7 @@ int main(int argc, char *argv[])
 	/* bars are per-output */
 
 	switcher_init(&s);
+	ghost_init(&s);
 
 	if (!ui_preview_create(&s.preview, &s)) {
 		wlr_log(WLR_ERROR, "could not build the drop indicator");
@@ -5314,6 +5419,7 @@ int main(int argc, char *argv[])
 	prompt_finish(&s);
 	overview_finish(&s);
 	switcher_finish(&s);
+	ghost_drop(&s, NULL);
 	config_watch_stop(&s);
 	config_finish(&s.cfg);
 	/* outputs free their trees */
@@ -5372,5 +5478,6 @@ int main(int argc, char *argv[])
 		s.orphan_ws[i] = NULL;
 	}
 	wl_display_destroy(s.display);
+	logfile_finish();
 	return 0;
 }

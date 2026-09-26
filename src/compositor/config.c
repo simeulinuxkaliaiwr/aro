@@ -1174,7 +1174,11 @@ bool config_load(struct aro_config *c, const char *path)
 		} else if (!strcasecmp(key, "confirm_quit")) {
 			ok = parse_bool(value, &c->confirm_quit);
 		} else if (!strcasecmp(key, "bar")) {
-			ok = parse_bool(value, &c->bar);
+			bool b;
+			if (!strcasecmp(value, "auto"))
+				c->bar = Q_BAR_AUTO;
+			else if ((ok = parse_bool(value, &b)))
+				c->bar = b ? Q_BAR_ON : Q_BAR_OFF;
 		} else if (!strcasecmp(key, "wallpaper")) {
 			/* the keywords are words, not paths: `none` never means a
 			 * file called none. ./none does, if anyone needs it. */
@@ -1217,7 +1221,7 @@ bool config_load(struct aro_config *c, const char *path)
 		config_err(c, block_line, "monitor block has no '}'");
 
 	/* no bar takes no room; see aro_config.bar */
-	if (!c->bar)
+	if (c->bar == Q_BAR_OFF)
 		c->theme.bar_h = 0;
 
 	fclose(f);

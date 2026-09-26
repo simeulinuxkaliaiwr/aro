@@ -30,10 +30,15 @@ struct aro_bar {
 
 	int x, y, w;
 	float scale;
+
+	/* another bar holds this output */
+	bool yielded;
 };
 
 bool bar_create(struct aro_bar *b, struct aro_output *o);
 void bar_place(struct aro_bar *b, int x, int y, int w, float scale);
+/* 0 when off, missing or yielded */
+int bar_height(const struct aro_bar *b);
 /* update bar from output state */
 void bar_update(struct aro_bar *b, struct aro_output *o);
 void bar_retheme(struct aro_bar *b);

@@ -48,9 +48,10 @@
 
 /* animation */
 /* animation timings */
-#define TH_ANIM_MS       340    /* open, close, retile */
+#define TH_ANIM_MS       340    /* open, retile */
 #define TH_ANIM_FOCUS_MS 160    /* border colour crossfade */
 #define TH_OPEN_SCALE    0.88   /* new frames grow from this, overshooting */
+#define TH_CLOSE_MS      160    /* closing shrinks back to open scale, flat */
 
 /* spring easing */
 #define TH_EASE_X1 0.30
@@ -110,8 +111,10 @@
 /* confirm quit default */
 #define TH_CONFIRM_QUIT 1
 
-/* our bar along the bottom; false leaves the space to windows */
-#define TH_BAR          1
+/* bar: 0 off, 1 always, 2 auto */
+#define TH_BAR          2
+/* delay before our bar comes back */
+#define TH_BAR_RETURN_MS 500
 #define TH_RESIZE_STEP  0.04    /* one press of the resize bind */
 
 #endif

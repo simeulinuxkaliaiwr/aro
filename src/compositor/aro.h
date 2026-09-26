@@ -13,6 +13,7 @@
 #include "anim.h"
 #include "bar.h"
 #include "config.h"
+#include "ghost.h"
 #include "idle.h"
 #include "ime.h"
 #include "lock.h"
@@ -200,6 +201,10 @@ struct aro_output {
 	} slide;
 
 	struct aro_bar bar;          /* one bar per output */
+	/* bar = auto: pending return timer */
+	struct wl_event_source *bar_return;
+	/* next arrange places instead of springing */
+	bool bar_snap;
 
 	/* layout-enabled flag; not the same as wlr_output DPMS state */
 	bool enabled;
@@ -304,6 +309,7 @@ struct aro_server {
 	struct aro_prompt prompt;            /* the modal yes/no card */
 	struct aro_switcher switcher;        /* mod+tab */
 	struct aro_overview overview;
+	struct wl_list ghosts;               /* closed windows fading out */
 	struct wl_list inhibitors;
 
 	/* per-output state lives in aro_output */
