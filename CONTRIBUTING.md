@@ -44,20 +44,25 @@ without starting anything.
 
 ## Testing
 
-The layout tree has a test harness that needs no compositor:
+CI builds with warnings as errors and with sanitizers on, once with
+XWayland and once without. To catch what it would before you push:
 
 ```sh
-./build/aro-layout
+meson setup build-ci --werror -Db_sanitize=address,undefined -Deffects=false
+ninja -C build-ci
 ```
 
-CI builds with `-Deffects=false -Dwallpaper=enabled` and runs that
-harness. It does not try every combination, so if you touch code behind
-a build flag, build both ways:
+The layout tree has a test harness that needs no compositor. It is
+interactive: `v` / `s` split, `hjkl` move focus, `HJKL` resize, `q` close,
+`x` quit. CI feeds it keys, and so can you:
 
 ```sh
-meson setup build-plain -Deffects=false -Dxwayland=disabled
-ninja -C build-plain
+printf 'vsvshjklHJKLqq' | ./build-ci/aro-layout > /dev/null
 ```
+
+If you touch code behind `ARO_XWAYLAND`, also build with
+`-Dxwayland=disabled`. CI cannot build with SceneFX, so if you touch code
+behind `ARO_EFFECTS`, build with it locally too.
 
 ## Where things are
 
@@ -90,9 +95,9 @@ reading it top to bottom.
 
 ## Style
 
-Match the code around you: C11, tabs, lines kept near 80 columns, and
-short lowercase comments that say why rather than what. Names carry
-their module's prefix (`aro_`, `ly_`, `q_`, and so on).
+Match the code around you: C11, tabs, lines kept near 80 columns.
+Comments are one line, short and lowercase, and say why rather than
+what. Names carry their module's prefix (`aro_`, `ly_`, `q_`, and so on).
 
 Commit messages are one short line saying what changed, like
 `Add drag+drop in overview`. One logical change per commit.
