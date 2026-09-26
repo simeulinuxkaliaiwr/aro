@@ -1216,9 +1216,10 @@ static void view_request_fullscreen(struct wl_listener *l, void *data)
 	}
 #endif
 
-	/* answer fullscreen requests even when unmapped */
+	/* answer fullscreen requests even when unmapped; before the first commit, map reads them */
 	if (!v->mapped) {
-		wlr_xdg_surface_schedule_configure(v->toplevel->base);
+		if (v->toplevel->base->initialized)
+			wlr_xdg_surface_schedule_configure(v->toplevel->base);
 		return;
 	}
 	view_set_fullscreen(v->server, v, v->toplevel->requested.fullscreen);
