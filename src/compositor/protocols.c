@@ -6,6 +6,7 @@
 
 #include <wlr/backend.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_drm_lease_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_ext_image_capture_source_v1.h>
 #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
@@ -209,6 +210,25 @@ static void capture_init(struct aro_server *s)
 #endif
 }
 
+/* VR headsets: aro lends non-desktop outputs to runtimes like Monado or SteamVR */
+static void lease_request(struct wl_listener *l, void *data)
+{
+	struct wlr_drm_lease_request_v1 *req = data;
+	(void)l;
+	if (!wlr_drm_lease_request_v1_grant(req))
+		wlr_drm_lease_request_v1_reject(req);
+}
+
+static void lease_init(struct aro_server *s)
+{
+	s->drm_lease = wlr_drm_lease_v1_manager_create(s->display, s->backend);
+	if (!s->drm_lease)
+		return;         /* nested or headless: no DRM to lend */
+	s->lease_request.notify = lease_request;
+	wl_signal_add(&s->drm_lease->events.request, &s->lease_request);
+	wlr_log(WLR_INFO, "VR headsets: can be leased");
+}
+
 void protocols_init(struct aro_server *s)
 {
 	syncobj_init(s);
@@ -217,6 +237,7 @@ void protocols_init(struct aro_server *s)
 	wlr_xdg_wm_dialog_v1_create(s->display, 1);     /* modal dialogs; see xdg_type */
 	s->tearing_mgr = wlr_tearing_control_manager_v1_create(s->display, 1);
 	capture_init(s);
+	lease_init(s);
 }
 
 void protocols_finish(struct aro_server *s)
@@ -227,4 +248,7 @@ void protocols_finish(struct aro_server *s)
 	if (s->capture_toplevels)
 		wl_list_remove(&s->new_capture_request.link);
 	s->capture_toplevels = false;
+	if (s->drm_lease)
+		wl_list_remove(&s->lease_request.link);
+	s->drm_lease = NULL;
 }

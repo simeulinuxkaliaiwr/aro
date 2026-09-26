@@ -309,6 +309,8 @@ struct aro_server {
 	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
 	struct wlr_tearing_control_manager_v1 *tearing_mgr;    /* games that skip vsync */
 	struct wl_listener new_capture_request;  /* sharing one window; not with SceneFX */
+	struct wlr_drm_lease_v1_manager *drm_lease;  /* VR headsets; NULL without DRM */
+	struct wl_listener lease_request;
 	bool capture_toplevels;
 	struct aro_gestures gestures;   /* gestures.c */
 	struct aro_tablets tablets;     /* tablet.c */

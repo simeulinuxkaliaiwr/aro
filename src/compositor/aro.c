@@ -83,6 +83,7 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_drm_lease_v1.h>
 #include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -3291,6 +3292,13 @@ static void new_output(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_output);
 	struct wlr_output *wlr_output = data;
+
+	/* a VR headset is not part of the desktop: only lent to a VR runtime */
+	if (wlr_output->non_desktop) {
+		if (s->drm_lease && wlr_drm_lease_v1_manager_offer_output(s->drm_lease, wlr_output))
+			wlr_log(WLR_INFO, "output: %s offered for lease (non-desktop)", wlr_output->name);
+		return;
+	}
 
 	wlr_output_init_render(wlr_output, s->allocator, s->renderer);
 
