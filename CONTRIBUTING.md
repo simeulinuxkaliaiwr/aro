@@ -64,6 +64,18 @@ interactive: `v` / `s` split, `hjkl` move focus, `HJKL` resize, `q` close,
 printf 'vsvshjklHJKLqq' | ./build-ci/aro-layout > /dev/null
 ```
 
+The headless suite starts aro with no screen, runs small test clients
+against it (popups, a bar's tooltip, workspaces for bars, windows through
+every layout, live config saves) and fails if aro crashes, a sanitizer
+complains, or it does not quit cleanly. CI runs it on every push:
+
+```sh
+meson test -C build-ci --print-errorlogs
+```
+
+A bug that crashed aro deserves a check there, next to the others in
+`tests/run.sh`.
+
 If you touch code behind `ARO_XWAYLAND`, also build with
 `-Dxwayland=disabled`. CI cannot build with SceneFX, so if you touch code
 behind `ARO_EFFECTS`, build with it locally too.
@@ -80,6 +92,7 @@ src/ui/          everything aro draws: frames (ui.c), bar, overview,
                  switcher, exit prompt, notifications, drop preview, text
 src/aroctl/      the command-line client; talks to aro over a unix socket
 src/aropaper/    the wallpaper client; plain Wayland, no wlroots
+tests/           the headless suite: run.sh and its test clients
 ```
 
 `aro.c` is large; searching for the function you want is faster than

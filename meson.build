@@ -169,7 +169,7 @@ if get_option('compositor')
     'src/ui/text.c',
   ]
 
-  executable('aro',
+  aro_exe = executable('aro',
     aro_sources + proto_headers,
     dependencies: deps,
     include_directories: inc,
@@ -177,9 +177,11 @@ if get_option('compositor')
   )
 
   # talks to a running aro over its socket; no wlroots, no libwayland
-  executable('aroctl', 'src/aroctl/aroctl.c',
+  aroctl_exe = executable('aroctl', 'src/aroctl/aroctl.c',
     install: true,
   )
+
+  subdir('tests')
 endif
 
 # === wallpaper ===

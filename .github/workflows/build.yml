@@ -22,7 +22,7 @@ jobs:
             git meson ninja pkgconf \
             wayland wayland-protocols wlroots0.20 \
             libxkbcommon pixman pango cairo \
-            gdk-pixbuf2
+            gdk-pixbuf2 grim
       - uses: actions/checkout@v4
       - name: build
         run: |
@@ -38,3 +38,5 @@ jobs:
           printf 'vvssvsqqqqqqq' | ./build/aro-layout > /dev/null
       - name: aropaper
         run: ./build/aropaper --version
+      - name: headless tests
+        run: meson test -C build --print-errorlogs
