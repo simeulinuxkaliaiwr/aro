@@ -206,6 +206,17 @@ aro runs `aropaper` itself, so there is a wallpaper with no config at all.
 SVG, covering the screen and cropping the overflow), and `wallpaper = none`
 leaves the background to you — `exec = swaybg -i …`, for instance.
 
+Three more come with aro, in `/usr/share/backgrounds/aro/`: `dwindle`,
+the layout aro's dwindle mode builds, as a small mark; `rim`, a focused
+frame's border and inner ring, tilted; and `lenses`, the logo's glasses.
+
+```
+wallpaper = /usr/share/backgrounds/aro/aro-wallpaper-rim-3840x2160.png
+```
+
+Each comes as a PNG at 1920x1080, 2560x1440 and 3840x2160, and as an SVG
+if you have librsvg.
+
 `aropaper` is an ordinary layer-shell client, so it also works on any compositor that has layer shell — sway, Hyprland, niri and river among them, though not GNOME
 
 ```sh

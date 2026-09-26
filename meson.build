@@ -188,6 +188,18 @@ install_data(
   'data/wallpaper/aro-wallpaper-1920x1080.png',
   'data/wallpaper/aro-wallpaper-2560x1440.png',
   'data/wallpaper/aro-wallpaper-3840x2160.png',
+  'data/wallpaper/aro-wallpaper-dwindle.svg',
+  'data/wallpaper/aro-wallpaper-dwindle-1920x1080.png',
+  'data/wallpaper/aro-wallpaper-dwindle-2560x1440.png',
+  'data/wallpaper/aro-wallpaper-dwindle-3840x2160.png',
+  'data/wallpaper/aro-wallpaper-rim.svg',
+  'data/wallpaper/aro-wallpaper-rim-1920x1080.png',
+  'data/wallpaper/aro-wallpaper-rim-2560x1440.png',
+  'data/wallpaper/aro-wallpaper-rim-3840x2160.png',
+  'data/wallpaper/aro-wallpaper-lenses.svg',
+  'data/wallpaper/aro-wallpaper-lenses-1920x1080.png',
+  'data/wallpaper/aro-wallpaper-lenses-2560x1440.png',
+  'data/wallpaper/aro-wallpaper-lenses-3840x2160.png',
   install_dir: wallpaper_dir,
 )
 

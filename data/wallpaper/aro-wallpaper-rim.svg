@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080" preserveAspectRatio="xMidYMid slice">
+<rect width="1920" height="1080" fill="#0c0f13"/>
+<g transform="rotate(-12 1650.0 775.0)">
+<rect x="720" y="60" width="1500" height="1150" rx="64" fill="none" stroke="#29323e" stroke-width="2.5"/>
+<rect x="900" y="200" width="1500" height="1150" rx="64" fill="#10141a" stroke="#e6a54b" stroke-width="4"/>
+<rect x="914" y="214" width="1472" height="1122" rx="50" fill="none" stroke="rgba(230,165,75,0.32)" stroke-width="3"/>
+</g>
+</svg>
