@@ -69,6 +69,15 @@ emerge -av gui-wm/aro
 Rounded corners need `USE=effects` and SceneFX from GURU; the overlay's
 README has the details.
 
+On Fedora 44 and newer, from [COPR](https://copr.fedorainfracloud.org/coprs/simeulinuxkaliaiwr/aro/):
+
+```sh
+sudo dnf copr enable simeulinuxkaliaiwr/aro
+sudo dnf install aro
+```
+
+Rounded corners are included; SceneFX comes from Fedora itself.
+
 On NixOS, from this repository's flake:
 
 ```nix
