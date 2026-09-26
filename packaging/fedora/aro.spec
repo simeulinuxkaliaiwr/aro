@@ -1,3 +1,4 @@
+# COPR builds main via .copr/Makefile, which rewrites Version; plain rpmbuild builds the release
 Name:           aro
 Version:        0.2.0
 Release:        1%{?dist}
@@ -61,6 +62,10 @@ aroctl for scripts.
 %{_datadir}/icons/hicolor/symbolic/apps/aro-symbolic.svg
 %{_docdir}/%{name}/config.example
 %{_datadir}/backgrounds/aro/
+%{_mandir}/man1/aro.1*
+%{_mandir}/man1/aroctl.1*
+%{_mandir}/man1/aropaper.1*
+%{_mandir}/man5/aro.5*
 
 %changelog
 * Sat Sep 26 2026 Guilherme <aerofrutiger3000@gmail.com> - 0.2.0-1
