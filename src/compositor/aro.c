@@ -5011,6 +5011,21 @@ static void cursor_theme_apply(struct aro_server *s)
 	wlr_log(WLR_INFO, "cursor: theme=%s size=%d",
 	        theme ? theme : "default", size);
 
+	/* a missing theme silently becomes wlroots' built-in one, named "default" */
+	if (theme && wlr_xcursor_manager_load(mgr, 1)) {
+		struct wlr_xcursor_manager_theme *mt;
+		wl_list_for_each(mt, &mgr->scaled_themes, link) {
+			if (mt->theme && strcmp(mt->theme->name, theme) != 0) {
+				wlr_log(WLR_ERROR, "cursor theme '%s' not found, "
+				        "using the built-in cursors", theme);
+				if (s->xcursor_mgr)
+					notify(s, NOTIFY_ERROR, "cursor theme '%s' not found",
+					       theme);
+			}
+			break;
+		}
+	}
+
 	char buf[16];
 	snprintf(buf, sizeof buf, "%d", size);
 	setenv("XCURSOR_SIZE", buf, true);
