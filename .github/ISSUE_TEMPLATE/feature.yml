@@ -1,0 +1,21 @@
+name: Feature request
+description: Something aro should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        aro is meant to stay small. Fixes, protocol support that makes real apps work and polish on what is already there are always welcome; a new look or a second way of doing something may be turned down. See [Scope](https://github.com/simeulinuxkaliaiwr/aro/blob/main/CONTRIBUTING.md#scope).
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true

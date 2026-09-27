@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in aro is broken, crashes or looks wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps, starting from a fresh session if you can.
+      placeholder: |
+        1. layout = scroll, open two windows
+        2. press mod+m
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: aro version
+      description: The output of `aroctl version`, or the commit if you built it yourself.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options:
+        - AUR (aro-git)
+        - Gentoo overlay
+        - Fedora COPR
+        - Nix flake
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distro and GPU
+      placeholder: Arch Linux, AMD RX 6600 (mesa 25.2)
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: If aro crashed, start it again and paste `aroctl log --old`; otherwise `aroctl log`.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: Your `~/.config/aro/config`, or the lines that matter.
+      render: shell
