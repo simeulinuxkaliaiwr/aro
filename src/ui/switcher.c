@@ -78,7 +78,7 @@ static void schedule_all(struct aro_server *s)
 
 static bool listed(struct aro_view *v)
 {
-	return v->mapped && v->output;  /* parked windows have no screen */
+	return v->mapped && v->output && !v->stashed;   /* parked: no screen */
 }
 
 /* ── recently used ─────────────────────────────────────────────────────── */

@@ -222,7 +222,8 @@ resize_step = 0.04          # resize amount per keypress
 #          windows are only ever normal, or dialog when they have a parent.
 #          dialog, utility, toolbar and splash already float by default.
 #
-# action:  float | tile | fullscreen | workspace <1..32>
+# action:  float | tile | fullscreen | workspace <1..32> | scratchpad
+#          scratchpad opens the window hidden, for scratchpad_show to bring out.
 #          use `tile` to force tiling on dialogs, or `float` to force floating.
 #
 # rules apply top-to-bottom. if multiple rules set the same property, the last one wins.
@@ -233,6 +234,8 @@ resize_step = 0.04          # resize amount per keypress
 #   map: app_id="org.gnome.Calculator" title="Calculator" type=normal
 #
 # rule = app_id:mpv  workspace 3
+# rule = app_id:dropterm  scratchpad   (with exec = foot --app-id dropterm and
+#                                      bind = mod+grave, scratchpad_show, dropterm)
 # rule = app_id:firefox  title:Picture-in-Picture  float
 # rule = app_id:org.gnome.Calculator  float
 # rule = title:*YouTube*  fullscreen
@@ -251,6 +254,9 @@ resize_step = 0.04          # resize amount per keypress
 #          focus|move|resize left|right|up|down
 #          move_workspace left|right|up|down   (to the monitor in that direction)
 #          sticky   (floating, on every workspace of its monitor)
+#          scratchpad   (hide the window in the scratchpad, or take it out)
+#          scratchpad_show [app_id]   (bring the latest scratchpad window, or the
+#                   latest matching the glob, to this workspace; again hides it)
 #          maximize (layout = scroll: the column fills the screen, or goes back)
 #          width next|prev   (layout = scroll: the next preset column width)
 #          workspace|sendto 1..32
@@ -268,6 +274,8 @@ bind = mod+t, layout, toggle
 bind = mod+o, overview
 bind = mod+m, maximize
 bind = mod+r, width, next
+bind = mod+shift+minus, scratchpad
+bind = mod+minus, scratchpad_show
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

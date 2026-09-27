@@ -182,7 +182,7 @@ static int ws_count(struct aro_server *s, struct aro_output *o, int ws)
 	int n = 0;
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link)
-		if (v->mapped && v->output == o && v->workspace == ws)
+		if (v->mapped && !v->stashed && v->output == o && v->workspace == ws)
 			n++;
 	return n;
 }
@@ -348,7 +348,7 @@ static void cmd_workspaces(struct req *r)
 
 static const char *view_state(struct aro_view *v)
 {
-	return v->fullscreen ? "fullscreen" : v->sticky ? "sticky"
+	return v->stashed ? "scratchpad" : v->fullscreen ? "fullscreen" : v->sticky ? "sticky"
 	     : v->floating ? "floating" : "tiled";
 }
 
@@ -380,7 +380,8 @@ static void view_json(struct req *r, struct aro_view *v)
 	          v->sticky ? "true" : "false",
 	          v->fullscreen ? "true" : "false",
 	          v == r->s->focused ? "true" : "false",
-	          v->output && v->workspace == v->output->cur_ws ? "true" : "false",
+	          v->output && !v->stashed && v->workspace == v->output->cur_ws
+	              ? "true" : "false",
 	          box.x, box.y, box.w, box.h);
 }
 
@@ -596,7 +597,7 @@ static void cmd_dispatch(struct req *r)
 	struct q_bind b = {
 		.action = action,
 		.num = num,
-		.arg = action == Q_SPAWN ? arg : NULL,
+		.arg = (action == Q_SPAWN || action == Q_SCRATCH_SHOW) && *arg ? arg : NULL,
 	};
 	aro_run_action(r->s, &b);
 	if (r->json)

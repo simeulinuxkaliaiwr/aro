@@ -108,6 +108,8 @@ struct aro_view {
 	/* floating windows are outside the tree. fullscreen is separate. */
 	bool floating;
 	bool sticky;            /* floating, and on every workspace of its output */
+	bool scratch;           /* in the scratchpad: floating, shown on demand */
+	bool stashed;           /* a scratchpad window while hidden */
 	double scroll_w;        /* layout = scroll: this column's width share; 0 = the default */
 	double scroll_w_prev;   /* what maximize goes back to */
 	bool fullscreen;

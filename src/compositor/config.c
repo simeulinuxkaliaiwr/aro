@@ -207,6 +207,11 @@ bool config_parse_action(const char *name, const char *arg,
 	if (!strcasecmp(name, "overview"))   { *action = Q_OVERVIEW;   return true; }
 	if (!strcasecmp(name, "sticky"))     { *action = Q_STICKY;     return true; }
 	if (!strcasecmp(name, "maximize"))   { *action = Q_MAXIMIZE;   return true; }
+	if (!strcasecmp(name, "scratchpad")) { *action = Q_SCRATCH;    return true; }
+	if (!strcasecmp(name, "scratchpad_show")) {
+		*action = Q_SCRATCH_SHOW;       /* arg, if any, stays in arg */
+		return true;
+	}
 	if (!strcasecmp(name, "quit"))       { *action = Q_QUIT;       return true; }
 	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
 	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }
@@ -339,7 +344,7 @@ static bool parse_bind(struct aro_config *c, char *value)
 	int num;
 	if (!config_parse_action(action, arg, &a, &num))
 		return false;
-	if (!bind_add(c, mods, sym, a, num, a == Q_SPAWN ? arg : NULL))
+	if (!bind_add(c, mods, sym, a, num, (a == Q_SPAWN || a == Q_SCRATCH_SHOW) ? arg : NULL))
 		return false;
 	c->binds[c->nbinds - 1].button = button;
 	return true;
@@ -367,6 +372,8 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_o, Q_OVERVIEW, 0, NULL);
 	bind_add(c, M, XKB_KEY_m, Q_MAXIMIZE, 0, NULL);
 	bind_add(c, M, XKB_KEY_r, Q_WIDTH, 1, NULL);
+	bind_add(c, M | S, XKB_KEY_minus, Q_SCRATCH, 0, NULL);
+	bind_add(c, M, XKB_KEY_minus, Q_SCRATCH_SHOW, 0, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -528,7 +535,7 @@ static bool list_add(char ***list, int *n, const char *cmd)
 /* window rules */
 
 /* case-insensitive glob: * and ?, with \\ escaping */
-static bool glob_match(const char *p, const char *s)
+bool glob_match(const char *p, const char *s)
 {
 	const char *star = NULL, *resume = NULL;
 
@@ -653,6 +660,7 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		.floating = Q_RULE_UNSET,
 		.workspace = Q_RULE_UNSET,
 		.fullscreen = Q_RULE_UNSET,
+		.scratch = Q_RULE_UNSET,
 	};
 	bool acts = false, bad_quote = false;
 	char *cur = value, *w;
@@ -680,6 +688,9 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 			acts = true;
 		} else if (!strcasecmp(w, "fullscreen")) {
 			r.fullscreen = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "scratchpad")) {
+			r.scratch = 1;
 			acts = true;
 		} else if (!strcasecmp(w, "workspace")) {
 			char *n = next_word(&cur, &bad_quote);
@@ -729,7 +740,7 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
                        struct q_rule_result *out)
 {
 	*out = (struct q_rule_result){
-		Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET,
+		Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET,
 	};
 	const char *a = app_id ? app_id : "";
 	const char *t = title ? title : "";
@@ -749,6 +760,8 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 			out->workspace = r->workspace;
 		if (r->fullscreen != Q_RULE_UNSET)
 			out->fullscreen = r->fullscreen;
+		if (r->scratch != Q_RULE_UNSET)
+			out->scratch = r->scratch;
 	}
 }
 

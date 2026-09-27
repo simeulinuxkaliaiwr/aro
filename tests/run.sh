@@ -214,6 +214,36 @@ fi
 wait "$CS"
 alive
 
+# 4f. the scratchpad hides a window and brings it to whatever workspace is showing
+client window 2 5 > "$T/scratch.out" 2>&1 &
+CX=$!
+if wait_for "$T/scratch.out" "2 windows open"; then
+	# "state visible focused" of the window with id $1
+	sx() { ctl -j windows | grep -o "\"id\":$1,[^}]*" | sed -E 's/.*"state":"([a-z]*)".*"focused":([a-z]*),"visible":([a-z]*).*/\1 \3 \2/'; }
+	id=$(ctl windows | awk '$1 == "*" { print $2 }')
+	ctl dispatch scratchpad > /dev/null; sleep 0.3
+	[ "$(sx "$id")" = "scratchpad false false" ] && ok "scratchpad hides the window" \
+		|| bad "scratchpad hides the window: $(sx "$id")"
+	ctl dispatch workspace 2 > /dev/null
+	ctl dispatch scratchpad_show "nothing-*" > /dev/null; sleep 0.3
+	[ "$(sx "$id")" = "scratchpad false false" ] && ok "scratchpad_show with no match does nothing" \
+		|| bad "scratchpad_show with no match does nothing: $(sx "$id")"
+	ctl dispatch scratchpad_show "AR?-test" > /dev/null; sleep 0.3
+	[ "$(sx "$id")" = "floating true true" ] && ok "scratchpad_show brings it to workspace 2" \
+		|| bad "scratchpad_show brings it to workspace 2: $(sx "$id")"
+	ctl dispatch scratchpad_show > /dev/null; sleep 0.3
+	[ "$(sx "$id")" = "scratchpad false false" ] && ok "scratchpad_show again hides it" \
+		|| bad "scratchpad_show again hides it: $(sx "$id")"
+	ctl dispatch scratchpad_show > /dev/null
+	ctl dispatch scratchpad > /dev/null
+	ctl dispatch scratchpad_show > /dev/null; sleep 0.3
+	[ "$(sx "$id")" = "floating true true" ] && ok "scratchpad on a shown one takes it out" \
+		|| bad "scratchpad on a shown one takes it out: $(sx "$id")"
+	ctl dispatch workspace 1 > /dev/null
+fi
+wait "$CX"
+alive
+
 # 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
 # focus follows mouse too: aro moving the pointer after a key press must not steal focus back
 config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"

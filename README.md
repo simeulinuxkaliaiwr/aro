@@ -40,6 +40,8 @@ says "this is the window you are in".
   share — both sides follow the cursor at once.
 - **Floating when it matters.** Dialogs and fixed-size windows float on
   their own, at the size they asked for; `mod+space` for anything else.
+  A scratchpad keeps a window hidden until `mod+minus` brings it to
+  whichever workspace you are on.
 - **One workspace set per monitor**, sway-style, created as you use them.
   A VT switch, or unplugging the only screen, keeps layouts and split
   ratios intact.
@@ -290,6 +292,7 @@ replaces this table entirely.
 | `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll |
 | `mod+m` | scroll layout: column fills the screen, or goes back |
 | `mod+r` | scroll layout: next preset column width |
+| `mod+shift+minus` / `mod+minus` | into the scratchpad / show or hide it |
 | `mod+space` | toggle floating |
 | `mod+f` | toggle fullscreen |
 | `mod+1..4` | workspace |

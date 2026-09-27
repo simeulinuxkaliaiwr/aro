@@ -160,7 +160,7 @@ static bool ws_empty(struct aro_server *s, struct aro_output *o, int ws)
 		return false;
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link)
-		if (v->mapped && v->output == o && v->workspace == ws)
+		if (v->mapped && !v->stashed && v->output == o && v->workspace == ws)
 			return false;
 	return true;
 }
@@ -191,7 +191,7 @@ static void workspace_move_to_output(struct aro_server *s, ly_edge e)
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (v->output != o || v->workspace != from || v->sticky)
+		if (v->output != o || v->workspace != from || v->sticky || v->stashed)
 			continue;
 		v->output = dest;
 		v->workspace = to;
@@ -298,11 +298,18 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 	case Q_MOVE_WS:
 		workspace_move_to_output(s, (ly_edge)b->num);
 		return;
+	case Q_SCRATCH:
+		scratch_toggle(s, f);
+		return;
+	case Q_SCRATCH_SHOW:
+		scratch_show(s, b->arg);
+		return;
 	case Q_STICKY:
 		if (f && !f->fullscreen) {
 			if (!f->sticky)
 				view_set_floating(s, f, true);
 			f->sticky = !f->sticky;
+			f->scratch = false;     /* a sticky window is always shown */
 			wlr_log(WLR_INFO, "sticky: %s %s", view_app_id(f) ? view_app_id(f) : "?",
 			        f->sticky ? "on" : "off");
 		}

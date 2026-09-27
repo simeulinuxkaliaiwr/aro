@@ -182,7 +182,7 @@ static bool ws_occupied(struct aro_output *o, int ws)
 
 	struct aro_view *v;
 	wl_list_for_each(v, &o->server->views, link) {
-		if (v->mapped && v->output == o && v->workspace == ws)
+		if (v->mapped && !v->stashed && v->output == o && v->workspace == ws)
 			return true;
 	}
 	return false;

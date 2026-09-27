@@ -89,7 +89,7 @@ static void output_sync(struct aro_server *s, struct aro_output *o)
 	bool occupied[ARO_MAX_WS] = { 0 };
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link)
-		if (v->mapped && v->output == o && v->workspace >= 0 &&
+		if (v->mapped && !v->stashed && v->output == o && v->workspace >= 0 &&
 		    v->workspace < ARO_MAX_WS)
 			occupied[v->workspace] = true;
 

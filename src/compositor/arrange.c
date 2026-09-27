@@ -7,11 +7,13 @@
 #include "config.h"
 #include "aro.h"
 #include "core.h"
+#include "ghost.h"
 #include "idle.h"
 #include "ipc.h"
 
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/util/log.h>
 
 /* tiling area after exclusive zones and bar */
 ly_box usable_area(struct aro_output *o)
@@ -296,7 +298,7 @@ static void view_retarget(anim_box *g, ly_box t, uint32_t now, uint32_t dur,
 /* mapped, on an output, and on its current workspace */
 bool view_visible(struct aro_view *v)
 {
-	return v->mapped && v->output && v->workspace == v->output->cur_ws;
+	return v->mapped && v->output && !v->stashed && v->workspace == v->output->cur_ws;
 }
 
 /* ── workspace slide ───────────────────────────────────────────────────── */
@@ -310,7 +312,7 @@ bool view_visible(struct aro_view *v)
 static bool view_leaving(struct aro_view *v)
 {
 	struct aro_output *o = v->output;
-	return v->mapped && o && o->slide.active &&
+	return v->mapped && !v->stashed && o && o->slide.active &&
 	       v->workspace == o->slide.out_ws && v->workspace != o->cur_ws;
 }
 
@@ -527,7 +529,7 @@ void aro_arrange(struct aro_server *s)
 
 void view_set_visible(struct aro_view *v, bool visible)
 {
-	wlr_scene_node_set_enabled(&v->frame_tree->node, visible);
+	wlr_scene_node_set_enabled(&v->frame_tree->node, visible && !v->stashed);
 }
 
 /* show a workspace on the focused output */
@@ -601,7 +603,8 @@ void workspace_show(struct aro_server *s, int ws)
 		/* fallback focus for floating-only workspace */
 		struct aro_view *cand;
 		wl_list_for_each(cand, &s->views, link) {
-			if (cand->mapped && cand->output == o && cand->workspace == ws) {
+			if (cand->mapped && !cand->stashed && cand->output == o &&
+			    cand->workspace == ws) {
 				next = cand;
 				break;
 			}
@@ -616,6 +619,7 @@ void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 	if (!v || ws < 0 || ws >= ARO_MAX_WS || ws == v->workspace)
 		return;
 	v->sticky = false;              /* sent to one workspace on purpose */
+	v->scratch = v->stashed = false;
 
 	ly_node *next = NULL;
 
@@ -641,3 +645,103 @@ void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 	}
 	aro_arrange(s);
 }
+
+/* ── scratchpad ────────────────────────────────────────────────────────── */
+
+/* the most recent other window showing on o */
+static struct aro_view *mru_showing(struct aro_server *s, struct aro_output *o,
+                                    struct aro_view *not)
+{
+	struct aro_view *m;
+	wl_list_for_each(m, &s->switcher.mru, mru_link)
+		if (m != not && view_visible(m) && m->output == o)
+			return m;
+	return NULL;
+}
+
+/* hide a scratchpad window; focus goes back to what was used before it */
+void scratch_stash(struct aro_server *s, struct aro_view *v)
+{
+	if (!v || !v->scratch || v->stashed)
+		return;
+	if (v->fullscreen)
+		view_set_fullscreen(s, v, false);
+	if (view_visible(v) && !v->output->slide.active && !aro_locked(s))
+		ghost_spawn(s, v, view_draw_box(v, aro_now_ms()));
+	v->stashed = true;
+	view_set_visible(v, false);
+	if (s->focused == v) {
+		s->focused = NULL;
+		aro_focus(s, v->output ? mru_showing(s, v->output, v) : NULL);
+	}
+	aro_arrange(s);
+}
+
+/* into the scratchpad and hidden, or out of it and left where it is */
+void scratch_toggle(struct aro_server *s, struct aro_view *v)
+{
+	if (!v || !v->mapped)
+		return;
+	if (v->scratch) {
+		v->scratch = v->stashed = false;
+		wlr_log(WLR_INFO, "scratchpad: %s out", view_app_id(v) ? view_app_id(v) : "?");
+		return;
+	}
+	view_set_floating(s, v, true);
+	v->sticky = false;
+	v->scratch = true;
+	wlr_log(WLR_INFO, "scratchpad: %s in", view_app_id(v) ? view_app_id(v) : "?");
+	scratch_stash(s, v);
+}
+
+/* onto the focused screen's workspace, growing in like a new window */
+void scratch_bring_view(struct aro_server *s, struct aro_view *v)
+{
+	struct aro_output *o = aro_focused_output(s);
+	if (!o)
+		return;
+	if (v->output != o) {
+		ly_box u = usable_area(o);
+		v->fbox.x = u.x + (u.w - v->fbox.w) / 2;
+		v->fbox.y = u.y + (u.h - v->fbox.h) / 2;
+		v->output = o;
+	}
+	v->workspace = o->cur_ws;
+	v->stashed = false;
+
+	const double k = s->cfg.theme.open_scale;
+	ly_box t = view_target(v);
+	anim_box_set(&v->geo, (ly_box){
+		.x = t.x + (int)(t.w * (1 - k) / 2), .y = t.y + (int)(t.h * (1 - k) / 2),
+		.w = (int)(t.w * k), .h = (int)(t.h * k),
+	});
+	view_set_visible(v, true);
+	aro_focus(s, v);
+	aro_arrange(s);
+}
+
+/* toggle the most recent scratchpad window matching app_id (NULL: any) */
+void scratch_show(struct aro_server *s, const char *app_id)
+{
+	struct aro_output *o = aro_focused_output(s);
+	if (!o)
+		return;
+
+	struct aro_view *v = NULL, *m;
+	wl_list_for_each(m, &s->switcher.mru, mru_link) {
+		const char *a = view_app_id(m);
+		if (m->mapped && m->scratch && (!app_id || glob_match(app_id, a ? a : ""))) {
+			v = m;
+			break;
+		}
+	}
+	if (!v)
+		return;
+
+	/* showing here: hide it; hidden or elsewhere: bring it here */
+	if (view_visible(v) && v->output == o)
+		scratch_stash(s, v);
+	else
+		scratch_bring_view(s, v);
+}
+

@@ -893,6 +893,10 @@ void view_raise_and_focus(struct aro_server *s, struct aro_view *v)
 {
 	if (!v || !v->mapped || !v->output)
 		return;             /* parked: no screen to show it on */
+	if (v->stashed) {
+		scratch_bring_view(s, v);       /* a taskbar or the app asked for it */
+		return;
+	}
 
 	s->focused_output = v->output;
 	if (v->workspace != v->output->cur_ws)

@@ -65,6 +65,8 @@ enum q_action {
 	Q_STICKY,
 	Q_MAXIMIZE,     /* layout = scroll: the column fills the screen, or goes back */
 	Q_WIDTH,        /* layout = scroll, num: +1 next preset width, -1 previous */
+	Q_SCRATCH,      /* the focused window into the scratchpad, or out */
+	Q_SCRATCH_SHOW, /* arg: app_id glob, or NULL for any */
 };
 
 struct q_bind {
@@ -72,7 +74,7 @@ struct q_bind {
 	xkb_keysym_t sym;       /* level-0 keysym, as the key handler compares */
 	uint32_t button;        /* a mouse button (BTN_*) instead of a key; else 0 */
 	enum q_action action;
-	char *arg;              /* Q_SPAWN only; owned */
+	char *arg;              /* Q_SPAWN and Q_SCRATCH_SHOW; owned */
 	int num;
 };
 
@@ -86,11 +88,12 @@ struct q_rule {
 	int floating;           /* 1 float, 0 tile */
 	int workspace;          /* 0-based */
 	int fullscreen;         /* 1 only: a rule can ask for it, not forbid it */
+	int scratch;            /* 1 only: starts hidden in the scratchpad */
 };
 
 /* merged rule result */
 struct q_rule_result {
-	int floating, workspace, fullscreen;
+	int floating, workspace, fullscreen, scratch;
 };
 
 /* monitor block */
@@ -225,6 +228,9 @@ struct aro_config {
 
 /* defaults + built-in bindings */
 void config_defaults(struct aro_config *c);
+
+/* case-insensitive glob with * and ?, as rules match */
+bool glob_match(const char *p, const char *s);
 
 /* the action half of a bind line; also what IPC dispatch uses.
  * arg may be NULL; for Q_SPAWN the command is arg itself */

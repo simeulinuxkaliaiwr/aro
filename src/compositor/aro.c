@@ -517,7 +517,7 @@ void view_set_floating(struct aro_server *s, struct aro_view *v,
 	if (!v || v->floating == floating)
 		return;
 	if (!floating)
-		v->sticky = false;      /* only floating windows can be sticky */
+		v->sticky = v->scratch = false; /* both are floating only */
 
 	if (floating) {
 		if (v->node) {
@@ -625,6 +625,8 @@ static void view_rules_reapply(struct aro_view *v)
 		view_send_to(s, v, r.workspace);
 	if (r.fullscreen != Q_RULE_UNSET && r.fullscreen != last.fullscreen)
 		view_set_fullscreen(s, v, true);
+	if (r.scratch == 1 && last.scratch != 1 && !v->scratch)
+		scratch_toggle(s, v);
 }
 
 /* ── across outputs ────────────────────────────────────────────────────── */
@@ -683,7 +685,7 @@ struct aro_view *output_pick_view(struct aro_server *s,
 	}
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
-		if (v->mapped && v->output == o && v->workspace == o->cur_ws)
+		if (v->mapped && !v->stashed && v->output == o && v->workspace == o->cur_ws)
 			return v;
 	}
 	return NULL;
@@ -1331,13 +1333,14 @@ void view_map(struct wl_listener *l, void *data)
 	v->rule_last = r;
 
 	const int ws = r.workspace != Q_RULE_UNSET ? r.workspace : o->cur_ws;
-	const bool here = ws == o->cur_ws;
+	v->scratch = v->stashed = r.scratch == 1;       /* starts hidden */
+	const bool here = ws == o->cur_ws && !v->stashed;
 	v->workspace = ws;
 
 	/* rule overrides float heuristic */
-	bool floating = r.floating != Q_RULE_UNSET
+	bool floating = v->scratch || (r.floating != Q_RULE_UNSET
 	              ? r.floating == 1
-	              : v->impl->wants_float && v->impl->wants_float(v);
+	              : v->impl->wants_float && v->impl->wants_float(v));
 
 	if (floating) {
 		/* floating windows skip the tree */
@@ -1367,8 +1370,8 @@ void view_map(struct wl_listener *l, void *data)
 	}
 
 	/* handle pre-map fullscreen request */
-	if (r.fullscreen == 1 ||
-	    (v->impl->wants_fullscreen && v->impl->wants_fullscreen(v)))
+	if (!v->stashed && (r.fullscreen == 1 ||
+	    (v->impl->wants_fullscreen && v->impl->wants_fullscreen(v))))
 		view_set_fullscreen(s, v, true);
 
 	ly_box t = view_target(v);
@@ -1408,6 +1411,7 @@ void view_unmap(struct wl_listener *l, void *data)
 
 	v->mapped = false;
 	view_set_visible(v, false);
+	v->scratch = v->stashed = false;        /* rules decide again on the next map */
 	grab_forget(s, v);
 	ftl_destroy(v);
 	mru_remove(s, v);

@@ -400,9 +400,11 @@ Dialogs, utilities, toolbars and splash screens float without a rule.
 An action is
 .BR float ,
 .BR tile ,
-.B fullscreen
+.BR fullscreen ,
+.BI workspace " n"
 or
-.BI workspace " n"\fR.
+.BR scratchpad ,
+which opens the window hidden in the scratchpad.
 Rules apply top to bottom, the last one winning, whenever a window opens,
 changes title or app_id, or the config is reloaded.
 .PP
@@ -410,6 +412,7 @@ changes title or app_id, or the config is reloaded.
 rule = app_id:mpv  workspace 3
 rule = app_id:firefox  title:Picture-in-Picture  float
 rule = type:dialog  app_id:gimp*  tile
+rule = app_id:dropterm  scratchpad
 .fi
 .SH BINDINGS
 .B bind =
@@ -473,6 +476,16 @@ wrapping round at the end.
 Keep the focused window on every workspace of its monitor, floating; a
 tiled window floats first.
 Tiling it again, or sending it to a workspace, ends it.
+.TP
+.B scratchpad
+Hide the focused window in the scratchpad, floating; on a scratchpad window
+that is showing, take it back out, leaving it where it is.
+.TP
+.BR scratchpad_show " [\fIapp_id\fP]"
+Bring the most recently used scratchpad window, or the most recent whose
+app_id matches the glob, to the current workspace and focus it; if it is
+already showing there, hide it again.
+Clicking a hidden one in a taskbar brings it out too.
 .TP
 .BR move_workspace " " left | right | up | down
 Move the current workspace, with its windows and layout, to the monitor in
