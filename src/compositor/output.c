@@ -158,6 +158,7 @@ void output_destroy(struct wl_listener *l, void *data)
 		aro_arrange(s);
 	}
 	output_mgr_update(s);
+	lid_update(s);
 }
 
 /* adopt parked workspaces */
@@ -568,6 +569,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 		wl_list_remove(&o->link);
 		wl_list_insert(&s->outputs, &o->link);
 		o->enabled = true;
+		o->lid_off = false;     /* whoever turned it on wins over the lid */
 
 		/* refresh box before bar */
 		output_refresh_box(o);
@@ -697,6 +699,9 @@ static void monitor_apply(struct aro_output *o, bool initial)
 	bool refused = false;
 	if (r.enabled == 0) {
 		int lit = wl_list_length(&s->outputs) - (o->enabled ? 1 : 0);
+		struct aro_output *lo;
+		wl_list_for_each(lo, &s->outputs_off, link)
+			lit += lo->lid_off;     /* lid_update turns it back on */
 		if (lit == 0) {
 			notify(s, NOTIFY_ERROR,
 			       "monitor %s: not turning off the only screen that is on",
@@ -766,6 +771,7 @@ void monitors_reapply(struct aro_server *s)
 		}
 	}
 	free(all);
+	lid_update(s);
 }
 
 /* apply output management config */
@@ -890,6 +896,7 @@ void new_output(struct wl_listener *l, void *data)
 
 	monitor_apply(o, true);
 	output_mgr_update(s);
+	lid_update(s);
 }
 
 /* output containing a point */
@@ -932,4 +939,41 @@ void update_backdrop(struct aro_server *s)
 
 	/* lock uses refreshed boxes too */
 	lock_arrange(s);
+}
+
+/* built-in panels, by connector name */
+static bool output_is_internal(const struct wlr_output *wo)
+{
+	return !strncmp(wo->name, "eDP-", 4) || !strncmp(wo->name, "LVDS-", 5) ||
+	       !strncmp(wo->name, "DSI-", 4);
+}
+
+/* lid shut with another screen on: built-in panels off, else back on */
+void lid_update(struct aro_server *s)
+{
+	bool other = false;
+	struct aro_output *o, *tmp;
+	wl_list_for_each(o, &s->outputs, link)
+		other |= !output_is_internal(o->wlr_output);
+
+	if (s->lid_closed && s->cfg.lid_switch && other) {
+		wl_list_for_each_safe(o, tmp, &s->outputs, link) {
+			if (!output_is_internal(o->wlr_output))
+				continue;
+			struct out_req r = OUT_REQ_NONE;
+			r.enabled = 0;
+			char why[128];
+			output_configure(o, &r, false, why, sizeof why);
+			o->lid_off = true;
+			wlr_log(WLR_INFO, "lid: %s off", o->wlr_output->name);
+		}
+		return;
+	}
+	wl_list_for_each_safe(o, tmp, &s->outputs_off, link) {
+		if (!o->lid_off)
+			continue;
+		wlr_log(WLR_INFO, "lid: %s back on", o->wlr_output->name);
+		monitor_apply(o, true);         /* its whole monitor block */
+		o->lid_off = false;
+	}
 }

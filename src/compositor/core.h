@@ -101,6 +101,7 @@ void layer_new_popup(struct wl_listener *listener, void *data);
 void new_layer_surface(struct wl_listener *listener, void *data);
 
 /* output.c */
+void lid_update(struct aro_server *s);
 void monitors_reapply(struct aro_server *s);
 void new_output(struct wl_listener *l, void *data);
 struct aro_output *output_at(struct aro_server *s, double x, double y);

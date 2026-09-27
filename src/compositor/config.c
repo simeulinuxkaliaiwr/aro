@@ -414,6 +414,9 @@ void config_defaults(struct aro_config *c)
 	c->confirm_quit = TH_CONFIRM_QUIT;
 	c->tp_tap = true;
 	c->tp_dwt = true;
+	c->kb_repeat_rate = 25;
+	c->kb_repeat_delay = 600;
+	c->lid_switch = true;
 	c->gesture_fingers = 3;
 	c->scroll_width = 0.5;
 	c->scroll_peek = 40;
@@ -1249,6 +1252,34 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_int(value, &n) && n >= 8 && n <= 256;
 			if (ok)
 				c->cursor_size = n;
+		} else if (!strcasecmp(key, "keyboard_repeat_rate")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 0 && n <= 1000;
+			if (ok)
+				c->kb_repeat_rate = n;
+		} else if (!strcasecmp(key, "keyboard_repeat_delay")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 1 && n <= 5000;
+			if (ok)
+				c->kb_repeat_delay = n;
+		} else if (!strcasecmp(key, "mouse_accel")) {
+			if (!strcasecmp(value, "auto"))
+				c->ms_accel = Q_ACCEL_DEFAULT;
+			else if (!strcasecmp(value, "flat"))
+				c->ms_accel = Q_ACCEL_FLAT;
+			else if (!strcasecmp(value, "adaptive"))
+				c->ms_accel = Q_ACCEL_ADAPTIVE;
+			else
+				ok = false;
+		} else if (!strcasecmp(key, "mouse_speed")) {
+			double d;
+			ok = parse_double(value, &d) && d >= -1.0 && d <= 1.0;
+			if (ok)
+				c->ms_speed = d;
+		} else if (!strcasecmp(key, "mouse_natural_scroll")) {
+			ok = parse_bool(value, &c->ms_natural_scroll);
+		} else if (!strcasecmp(key, "lid_switch")) {
+			ok = parse_bool(value, &c->lid_switch);
 		} else if (!strcasecmp(key, "touchpad_tap")) {
 			ok = parse_bool(value, &c->tp_tap);
 		} else if (!strcasecmp(key, "touchpad_natural_scroll")) {

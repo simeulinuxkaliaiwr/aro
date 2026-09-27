@@ -185,6 +185,16 @@ struct aro_config {
 	int nscroll_presets;
 	double tp_speed;        /* -1..1 */
 
+	/* mice and trackpoints (libinput) */
+	enum q_accel { Q_ACCEL_DEFAULT, Q_ACCEL_FLAT, Q_ACCEL_ADAPTIVE } ms_accel;
+	double ms_speed;        /* -1..1 */
+	bool ms_natural_scroll;
+
+	/* key repeat: keys per second, and ms before it starts */
+	int kb_repeat_rate, kb_repeat_delay;
+
+	bool lid_switch;        /* closing the lid turns the built-in screen off */
+
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;
 

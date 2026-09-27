@@ -48,6 +48,8 @@ keyboard_layout = us
 # keyboard_options = compose:ralt
 # keyboard_model =
 # keyboard_rules =
+keyboard_repeat_rate = 25      # keys per second; 0 turns repeat off
+keyboard_repeat_delay = 600    # ms before a held key repeats
 
 # === touchpad ===
 touchpad_tap = true
@@ -59,6 +61,17 @@ touchpad_speed = 0.0            # -1.0 to 1.0
 # then a sideways swipe on a scroll workspace moves along its columns).
 # 0 passes every gesture to apps instead. 3 to 5.
 gesture_fingers = 3
+
+# === mouse ===
+# also trackpoints. flat: the pointer moves the same however fast you go.
+mouse_accel = auto              # auto, flat or adaptive
+mouse_speed = 0.0               # -1.0 to 1.0
+mouse_natural_scroll = false
+
+# === laptop lid ===
+# closing the lid turns the built-in screen off while another screen is on.
+# with no other screen, the system (logind) decides, usually suspending.
+lid_switch = true
 
 # === cursor ===
 # falls back to XCURSOR_THEME / XCURSOR_SIZE if unset. apps started after

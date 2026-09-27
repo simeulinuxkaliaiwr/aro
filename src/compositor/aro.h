@@ -231,6 +231,7 @@ struct aro_output {
 	/* last applied monitor block values; reload applies only changes */
 	struct q_monitor_set mon_last;
 	bool mon_applied;
+	bool lid_off;           /* turned off by the lid, not by config */
 
 
 	struct wl_listener frame;
@@ -254,6 +255,13 @@ struct aro_pointer {
 	struct wl_list link;
 	struct aro_server *server;
 	struct wlr_input_device *dev;
+	struct wl_listener destroy;
+};
+
+/* a lid or tablet-mode switch; only the lid is acted on */
+struct aro_switch {
+	struct aro_server *server;
+	struct wl_listener toggle;
 	struct wl_listener destroy;
 };
 
@@ -345,6 +353,7 @@ struct aro_server {
 	struct wl_list views;
 	struct wl_list keyboards;
 	struct wl_list pointers;
+	bool lid_closed;
 	struct wl_list layers;
 	struct wl_list notifications;
 	struct aro_prompt prompt;            /* the modal yes/no card */

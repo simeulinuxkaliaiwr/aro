@@ -142,6 +142,14 @@ Unset ones come from the
 .B XKB_DEFAULT_*
 environment variables.
 .TP
+.BI "keyboard_repeat_rate = " n
+Keys per second while a key is held; 0 turns repeat off.
+Default: 25.
+.TP
+.BI "keyboard_repeat_delay = " ms
+How long a key is held before it repeats.
+Default: 600.
+.TP
 .BI "touchpad_tap = " bool
 Tap to click.
 Default: true.
@@ -155,6 +163,26 @@ Default: true.
 .BI "touchpad_speed = " number
 From \-1.0 to 1.0.
 Default: 0.
+.TP
+.BI "mouse_accel = " "auto | flat | adaptive"
+The acceleration profile for mice and trackpoints.
+.B flat
+moves the pointer by the same amount however fast the mouse goes.
+Default: auto, the device's own default.
+.TP
+.BI "mouse_speed = " number
+From \-1.0 to 1.0.
+Default: 0.
+.TP
+.BI "mouse_natural_scroll = " bool
+Default: false.
+.TP
+.BI "lid_switch = " bool
+Closing a laptop's lid turns its built-in screen off while another screen is
+on, and opening it turns it back on.
+With no other screen the lid is left to the system (logind), which usually
+suspends.
+Default: true.
 .TP
 .BI "gesture_fingers = " n
 A touchpad swipe with this many fingers, 3 to 5, changes workspace on the

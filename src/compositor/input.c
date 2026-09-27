@@ -29,6 +29,7 @@
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_switch.h>
 #include <wlr/util/edges.h>
 #include <wlr/util/region.h>
 #include <wlr/util/log.h>
@@ -192,7 +193,8 @@ void apply_keymap(struct aro_server *s, struct wlr_keyboard *wlr_kb)
 		wlr_log(WLR_ERROR, "could not compile the keymap; keeping the old one");
 	}
 	xkb_context_unref(ctx);
-	wlr_keyboard_set_repeat_info(wlr_kb, 25, 600);
+	wlr_keyboard_set_repeat_info(wlr_kb, s->cfg.kb_repeat_rate,
+	                             s->cfg.kb_repeat_delay);
 }
 
 void seat_update_caps(struct aro_server *s)
@@ -232,7 +234,27 @@ static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev,
 	wl_list_insert(&s->keyboards, &kb->link);
 }
 
-/* touchpad settings; tap finger count tells a touchpad from a mouse */
+#if WLR_HAS_LIBINPUT_BACKEND
+/* mice and trackpoints: no tap fingers */
+static void mouse_configure(const struct aro_config *c,
+                            struct libinput_device *li)
+{
+	if (libinput_device_config_accel_is_available(li)) {
+		enum libinput_config_accel_profile p =
+			c->ms_accel == Q_ACCEL_FLAT ? LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT
+			: c->ms_accel == Q_ACCEL_ADAPTIVE ? LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE
+			: libinput_device_config_accel_get_default_profile(li);
+		if (libinput_device_config_accel_get_profiles(li) & p)
+			libinput_device_config_accel_set_profile(li, p);
+		libinput_device_config_accel_set_speed(li, c->ms_speed);
+	}
+	if (libinput_device_config_scroll_has_natural_scroll(li))
+		libinput_device_config_scroll_set_natural_scroll_enabled(li,
+			c->ms_natural_scroll);
+}
+#endif
+
+/* pointer settings; tap finger count tells a touchpad from a mouse */
 void pointer_configure(struct aro_server *s,
                               struct wlr_input_device *dev)
 {
@@ -240,10 +262,15 @@ void pointer_configure(struct aro_server *s,
 	if (!wlr_input_device_is_libinput(dev))
 		return;
 	struct libinput_device *li = wlr_libinput_get_device_handle(dev);
-	if (!li || libinput_device_config_tap_get_finger_count(li) <= 0)
+	if (!li)
 		return;
 
 	const struct aro_config *c = &s->cfg;
+	if (libinput_device_config_tap_get_finger_count(li) <= 0) {
+		mouse_configure(c, li);
+		return;
+	}
+
 	libinput_device_config_tap_set_enabled(li, c->tp_tap
 		? LIBINPUT_CONFIG_TAP_ENABLED : LIBINPUT_CONFIG_TAP_DISABLED);
 	if (libinput_device_config_scroll_has_natural_scroll(li))
@@ -283,6 +310,38 @@ static void new_pointer(struct aro_server *s, struct wlr_input_device *dev)
 	wl_list_insert(&s->pointers, &p->link);
 }
 
+static void switch_toggle(struct wl_listener *l, void *data)
+{
+	struct aro_switch *sw = wl_container_of(l, sw, toggle);
+	struct wlr_switch_toggle_event *ev = data;
+	if (ev->switch_type != WLR_SWITCH_TYPE_LID)
+		return;
+	sw->server->lid_closed = ev->switch_state == WLR_SWITCH_STATE_ON;
+	wlr_log(WLR_INFO, "lid %s", sw->server->lid_closed ? "closed" : "open");
+	lid_update(sw->server);
+}
+
+static void switch_destroy(struct wl_listener *l, void *data)
+{
+	(void)data;
+	struct aro_switch *sw = wl_container_of(l, sw, destroy);
+	wl_list_remove(&sw->toggle.link);
+	wl_list_remove(&sw->destroy.link);
+	free(sw);
+}
+
+static void new_switch(struct aro_server *s, struct wlr_input_device *dev)
+{
+	struct aro_switch *sw = calloc(1, sizeof *sw);
+	if (!sw)
+		return;
+	sw->server = s;
+	sw->toggle.notify = switch_toggle;
+	wl_signal_add(&wlr_switch_from_input_device(dev)->events.toggle, &sw->toggle);
+	sw->destroy.notify = switch_destroy;
+	wl_signal_add(&dev->events.destroy, &sw->destroy);
+}
+
 void new_input(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_input);
@@ -294,6 +353,8 @@ void new_input(struct wl_listener *l, void *data)
 		tablet_add(s, dev);
 	} else if (dev->type == WLR_INPUT_DEVICE_TOUCH) {
 		touch_add(s, dev);
+	} else if (dev->type == WLR_INPUT_DEVICE_SWITCH) {
+		new_switch(s, dev);
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
 		new_pointer(s, dev);
