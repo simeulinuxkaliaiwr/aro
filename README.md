@@ -51,8 +51,8 @@ says "this is the window you are in".
   any action, and `aroctl subscribe` prints a line for each change, for
   bar modules and scripts.
 - **Its own wallpaper**, drawn by `aropaper` at each screen's exact
-  resolution, and a status bar that steps aside on its own when waybar or
-  quickshell starts.
+  resolution, and a status bar (workspaces, title, battery, clock) that
+  steps aside on its own when waybar or quickshell starts.
 - **Window rules**, monitor configuration, an exit prompt, and rounded
   corners through [SceneFX](https://github.com/wlrfx/scenefx). Layer shell,
   XWayland, session lock, idle inhibit, clipboard, drag and drop,

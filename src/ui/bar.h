@@ -27,6 +27,7 @@ struct aro_bar {
 
 	struct qtext title;
 	struct qtext clock;
+	struct qtext battery;
 
 	int x, y, w;
 	float scale;

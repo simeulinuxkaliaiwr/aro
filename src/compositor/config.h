@@ -169,6 +169,7 @@ struct aro_config {
 	 * means the same thing.
 	 */
 	enum q_bar bar;
+	bool bar_battery;       /* the battery left of the clock, when there is one */
 
 	enum q_wallpaper wallpaper;
 	char *wallpaper_file;   /* Q_WALLPAPER_FILE only; owned, `~` unexpanded */

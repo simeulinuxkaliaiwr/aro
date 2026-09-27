@@ -422,6 +422,7 @@ void config_defaults(struct aro_config *c)
 	c->scroll_presets[2] = 2.0 / 3;
 	c->nscroll_presets = 3;
 	c->bar = TH_BAR;
+	c->bar_battery = true;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
 	for (int i = 0; i < ARO_MAX_WS; i++)
@@ -1311,6 +1312,8 @@ bool config_load(struct aro_config *c, const char *path)
 				c->bar = Q_BAR_AUTO;
 			else if ((ok = parse_bool(value, &b)))
 				c->bar = b ? Q_BAR_ON : Q_BAR_OFF;
+		} else if (!strcasecmp(key, "bar_battery")) {
+			ok = parse_bool(value, &c->bar_battery);
 		} else if (!strcasecmp(key, "wallpaper")) {
 			/* the keywords are words, not paths: `none` never means a
 			 * file called none. ./none does, if anyone needs it. */

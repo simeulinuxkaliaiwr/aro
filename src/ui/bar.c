@@ -9,10 +9,106 @@
 #include "aro.h"
 #include "theme.h"
 
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+
+/* ── battery ───────────────────────────────────────────────────────────── */
+
+#define POWER_SUPPLY "/sys/class/power_supply"
+
+struct battery {
+	bool present, charging;
+	int percent;
+};
+
+/* one line of a sysfs file; false if it is not there */
+static bool read_line(const char *dir, const char *name, char *buf, size_t size)
+{
+	char path[512];
+	snprintf(path, sizeof path, "%s/%s", dir, name);
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return false;
+	bool ok = fgets(buf, (int)size, f) != NULL;
+	fclose(f);
+	buf[strcspn(buf, "\n")] = '\0';
+	return ok;
+}
+
+static long read_long(const char *dir, const char *name)
+{
+	char buf[32];
+	return read_line(dir, name, buf, sizeof buf) ? strtol(buf, NULL, 10) : -1;
+}
+
+/* every system battery together; a mouse's or a phone's does not count */
+static struct battery battery_read(void)
+{
+	struct battery bat = { 0 };
+	DIR *d = opendir(POWER_SUPPLY);
+	if (!d)
+		return bat;
+	long now = 0, full = 0, pct_sum = 0, npct = 0;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.')
+			continue;
+		char dir[300], buf[32];
+		snprintf(dir, sizeof dir, POWER_SUPPLY "/%s", e->d_name);
+		if (!read_line(dir, "type", buf, sizeof buf) || strcmp(buf, "Battery"))
+			continue;
+		if (read_line(dir, "scope", buf, sizeof buf) && !strcmp(buf, "Device"))
+			continue;
+		bat.present = true;
+		if (read_line(dir, "status", buf, sizeof buf) && !strcmp(buf, "Charging"))
+			bat.charging = true;
+		/* energy or charge counters weigh two batteries properly; capacity is the fallback */
+		long n = read_long(dir, "energy_now"), f = read_long(dir, "energy_full");
+		if (n < 0 || f <= 0) {
+			n = read_long(dir, "charge_now");
+			f = read_long(dir, "charge_full");
+		}
+		if (n >= 0 && f > 0) {
+			now += n;
+			full += f;
+		} else {
+			long c = read_long(dir, "capacity");
+			if (c >= 0) {
+				pct_sum += c;
+				npct++;
+			}
+		}
+	}
+	closedir(d);
+	if (full > 0)
+		bat.percent = (int)((now * 100 + full / 2) / full);
+	else if (npct > 0)
+		bat.percent = (int)(pct_sum / npct);
+	else
+		bat.present = false;
+	if (bat.percent > 100)
+		bat.percent = 100;
+	return bat;
+}
+
+/* read at most every 30 s: the bar redraws far more often than batteries change */
+static struct battery battery_get(void)
+{
+	static struct battery cached;
+	static time_t at;
+	time_t now = time(NULL);
+	if (!at || now - at >= 30 || now < at) {
+		cached = battery_read();
+		at = now;
+	}
+	return cached;
+}
+
+/* ── the bar ───────────────────────────────────────────────────────────── */
 
 #define PILL_H 18
 #define PILL_PAD 9
@@ -47,6 +143,8 @@ bool bar_create(struct aro_bar *b, struct aro_output *o)
 	if (!qtext_init(&b->title, b->tree, th->font))
 		return false;
 	if (!qtext_init(&b->clock, b->tree, th->font_small))
+		return false;
+	if (!qtext_init(&b->battery, b->tree, th->font_small))
 		return false;
 
 	return b->bg != NULL;
@@ -153,6 +251,19 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 	           b->w - th->bar_pad - b->clock.w,
 	           mid - b->clock.h / 2);
 
+	/* battery, left of the clock; red when low and draining */
+	int right = b->w - th->bar_pad - b->clock.w;
+	const struct battery bat = s->cfg.bar_battery ? battery_get() : (struct battery){ 0 };
+	qtext_show(&b->battery, bat.present);
+	if (bat.present) {
+		char text[32];
+		snprintf(text, sizeof text, bat.charging ? "%d%% charging" : "%d%%", bat.percent);
+		bool low = !bat.charging && bat.percent <= 15;
+		qtext_set(&b->battery, text, low ? th->urgent : th->dim, b->scale, 0);
+		right -= th->bar_pad + b->battery.w;
+		qtext_move(&b->battery, right, mid - b->battery.h / 2);
+	}
+
 	/* focused title */
 	/* only show title on its own output */
 	const char *title = NULL;
@@ -160,7 +271,7 @@ void bar_update(struct aro_bar *b, struct aro_output *o)
 		title = view_title(s->focused);
 
 	int title_x = cursor + th->bar_pad;
-	int avail = (b->w - th->bar_pad - b->clock.w - th->bar_pad * 2) - title_x;
+	int avail = right - th->bar_pad * 2 - title_x;
 	if (avail < 0)
 		avail = 0;
 
@@ -174,6 +285,7 @@ void bar_finish(struct aro_bar *b)
 		qtext_finish(&b->ws[i].label);
 	qtext_finish(&b->title);
 	qtext_finish(&b->clock);
+	qtext_finish(&b->battery);
 	if (b->tree)
 		wlr_scene_node_destroy(&b->tree->node);
 	b->tree = NULL;
@@ -200,4 +312,5 @@ void bar_retheme(struct aro_bar *b)
 	}
 	qtext_set_font(&b->title, th->font);
 	qtext_set_font(&b->clock, th->font_small);
+	qtext_set_font(&b->battery, th->font_small);
 }

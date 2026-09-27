@@ -107,6 +107,7 @@ wallpaper = auto
 
 # false removes the bar and gives its space to windows (running waybar, say).
 bar = true
+bar_battery = true         # charge left of the clock, on machines with a battery
 
 # === spacing ===
 gaps = 9                    # between tiled windows
