@@ -405,10 +405,29 @@ An action is
 .BR float ,
 .BR tile ,
 .BR fullscreen ,
-.BI workspace " n"
+.BI workspace " n"\fR,
+.B scratchpad
+(opens the window hidden in the scratchpad),
+.B sticky
+(floating, on every workspace),
+.BI monitor " name"
+(opens it on the screen whose connector name or
+.RI \(dq make " " model " " serial \(dq
+matches the glob, as monitor blocks do),
+.BI size " w h"
+and
+.BI position " x y"
+(a floating window's size, frame included, and top-left corner in the
+screen's usable area; each in pixels, or a share of the screen like
+.BR 60% ),
+.B center
+(floating, centred),
 or
-.BR scratchpad ,
-which opens the window hidden in the scratchpad.
+.BR no_border ,
+.B no_header
+and
+.BR no_radius ,
+which take that part of the window's frame away.
 Rules apply top to bottom, the last one winning, whenever a window opens,
 changes title or app_id, or the config is reloaded.
 .PP
@@ -417,6 +436,8 @@ rule = app_id:mpv  workspace 3
 rule = app_id:firefox  title:Picture-in-Picture  float
 rule = type:dialog  app_id:gimp*  tile
 rule = app_id:dropterm  scratchpad
+rule = app_id:pavucontrol  float  size 800 500  center
+rule = app_id:mpv  no_border  no_header  no_radius
 .fi
 .SH BINDINGS
 .B bind =

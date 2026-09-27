@@ -6,6 +6,8 @@
 #include "theme.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <math.h>     /* isfinite */
 #include <linux/input-event-codes.h>
 #include <stddef.h>   /* offsetof */
 #include <stdarg.h>
@@ -605,7 +607,25 @@ static void rule_free(struct q_rule *r)
 	free(r->app_id);
 	free(r->title);
 	free(r->type);
-	r->app_id = r->title = r->type = NULL;
+	free(r->monitor);
+	r->app_id = r->title = r->type = r->monitor = NULL;
+}
+
+/* "800" pixels or "60%"; a size must be more than 0, a position at least 0 */
+static bool parse_len(const char *s, bool size, struct q_len *out)
+{
+	char *end;
+	errno = 0;
+	double d = strtod(s, &end);
+	bool pct = *end == '%';
+	if (errno || end == s || (pct ? end[1] : *end) || !isfinite(d))
+		return false;
+	if (pct)
+		d /= 100.0;
+	if ((size ? d <= 0 : d < 0) || (pct && d > 1.0))
+		return false;
+	*out = (struct q_len){ .v = d, .pct = pct, .set = true };
+	return true;
 }
 
 /* workspace = N layout X */
@@ -661,6 +681,11 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		.workspace = Q_RULE_UNSET,
 		.fullscreen = Q_RULE_UNSET,
 		.scratch = Q_RULE_UNSET,
+		.sticky = Q_RULE_UNSET,
+		.center = Q_RULE_UNSET,
+		.no_border = Q_RULE_UNSET,
+		.no_header = Q_RULE_UNSET,
+		.no_radius = Q_RULE_UNSET,
 	};
 	bool acts = false, bad_quote = false;
 	char *cur = value, *w;
@@ -692,6 +717,43 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		} else if (!strcasecmp(w, "scratchpad")) {
 			r.scratch = 1;
 			acts = true;
+		} else if (!strcasecmp(w, "sticky")) {
+			r.sticky = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "center")) {
+			r.center = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "no_border")) {
+			r.no_border = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "no_header")) {
+			r.no_header = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "no_radius")) {
+			r.no_radius = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "size") || !strcasecmp(w, "position")) {
+			const bool size = !strcasecmp(w, "size");
+			struct q_len *l = size ? r.size : r.pos;
+			for (int i = 0; i < 2; i++) {
+				char *n = next_word(&cur, &bad_quote);
+				if (!n || !parse_len(n, size, &l[i])) {
+					config_err(c, lineno, size
+						? "rule: size needs a width and height, in pixels or like 50%%"
+						: "rule: position needs x and y, in pixels or like 10%%");
+					goto fail;
+				}
+			}
+			acts = true;
+		} else if (!strcasecmp(w, "monitor")) {
+			char *n = next_word(&cur, &bad_quote);
+			if (!n || !*n) {
+				config_err(c, lineno, "rule: monitor needs a name, e.g. HDMI-A-1");
+				goto fail;
+			}
+			if (!set_str(&r.monitor, n))
+				goto fail;
+			acts = true;
 		} else if (!strcasecmp(w, "workspace")) {
 			char *n = next_word(&cur, &bad_quote);
 			int ws;
@@ -720,7 +782,7 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 	}
 	if (!acts) {
 		config_err(c, lineno,
-		           "rule: no action (float, tile, fullscreen, workspace N)");
+		           "rule: no action (float, tile, fullscreen, workspace N, ...)");
 		goto fail;
 	}
 
@@ -740,7 +802,11 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
                        struct q_rule_result *out)
 {
 	*out = (struct q_rule_result){
-		Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET, Q_RULE_UNSET,
+		.floating = Q_RULE_UNSET, .workspace = Q_RULE_UNSET,
+		.fullscreen = Q_RULE_UNSET, .scratch = Q_RULE_UNSET,
+		.sticky = Q_RULE_UNSET, .center = Q_RULE_UNSET,
+		.no_border = Q_RULE_UNSET, .no_header = Q_RULE_UNSET,
+		.no_radius = Q_RULE_UNSET,
 	};
 	const char *a = app_id ? app_id : "";
 	const char *t = title ? title : "";
@@ -762,6 +828,31 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 			out->fullscreen = r->fullscreen;
 		if (r->scratch != Q_RULE_UNSET)
 			out->scratch = r->scratch;
+		if (r->sticky != Q_RULE_UNSET)
+			out->sticky = r->sticky;
+		if (r->center != Q_RULE_UNSET)
+			out->center = r->center;
+		if (r->no_border != Q_RULE_UNSET)
+			out->no_border = r->no_border;
+		if (r->no_header != Q_RULE_UNSET)
+			out->no_header = r->no_header;
+		if (r->no_radius != Q_RULE_UNSET)
+			out->no_radius = r->no_radius;
+		if (r->size[0].set) {
+			out->size[0] = r->size[0];
+			out->size[1] = r->size[1];
+		}
+		if (r->pos[0].set) {
+			out->pos[0] = r->pos[0];
+			out->pos[1] = r->pos[1];
+		}
+		if (r->monitor) {
+			out->monitor = r->monitor;
+			unsigned h = 2166136261u;       /* FNV-1a */
+			for (const char *p = r->monitor; *p; p++)
+				h = (h ^ (unsigned char)*p) * 16777619u;
+			out->monitor_hash = h ? h : 1;
+		}
 	}
 }
 

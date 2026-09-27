@@ -272,7 +272,6 @@ static void xwl_request_configure(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, request_configure);
 	struct wlr_xwayland_surface_configure_event *ev = data;
-	const struct q_theme *th = &v->server->cfg.theme;
 
 	if (!v->mapped) {
 		wlr_xwayland_surface_configure(v->xsurface, ev->x, ev->y,
@@ -281,18 +280,15 @@ static void xwl_request_configure(struct wl_listener *l, void *data)
 	}
 
 	/* floating X11 resize */
+	ly_box b = view_target(v), c;
+	ui_frame_content_box(v, b, &c);
 	if (v->floating && !v->fullscreen) {
-		v->fbox.w = ev->width + th->border * 2;
-		v->fbox.h = ev->height + th->border * 2 + th->header_h;
+		v->fbox.w = ev->width + b.w - c.w;
+		v->fbox.h = ev->height + b.h - c.h;
 		aro_arrange(v->server);
 	} else {
 		/* tiled X11 configure */
-		ly_box b = view_target(v);
-		wlr_xwayland_surface_configure(v->xsurface,
-		                               b.x + th->border,
-		                               b.y + th->border + th->header_h,
-		                               b.w - th->border * 2,
-		                               b.h - th->border * 2 - th->header_h);
+		wlr_xwayland_surface_configure(v->xsurface, c.x, c.y, c.w, c.h);
 	}
 }
 

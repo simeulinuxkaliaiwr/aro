@@ -81,6 +81,12 @@ struct q_bind {
 /* window rule */
 #define Q_RULE_UNSET (-1)
 
+/* a rule's length: pixels, or a share of the screen when pct */
+struct q_len {
+	double v;
+	bool pct, set;
+};
+
 struct q_rule {
 	char *app_id;           /* glob, NULL = any; owned */
 	char *title;            /* glob, NULL = any; owned */
@@ -89,11 +95,21 @@ struct q_rule {
 	int workspace;          /* 0-based */
 	int fullscreen;         /* 1 only: a rule can ask for it, not forbid it */
 	int scratch;            /* 1 only: starts hidden in the scratchpad */
+	int sticky;             /* 1 only */
+	struct q_len size[2];   /* floating size, frame included */
+	struct q_len pos[2];    /* floating top-left, from the usable area's */
+	int center;             /* 1 only */
+	char *monitor;          /* glob on name or "make model serial"; owned */
+	int no_border, no_header, no_radius;    /* 1 only */
 };
 
 /* merged rule result */
 struct q_rule_result {
-	int floating, workspace, fullscreen, scratch;
+	int floating, workspace, fullscreen, scratch, sticky, center;
+	struct q_len size[2], pos[2];
+	const char *monitor;    /* the rule's; only good until the next reload */
+	unsigned monitor_hash;  /* what changes are told by; 0 unset */
+	int no_border, no_header, no_radius;
 };
 
 /* monitor block */

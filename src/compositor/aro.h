@@ -110,6 +110,7 @@ struct aro_view {
 	bool sticky;            /* floating, and on every workspace of its output */
 	bool scratch;           /* in the scratchpad: floating, shown on demand */
 	bool stashed;           /* a scratchpad window while hidden */
+	bool no_border, no_header, no_radius;   /* from rules */
 	double scroll_w;        /* layout = scroll: this column's width share; 0 = the default */
 	double scroll_w_prev;   /* what maximize goes back to */
 	bool fullscreen;
@@ -514,6 +515,8 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent);
 void ui_frame_geometry(struct aro_view *v, ly_box b);
 /* content box inside a frame */
 void ui_frame_content_box(struct aro_view *v, ly_box b, ly_box *out);
+int ui_frame_border(struct aro_view *v);
+int ui_frame_radius(struct aro_view *v);
 void ui_frame_focus(struct aro_view *v, bool focused);
 void ui_frame_title(struct aro_view *v, int frame_w, float scale);
 /* the app's icon in the header; NULL takes it away */

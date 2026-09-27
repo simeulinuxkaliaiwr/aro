@@ -223,9 +223,15 @@ resize_step = 0.04          # resize amount per keypress
 #          windows are only ever normal, or dialog when they have a parent.
 #          dialog, utility, toolbar and splash already float by default.
 #
-# action:  float | tile | fullscreen | workspace <1..32> | scratchpad
+# action:  float | tile | fullscreen | workspace <1..32> | scratchpad | sticky
+#          monitor <name>     open on that screen (a glob, as in monitor blocks)
+#          size <w> <h>       floating size, frame included: pixels, or 60% of the screen
+#          position <x> <y>   floating top-left, from the screen's usable corner
+#          center             floating, centred (the default place)
+#          no_border | no_header | no_radius   take that part of the frame away
 #          scratchpad opens the window hidden, for scratchpad_show to bring out.
-#          use `tile` to force tiling on dialogs, or `float` to force floating.
+#          use `tile` to force tiling on dialogs, or `float` to force floating;
+#          size and position only apply to floating windows.
 #
 # rules apply top-to-bottom. if multiple rules set the same property, the last one wins.
 # rules are evaluated on window map, title change, app_id change, and config
@@ -235,6 +241,9 @@ resize_step = 0.04          # resize amount per keypress
 #   map: app_id="org.gnome.Calculator" title="Calculator" type=normal
 #
 # rule = app_id:mpv  workspace 3
+# rule = app_id:pavucontrol  float  size 800 500  center
+# rule = app_id:mpv  no_border  no_header  no_radius
+# rule = app_id:discord  monitor HDMI-A-1
 # rule = app_id:dropterm  scratchpad   (with exec = foot --app-id dropterm and
 #                                      bind = mod+grave, scratchpad_show, dropterm)
 # rule = app_id:firefox  title:Picture-in-Picture  float

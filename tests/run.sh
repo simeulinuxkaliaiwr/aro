@@ -244,6 +244,24 @@ fi
 wait "$CX"
 alive
 
+# 4f2. rules size and place a floating window, and follow a reload
+config "rule = app_id:aro-test float size 400 300 position 10 20 sticky no_border"
+sleep 0.3
+client window 1 4 > "$T/rules.out" 2>&1 &
+CR=$!
+if wait_for "$T/rules.out" "1 windows open"; then
+	rg() { ctl -j windows | grep -o '"state":"[a-z]*"\|"width":[0-9]*,"height":[0-9]*' | tr '\n' ' '; }
+	ctl -j windows | grep -q '"state":"sticky".*"x":10,"y":20,"width":400,"height":300' \
+		&& ok "rule: size, position and sticky" || bad "rule: size, position and sticky: $(rg)"
+	config "rule = app_id:aro-test float size 50% 50% center"
+	sleep 0.5
+	ctl -j windows | grep -q '"width":640,' && ok "rule: a reload resizes it to 50%" \
+		|| bad "rule: a reload resizes it to 50%: $(rg)"
+fi
+wait "$CR"
+alive
+config
+
 # 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
 # focus follows mouse too: aro moving the pointer after a key press must not steal focus back
 config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"
@@ -452,6 +470,21 @@ fi
 fi
 
 if [ "$MODE" = multi ]; then
+
+# 4c2. a monitor rule opens the window on that screen
+for m in HEADLESS-1 HEADLESS-2; do
+	config "rule = app_id:aro-test monitor $m"
+	sleep 0.3
+	client window 1 2 > "$T/mon.out" 2>&1 &
+	CO=$!
+	if wait_for "$T/mon.out" "1 windows open"; then
+		ctl -j windows | grep -q "\"output\":\"$m\"" && ok "rule: monitor $m" \
+			|| bad "rule: monitor $m: $(ctl -j windows | grep -o '"output":"[^"]*"')"
+	fi
+	wait "$CO"
+done
+config
+alive
 
 # 4d. a workspace moves to the next monitor with its windows, and back
 client window 2 4 > "$T/mv.out" 2>&1 &

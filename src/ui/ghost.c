@@ -177,7 +177,8 @@ void ghost_spawn(struct aro_server *s, struct aro_view *v, ly_box from)
 	wlr_scene_node_raise_to_top(&g->tree->node);
 
 	const bool focused = s->focused == v;
-	const int inner = th->radius - th->border > 0 ? th->radius - th->border : 0;
+	const int bw = ui_frame_border(v), radius = ui_frame_radius(v);
+	const int inner = radius - bw > 0 ? radius - bw : 0;
 	ly_box cb;
 	ui_frame_content_box(v, from, &cb);
 
@@ -185,8 +186,8 @@ void ghost_spawn(struct aro_server *s, struct aro_view *v, ly_box from)
 	g->from = from;
 	g->fullscreen = v->fullscreen;
 	g->scale = v->fullscreen ? 1.0 : scale;
-	g->border = th->border;
-	g->header_h = cb.y - from.y - th->border;
+	g->border = bw;
+	g->header_h = cb.y - from.y - bw;
 	g->text_pad = th->text_pad;
 	g->radius = inner;
 	g->edge_col = focused ? th->accent : th->line;
@@ -199,7 +200,7 @@ void ghost_spawn(struct aro_server *s, struct aro_view *v, ly_box from)
 	if (!g->fullscreen) {
 		for (int i = 0; i < NEDGE && g->border > 0; i++)
 			g->edge[i] = rect(g->tree, g->edge_col);
-		set_radius(g->edge[0], th->radius);
+		set_radius(g->edge[0], radius);
 		g->bg = rect(g->tree, g->bg_col);
 		set_radius(g->bg, inner);
 		if (focused)

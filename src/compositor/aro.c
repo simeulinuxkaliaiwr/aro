@@ -606,6 +606,79 @@ void view_request_fullscreen(struct wl_listener *l, void *data)
 
 /* ── window rules ──────────────────────────────────────────────────────── */
 
+/* a rule length in pixels, along a span of the screen */
+static int rule_px(struct q_len l, int span)
+{
+	return (int)(l.pct ? l.v * span : l.v);
+}
+
+static bool rule_place_same(const struct q_rule_result *a, const struct q_rule_result *b)
+{
+	for (int i = 0; i < 2; i++)
+		if (a->size[i].set != b->size[i].set || a->size[i].v != b->size[i].v ||
+		    a->size[i].pct != b->size[i].pct || a->pos[i].set != b->pos[i].set ||
+		    a->pos[i].v != b->pos[i].v || a->pos[i].pct != b->pos[i].pct)
+			return false;
+	return a->center == b->center;
+}
+
+/* a floating window's size and place from its rules */
+static void rule_place(struct aro_view *v, const struct q_rule_result *r)
+{
+	if (!v->floating || v->fullscreen || !v->output ||
+	    (!r->size[0].set && !r->pos[0].set && r->center != 1))
+		return;
+	const struct q_theme *th = &v->server->cfg.theme;
+	ly_box u = usable_area(v->output);
+	if (r->size[0].set) {
+		v->fbox.w = rule_px(r->size[0], u.w);
+		v->fbox.h = rule_px(r->size[1], u.h);
+		if (v->fbox.w < th->float_min_w)
+			v->fbox.w = th->float_min_w;
+		if (v->fbox.h < th->float_min_h)
+			v->fbox.h = th->float_min_h;
+		v->float_follow = false;        /* the rule's size, not the app's */
+	}
+	if (r->pos[0].set) {
+		v->fbox.x = u.x + rule_px(r->pos[0], u.w);
+		v->fbox.y = u.y + rule_px(r->pos[1], u.h);
+	} else {
+		v->fbox.x = u.x + (u.w - v->fbox.w) / 2;
+		v->fbox.y = u.y + (u.h - v->fbox.h) / 2;
+	}
+	ly_box c;
+	ui_frame_content_box(v, v->fbox, &c);
+	view_configure(v, c.x, c.y, c.w, c.h);
+}
+
+/* border, header and corners as the rules say; true if any changed */
+static bool rule_chrome(struct aro_view *v, const struct q_rule_result *r)
+{
+	const bool nb = r->no_border == 1, nh = r->no_header == 1, nr = r->no_radius == 1;
+	if (v->no_border == nb && v->no_header == nh && v->no_radius == nr)
+		return false;
+	v->no_border = nb;
+	v->no_header = nh;
+	v->no_radius = nr;
+	ui_frame_retheme(v);
+	return true;
+}
+
+/* the first enabled output whose name or "make model serial" matches */
+static struct aro_output *rule_output(struct aro_server *s, const char *glob)
+{
+	struct aro_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct wlr_output *wo = o->wlr_output;
+		char desc[256];
+		snprintf(desc, sizeof desc, "%s %s %s", wo->make ? wo->make : "",
+		         wo->model ? wo->model : "", wo->serial ? wo->serial : "");
+		if (glob_match(glob, wo->name) || glob_match(glob, desc))
+			return o;
+	}
+	return NULL;
+}
+
 /* reapply rules only on change */
 static void view_rules_reapply(struct aro_view *v)
 {
@@ -618,9 +691,27 @@ static void view_rules_reapply(struct aro_view *v)
 	v->rule_last = r;       /* before acting: nothing below re-enters, but
 	                           a stale answer must never be compared twice */
 
+	bool moved = rule_chrome(v, &r);
+	if (r.monitor_hash && r.monitor_hash != last.monitor_hash) {
+		struct aro_output *to = rule_output(s, r.monitor);
+		if (to && to != v->output)
+			view_move_to_output(s, v, to);
+	}
+
 	/* apply float before workspace move */
 	if (r.floating != Q_RULE_UNSET && r.floating != last.floating)
 		view_set_floating(s, v, r.floating == 1);
+	if (r.sticky == 1 && last.sticky != 1 && !v->sticky && !v->fullscreen) {
+		view_set_floating(s, v, true);
+		v->sticky = true;
+		v->scratch = v->stashed = false;
+	}
+	if (!rule_place_same(&r, &last)) {
+		rule_place(v, &r);
+		moved = true;
+	}
+	if (moved)
+		aro_arrange(s);
 	if (r.workspace != Q_RULE_UNSET && r.workspace != last.workspace)
 		view_send_to(s, v, r.workspace);
 	if (r.fullscreen != Q_RULE_UNSET && r.fullscreen != last.fullscreen)
@@ -1332,13 +1423,18 @@ void view_map(struct wl_listener *l, void *data)
 	config_rules_eval(&s->cfg, app_id, title, view_type(v), &r);
 	v->rule_last = r;
 
+	struct aro_output *ro = r.monitor ? rule_output(s, r.monitor) : NULL;
+	if (ro)
+		v->output = o = ro;
+	rule_chrome(v, &r);             /* before any size is worked out */
+
 	const int ws = r.workspace != Q_RULE_UNSET ? r.workspace : o->cur_ws;
 	v->scratch = v->stashed = r.scratch == 1;       /* starts hidden */
 	const bool here = ws == o->cur_ws && !v->stashed;
 	v->workspace = ws;
 
 	/* rule overrides float heuristic */
-	bool floating = v->scratch || (r.floating != Q_RULE_UNSET
+	bool floating = v->scratch || r.sticky == 1 || (r.floating != Q_RULE_UNSET
 	              ? r.floating == 1
 	              : v->impl->wants_float && v->impl->wants_float(v));
 
@@ -1348,6 +1444,8 @@ void view_map(struct wl_listener *l, void *data)
 		v->fbox = float_box_for(v);
 		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		view_float_configure_once(v);
+		rule_place(v, &r);
+		v->sticky = r.sticky == 1 && !v->scratch;
 	} else {
 		ly_node *target = s->focused &&
 		                  s->focused->output == o &&

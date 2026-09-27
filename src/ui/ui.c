@@ -25,23 +25,47 @@ void ui_color(uint32_t rgba, float out[4])
 static void set_radius(struct wlr_scene_rect *rect, int radius)
 {
 #ifdef ARO_EFFECTS
-	if (rect && radius > 0)
-		wlr_scene_rect_set_corner_radius(rect, radius);
+	if (rect)
+		wlr_scene_rect_set_corner_radius(rect, radius > 0 ? radius : 0);
 #else
 	(void)rect;
 	(void)radius;
 #endif
 }
 
+/* this window's border, header and corner radius; rules can take each away */
+int ui_frame_border(struct aro_view *v)
+{
+	return v->no_border ? 0 : v->server->cfg.theme.border;
+}
+
+static int frame_header(struct aro_view *v)
+{
+	const bool none = v->no_header ||
+		(v->csd && v->server->cfg.header == Q_HEADER_AUTO);
+	return none ? 0 : v->server->cfg.theme.header_h;
+}
+
+int ui_frame_radius(struct aro_view *v)
+{
+	return v->no_radius ? 0 : v->server->cfg.theme.radius;
+}
+
+/* the radius inside the border: the content's corners */
+static int inner_radius(struct aro_view *v)
+{
+	int r = ui_frame_radius(v) - ui_frame_border(v);
+	return r > 0 ? r : 0;
+}
+
 /* hollow out border ring; at is where the border rect starts after edge clipping */
 static void clip_border(struct aro_view *v, ly_box at, int inner_w, int inner_h)
 {
 #ifdef ARO_EFFECTS
-	const struct q_theme *th = &v->server->cfg.theme;
+	const int bw = ui_frame_border(v);
 	wlr_scene_rect_set_clipped_region(v->frame, (struct clipped_region){
-		.area = { th->border - at.x, th->border - at.y, inner_w, inner_h },
-		.corners = corner_radii_all(th->radius - th->border > 0
-		                            ? th->radius - th->border : 0),
+		.area = { bw - at.x, bw - at.y, inner_w, inner_h },
+		.corners = corner_radii_all(inner_radius(v)),
 	});
 #else
 	(void)v; (void)at; (void)inner_w; (void)inner_h;
@@ -80,10 +104,8 @@ static void round_buffer(struct wlr_scene_buffer *buffer, int sx, int sy,
 void ui_frame_clip_content(struct aro_view *v)
 {
 #ifdef ARO_EFFECTS
-	const struct q_theme *th = &v->server->cfg.theme;
-	int radius = th->radius - th->border > 0 ? th->radius - th->border : 0;
-	if (radius > 0)
-		wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
+	int radius = v->fullscreen ? 0 : inner_radius(v);
+	wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
 #else
 	(void)v;
 #endif
@@ -124,8 +146,8 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 	    !v->popups)
 		return false;
 
-	set_radius(v->frame, th->radius);
-	set_radius(v->bg, th->radius - th->border > 0 ? th->radius - th->border : 0);
+	set_radius(v->frame, ui_frame_radius(v));
+	set_radius(v->bg, inner_radius(v));
 
 	wlr_scene_node_set_enabled(&v->ring->node, false);
 	return true;
@@ -140,15 +162,12 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 	qtext_show(&v->title, !fullscreen);
 	if (v->icon)
 		wlr_scene_node_set_enabled(&v->icon->node, !fullscreen);
-	wlr_scene_node_set_enabled(&v->ring->node,
-	                           !fullscreen && v->server->focused == v);
+	wlr_scene_node_set_enabled(&v->ring->node, !fullscreen &&
+	                           v->server->focused == v && ui_frame_border(v) > 0);
 
 #ifdef ARO_EFFECTS
-	const struct q_theme *th = &v->server->cfg.theme;
 	/* no rounded corners in fullscreen */
-	int radius = fullscreen ? 0 : th->radius - th->border;
-	if (radius < 0)
-		radius = 0;
+	int radius = fullscreen ? 0 : inner_radius(v);
 	wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
 #endif
 }
@@ -156,11 +175,8 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 /* content box inside frame */
 void ui_frame_content_box(struct aro_view *v, ly_box b, ly_box *out)
 {
-	const struct q_theme *th = &v->server->cfg.theme;
-	const int bw = th->border;
-	const bool no_header =
-		v->csd && v->server->cfg.header == Q_HEADER_AUTO;
-	const int hh = no_header ? 0 : th->header_h;
+	const int bw = ui_frame_border(v);
+	const int hh = frame_header(v);
 
 	int cw = b.w - bw * 2;
 	int ch = b.h - bw * 2 - hh;
@@ -182,7 +198,7 @@ static int icon_size(const struct q_theme *th)
 static int title_x(struct aro_view *v)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
-	int x = th->border + th->text_pad;
+	int x = ui_frame_border(v) + th->text_pad;
 	if (v->icon && icon_size(th))
 		x += icon_size(th) + th->text_pad / 2;
 	return x;
@@ -191,12 +207,8 @@ static int title_x(struct aro_view *v)
 void ui_frame_geometry(struct aro_view *v, ly_box b)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
-	const int bw = th->border;
-
-	/* skip header for CSD in auto mode */
-	const bool no_header =
-		v->csd && v->server->cfg.header == Q_HEADER_AUTO;
-	const int hh = no_header ? 0 : th->header_h;
+	const int bw = ui_frame_border(v);
+	const int hh = frame_header(v);      /* none for CSD in auto mode */
 
 	/* ignore zero-size geometry */
 	if (b.w <= 0 || b.h <= 0)
@@ -295,7 +307,7 @@ void ui_frame_focus(struct aro_view *v, bool focused)
 	wlr_scene_rect_set_color(v->bg, col);
 	wlr_scene_rect_set_color(v->header, col);
 
-	wlr_scene_node_set_enabled(&v->ring->node, focused);
+	wlr_scene_node_set_enabled(&v->ring->node, focused && ui_frame_border(v) > 0);
 
 	/* title color follows focus */
 	const char *title = view_title(v);
@@ -318,8 +330,9 @@ void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf)
 			wlr_scene_buffer_set_dest_size(v->icon, icon_size(th), icon_size(th));
 			wlr_scene_buffer_set_filter_mode(v->icon, WLR_SCALE_FILTER_BILINEAR);
 			/* shown where and when the title is */
-			wlr_scene_node_set_position(&v->icon->node, th->border + th->text_pad,
-			                            th->border + (th->header_h - icon_size(th)) / 2);
+			const int bw = ui_frame_border(v);
+			wlr_scene_node_set_position(&v->icon->node, bw + th->text_pad,
+			                            bw + (th->header_h - icon_size(th)) / 2);
 			wlr_scene_node_set_enabled(&v->icon->node,
 				v->title.node && v->title.node->node.enabled);
 		}
@@ -333,17 +346,18 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
 	const char *title = view_title(v);
-	int avail = frame_w - title_x(v) - th->border - th->text_pad;
+	int avail = frame_w - title_x(v) - ui_frame_border(v) - th->text_pad;
 	if (avail < 1)
 		avail = 1;
 
-	if (v->csd && v->server->cfg.header == Q_HEADER_AUTO)
+	const int hh = frame_header(v);
+	if (hh == 0)
 		return;         /* no header to put a title in */
 
 	bool focused = v->server->focused == v;
 	qtext_set(&v->title, title ? title : "", focused ? th->accent : th->dim,
 	          scale, avail);
-	qtext_move(&v->title, title_x(v), th->border + (th->header_h - v->title.h) / 2);
+	qtext_move(&v->title, title_x(v), ui_frame_border(v) + (hh - v->title.h) / 2);
 }
 
 /* ── snapshots ─────────────────────────────────────────────────────────── */
@@ -490,8 +504,9 @@ void ui_frame_retheme(struct aro_view *v)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
 
-	set_radius(v->frame, th->radius);
-	set_radius(v->bg, th->radius - th->border > 0 ? th->radius - th->border : 0);
+	set_radius(v->frame, ui_frame_radius(v));
+	set_radius(v->bg, inner_radius(v));
+	ui_frame_clip_content(v);
 
 	qtext_set_font(&v->title, th->font);
 	ui_frame_focus(v, v->server->focused == v);
