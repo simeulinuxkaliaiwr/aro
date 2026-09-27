@@ -293,6 +293,47 @@ fi
 wait "$CU"
 alive
 
+# 4f5. tabbed groups: group, switch tabs by key, click and wheel, drag onto a title, ungroup
+config "layout = manual" "focus_follows_mouse = false" "switcher_debounce_ms = 0"
+sleep 0.3
+client window 3 8 > "$T/grp.out" 2>&1 &
+CG=$!
+if wait_for "$T/grp.out" "3 windows open"; then
+	# "id:state:visible" for each window, focused one marked with *
+	gs() { ctl -j windows | grep -o '"id":[0-9]*\|"state":"[a-z]*"\|"focused":[a-z]*\|"visible":[a-z]*' \
+		| paste -d, - - - - | sed -E 's/"id":([0-9]+),"state":"([a-z]+)","focused":([a-z]+),"visible":([a-z]+)/\2:\4:\3/;s/:true$/*/;s/:false$//' | tr '\n' ' '; }
+	ctl dispatch group left > /dev/null; sleep 0.3
+	case "$(gs)" in *"tabbed:false tabbed:true*"*) ok "group: joins the tile to the left as a tab" ;;
+		*) bad "group: joins the tile to the left as a tab: $(gs)" ;; esac
+	ctl dispatch tab next > /dev/null; sleep 0.3
+	case "$(gs)" in *"tabbed:true* tabbed:false"*) ok "group: tab next shows the other tab" ;;
+		*) bad "group: tab next shows the other tab: $(gs)" ;; esac
+	ctl dispatch ungroup > /dev/null; sleep 0.3
+	case "$(gs)" in *"tiled:true tiled:true* tiled:true"*) ok "group: ungroup gives it its own tile again" ;;
+		*) bad "group: ungroup gives it its own tile again: $(gs)" ;; esac
+	# the right-hand window's title dragged onto its neighbour's title
+	gxy() { ctl windows | awk -v n="$1" 'NR > 1 && ++k == n { i = ($1 == "*") ? 2 : 1; split($(i + 4), a, "[x+]"); print a[3], a[4], a[1] }'; }
+	read -r x y w < <(gxy 3)
+	read -r x2 y2 _ < <(gxy 2)
+	client click left $((x + w / 2)) $((y + 12)) $((x2 + 40)) $((y2 + 12))
+	sleep 0.5
+	case "$(gs)" in *"tabbed"*"tabbed"*) ok "group: dropping a window on a title makes a tab" ;;
+		*) bad "group: dropping a window on a title makes a tab: $(gs)" ;; esac
+	# the group's tile, wherever the drop left it: its first tab is at the left
+	read -r x2 y2 < <(ctl windows | awk '/tabbed/ { i = ($1 == "*") ? 2 : 1; split($(i + 4), a, "[x+]"); print a[3], a[4]; exit }')
+	before=$(gs)
+	client click left $((x2 + 40)) $((y2 + 12)); sleep 0.3
+	[ "$(gs)" != "$before" ] && ok "group: clicking the other tab shows it" \
+		|| bad "group: clicking the other tab shows it: $(gs)"
+	before=$(gs)
+	client click down $((x2 + 40)) $((y2 + 12)); sleep 0.3
+	[ "$(gs)" != "$before" ] && ok "group: the wheel over the tabs steps through them" \
+		|| bad "group: the wheel over the tabs steps through them: $(gs)"
+fi
+wait "$CG"
+alive
+config
+
 # 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
 # focus follows mouse too: aro moving the pointer after a key press must not steal focus back
 config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"

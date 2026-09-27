@@ -315,7 +315,7 @@ static int card_slot(const struct ov_output *oo, int ws)
 
 static bool shown_view(struct aro_view *v, struct aro_output *o)
 {
-	return v->mapped && !v->stashed && v->output == o;
+	return v->mapped && !v->stashed && !view_tab_hidden(v) && v->output == o;
 }
 
 /* the window to land on in a workspace: most recently used */

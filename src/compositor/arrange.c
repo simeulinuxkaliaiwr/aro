@@ -298,7 +298,8 @@ static void view_retarget(anim_box *g, ly_box t, uint32_t now, uint32_t dur,
 /* mapped, on an output, and on its current workspace */
 bool view_visible(struct aro_view *v)
 {
-	return v->mapped && v->output && !v->stashed && v->workspace == v->output->cur_ws;
+	return v->mapped && v->output && !v->stashed && !view_tab_hidden(v) &&
+	       v->workspace == v->output->cur_ws;
 }
 
 /* ── workspace slide ───────────────────────────────────────────────────── */
@@ -312,7 +313,7 @@ bool view_visible(struct aro_view *v)
 static bool view_leaving(struct aro_view *v)
 {
 	struct aro_output *o = v->output;
-	return v->mapped && !v->stashed && o && o->slide.active &&
+	return v->mapped && !v->stashed && !view_tab_hidden(v) && o && o->slide.active &&
 	       v->workspace == o->slide.out_ws && v->workspace != o->cur_ws;
 }
 
@@ -458,7 +459,7 @@ void monocle_sync(struct aro_server *s, struct aro_output *o)
 		if (!v->mapped || !v->node || v->output != o || v->workspace != ws)
 			continue;
 		wlr_scene_node_set_enabled(&v->frame_tree->node,
-		                           !mono || v == top || v->fullscreen);
+		                           (!mono || v == top || v->fullscreen) && !view_tab_hidden(v));
 	}
 }
 
@@ -497,6 +498,11 @@ void aro_arrange(struct aro_server *s)
 			ui_frame_title(v, t.w, v->output->scale);
 	}
 
+	/* hidden tabs keep the tile's size, so switching to one shows no resize */
+	wl_list_for_each(v, &s->views, link)
+		if (view_tab_hidden(v) && v->output && v->workspace == v->output->cur_ws)
+			ui_frame_geometry(v, view_target(v));
+
 	/* bar came or went: place, do not spring */
 	wl_list_for_each(o, &s->outputs, link) {
 		if (!o->bar_snap)
@@ -529,7 +535,7 @@ void aro_arrange(struct aro_server *s)
 
 void view_set_visible(struct aro_view *v, bool visible)
 {
-	wlr_scene_node_set_enabled(&v->frame_tree->node, visible && !v->stashed);
+	wlr_scene_node_set_enabled(&v->frame_tree->node, visible && !v->stashed && !view_tab_hidden(v));
 }
 
 /* show a workspace on the focused output */
@@ -629,8 +635,7 @@ void view_send_to(struct aro_server *s, struct aro_view *v, int ws)
 	} else {
 		if (!v->node)
 			return;
-		next = ly_close(&v->output->ws[v->workspace], v->node);
-		v->node = NULL;
+		next = view_detach(v);
 		v->workspace = ws;
 
 		v->node = tree_insert(s, v->output, ws, v, NULL, LY_ROW, false);

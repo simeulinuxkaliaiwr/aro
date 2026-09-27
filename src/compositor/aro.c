@@ -117,6 +117,10 @@ void keyboard_focus_changed(struct aro_server *s)
 
 void aro_focus(struct aro_server *s, struct aro_view *v)
 {
+	if (v && view_tab_hidden(v)) {
+		group_activate(s, v);   /* its tab comes forward */
+		aro_arrange(s);
+	}
 	focus_apply(s, v);
 	if (v)
 		monocle_sync(s, v->output);
@@ -179,6 +183,11 @@ void view_swap(struct aro_view *a, struct aro_view *b)
 	ly_swap(na, nb);
 	a->node = nb;
 	b->node = na;
+	/* a group moves as one: every tab follows its leaf */
+	for (int i = 0; a->group && i < a->group->n; i++)
+		a->group->v[i]->node = nb;
+	for (int i = 0; b->group && i < b->group->n; i++)
+		b->group->v[i]->node = na;
 }
 
 /* ── shells ────────────────────────────────────────────────────────────── */
@@ -520,10 +529,7 @@ void view_set_floating(struct aro_server *s, struct aro_view *v,
 		v->sticky = v->scratch = false; /* both are floating only */
 
 	if (floating) {
-		if (v->node) {
-			ly_close(&v->output->ws[v->workspace], v->node);
-			v->node = NULL;
-		}
+		view_detach(v);
 		v->floating = true;
 		v->fbox = float_box_for(v);
 		if (!v->fullscreen)
@@ -804,10 +810,7 @@ void view_move_to_output(struct aro_server *s, struct aro_view *v,
 	if (!v || !dest || v->output == dest)
 		return;
 
-	if (v->node) {
-		ly_close(&v->output->ws[v->workspace], v->node);
-		v->node = NULL;
-	}
+	view_detach(v);
 
 	struct aro_output *src = v->output;
 	v->output = dest;
@@ -890,6 +893,7 @@ ly_edge nearest_edge(ly_box b, double x, double y)
 static void drop_clear(struct aro_server *s)
 {
 	s->drop_target = NULL;
+	s->drop_join = false;
 	ui_preview_show(&s->preview, false);
 }
 
@@ -903,11 +907,15 @@ static void drop_update(struct aro_server *s)
 	}
 
 	ly_edge e = nearest_edge(target->node->box, s->cursor->x, s->cursor->y);
-	ly_box slot = drop_slot_box(drop_target_box(s, target, e), e);
+	/* over its title: the whole tile lights up, the drop makes a tab */
+	const bool join = ui_frame_in_header(target, s->cursor->x, s->cursor->y) &&
+	                  !(target->group && target->group->n == ARO_GROUP_MAX);
+	ly_box slot = join ? view_target(target) : drop_slot_box(drop_target_box(s, target, e), e);
 
 	bool fresh = !s->preview.active;
 	s->drop_target = target;
 	s->drop_edge = e;
+	s->drop_join = join;
 
 	if (fresh) {
 		/* place preview instantly first time */
@@ -985,11 +993,7 @@ void aro_view_drop(struct aro_server *s, struct aro_view *v,
 		return;                 /* dropped where it already is */
 
 	struct aro_output *src = v->output;
-	ly_node *next = NULL;
-	if (v->node) {
-		next = ly_close(&src->ws[v->workspace], v->node);
-		v->node = NULL;
-	}
+	ly_node *next = view_detach(v);
 	v->output = o;
 	v->workspace = ws;
 
@@ -1201,6 +1205,17 @@ static void view_retile(struct aro_server *s, struct aro_view *v)
 	struct aro_view *target = NULL;
 	ly_edge edge = LY_RIGHT;
 
+	if (s->preview.active && s->drop_target && s->drop_join) {
+		target = s->drop_target;
+		v->output = target->output;
+		v->workspace = target->workspace;
+		if (group_join(s, v, target)) {
+			v->floating = false;
+			v->float_follow = false;
+			wlr_scene_node_reparent(&v->frame_tree->node, s->l_tiled);
+			return;
+		}
+	}
 	if (s->preview.active && s->drop_target) {
 		target = s->drop_target;
 		edge = s->drop_edge;
@@ -1535,11 +1550,7 @@ void view_unmap(struct wl_listener *l, void *data)
 		grab_forget(s, s->grabbed);
 
 	/* only close tree leaf if present */
-	ly_node *next = NULL;
-	if (v->node) {
-		next = ly_close(view_ws_root(v), v->node);
-		v->node = NULL;
-	}
+	ly_node *next = view_detach(v);
 	v->floating = false;
 	v->float_follow = false;
 	if (v->fullscreen) {

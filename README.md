@@ -42,6 +42,9 @@ says "this is the window you are in".
   their own, at the size they asked for; `mod+space` for anything else.
   A scratchpad keeps a window hidden until `mod+minus` brings it to
   whichever workspace you are on.
+- **Tabs.** Several windows can share one tile, one showing at a time,
+  their titles as tabs in its header: `mod+alt+hjkl`, or drag a window by
+  its title onto another's.
 - **One workspace set per monitor**, sway-style, created as you use them.
   A VT switch, or unplugging the only screen, keeps layouts and split
   ratios intact.
@@ -294,6 +297,8 @@ replaces this table entirely.
 | `mod+m` | scroll layout: column fills the screen, or goes back |
 | `mod+r` | scroll layout: next preset column width |
 | `mod+shift+minus` / `mod+minus` | into the scratchpad / show or hide it |
+| `mod+alt+hjkl` | into the tile that way as a tab |
+| `mod+[` / `mod+]` / `mod+shift+g` | previous / next tab / out of the tabs |
 | `mod+space` | toggle floating |
 | `mod+f` | toggle fullscreen |
 | `mod+1..4` | workspace |

@@ -7,6 +7,7 @@
 #include "theme.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -41,9 +42,12 @@ int ui_frame_border(struct aro_view *v)
 
 static int frame_header(struct aro_view *v)
 {
+	const int hh = v->server->cfg.theme.header_h;
+	if (v->group)
+		return hh > 0 ? hh : 24;        /* tabs need somewhere to go */
 	const bool none = v->no_header ||
 		(v->csd && v->server->cfg.header == Q_HEADER_AUTO);
-	return none ? 0 : v->server->cfg.theme.header_h;
+	return none ? 0 : hh;
 }
 
 int ui_frame_radius(struct aro_view *v)
@@ -255,7 +259,9 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 	wlr_scene_node_set_enabled(&v->frame->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->bg->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->header->node, !fullscreen);
-	qtext_show(&v->title, !fullscreen);
+	qtext_show(&v->title, !fullscreen && !v->group);
+	if (v->group && v->group->tabs && v->group->tabs->node.parent == v->frame_tree)
+		wlr_scene_node_set_enabled(&v->group->tabs->node, !fullscreen);
 	if (v->icon)
 		wlr_scene_node_set_enabled(&v->icon->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->ring->node, !fullscreen &&
@@ -349,11 +355,14 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 	place_rect(v->ring, (ly_box){ bw, bw, inner_w, 1 }, vis);
 
 	wlr_scene_node_set_enabled(&v->header->node, hh > 0);
-	qtext_show(&v->title, hh > 0 && !v->fullscreen && !cut);
+	qtext_show(&v->title, hh > 0 && !v->fullscreen && !cut && !v->group);
+	if (v->group && v->group->tabs && v->group->tabs->node.parent == v->frame_tree)
+		wlr_scene_node_set_enabled(&v->group->tabs->node, !v->fullscreen && !cut);
 	if (v->icon) {
 		/* the icon goes where the title goes */
 		const int isz = icon_size(th);
-		wlr_scene_node_set_enabled(&v->icon->node, isz && hh >= isz && !v->fullscreen && !cut);
+		wlr_scene_node_set_enabled(&v->icon->node,
+			isz && hh >= isz && !v->fullscreen && !cut && !v->group);
 		wlr_scene_node_set_position(&v->icon->node, bw + th->text_pad, bw + (hh - isz) / 2);
 	}
 	place_rect(v->header, (ly_box){ bw, bw, inner_w, hh < inner_h ? hh : inner_h }, vis);
@@ -398,6 +407,8 @@ void ui_frame_focus(struct aro_view *v, bool focused)
 
 	frame_paint(v, focused);
 	wlr_scene_node_set_enabled(&v->ring->node, focused && ui_frame_border(v) > 0);
+	if (v->group && v->group->active == v)
+		ui_frame_tabs(v);
 
 	/* title color follows focus */
 	const char *title = view_title(v);
@@ -431,6 +442,106 @@ void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf)
 		ui_frame_title(v, aro_view_box(v).w, v->output->scale);
 }
 
+static struct wlr_scene_rect *tab_rect(struct wlr_scene_tree *parent)
+{
+	float none[4] = { 0 };
+	return wlr_scene_rect_create(parent, 1, 1, none);
+}
+
+/* the group's tabs across v's header: equal widths, a line between, a mark under the shown one */
+static void tabs_layout(struct aro_view *v, int frame_w, float scale)
+{
+	struct aro_group *g = v->group;
+	const struct q_theme *th = &v->server->cfg.theme;
+	if (!g->tabs) {
+		g->tabs = wlr_scene_tree_create(v->frame_tree);
+		g->mark = g->tabs ? tab_rect(g->tabs) : NULL;
+		if (!g->mark)
+			return;
+	} else if (g->tabs->node.parent != v->frame_tree) {
+		wlr_scene_node_reparent(&g->tabs->node, v->frame_tree);
+	}
+	wlr_scene_node_place_above(&g->tabs->node, &v->header->node);
+	while (g->nlabels < g->n) {
+		struct wlr_scene_rect *sep = tab_rect(g->tabs);
+		if (!sep || !qtext_init(&g->label[g->nlabels], g->tabs, th->font))
+			return;
+		g->sep[g->nlabels++] = sep;
+	}
+
+	const struct aro_server *s = v->server;
+	const bool focused = s->focused && s->focused->group == g;
+	const float a = frame_opacity(v, focused);
+	const int bw = ui_frame_border(v), hh = frame_header(v);
+	const int inner = frame_w - bw * 2 > 1 ? frame_w - bw * 2 : 1;
+	float col[4];
+	for (int i = 0; i < g->nlabels; i++) {
+		struct qtext *l = &g->label[i];
+		if (i >= g->n) {
+			qtext_show(l, false);
+			wlr_scene_node_set_enabled(&g->sep[i]->node, false);
+			continue;
+		}
+		struct aro_view *m = g->v[i];
+		const int x0 = bw + inner * i / g->n, x1 = bw + inner * (i + 1) / g->n;
+		g->edge[i] = x0;
+		g->edge[i + 1] = x1;
+		if (l->font && strcmp(l->font, th->font))
+			qtext_set_font(l, th->font);
+		const char *title = view_title(m);
+		const int avail = x1 - x0 - th->text_pad * 2;
+		qtext_set(l, title ? title : "", m == g->active ? (focused ? th->accent : th->ink) : th->dim,
+		          scale, avail > 1 ? avail : 1);
+		qtext_move(l, x0 + th->text_pad, bw + (hh - l->h) / 2);
+		qtext_show(l, true);
+		if (l->node)
+			wlr_scene_buffer_set_opacity(l->node, a);
+
+		/* a line between tabs */
+		wlr_scene_node_set_enabled(&g->sep[i]->node, i > 0);
+		color_faded(th->line, a, col);
+		wlr_scene_rect_set_color(g->sep[i], col);
+		wlr_scene_node_set_position(&g->sep[i]->node, x0, bw + 4);
+		wlr_scene_rect_set_size(g->sep[i], 1, hh > 8 ? hh - 8 : 1);
+
+		if (m == g->active) {
+			color_faded(focused ? th->accent : th->line, a, col);
+			wlr_scene_rect_set_color(g->mark, col);
+			wlr_scene_node_set_position(&g->mark->node, x0, bw + hh - 2);
+			wlr_scene_rect_set_size(g->mark, x1 - x0, 2);
+		}
+	}
+}
+
+/* a layout point in v's header */
+bool ui_frame_in_header(struct aro_view *v, double lx, double ly)
+{
+	if (v->fullscreen)
+		return false;
+	const ly_box b = aro_view_box(v);
+	const int bw = ui_frame_border(v), hh = frame_header(v);
+	return hh > 0 && lx >= b.x && lx < b.x + b.w && ly >= b.y + bw && ly < b.y + bw + hh;
+}
+
+/* the tab under a layout point in v's header; -1 if none */
+int ui_frame_tab_at(struct aro_view *v, double lx, double ly)
+{
+	if (!v->group || v->fullscreen)
+		return -1;
+	const ly_box b = aro_view_box(v);
+	const int bw = ui_frame_border(v), hh = frame_header(v);
+	if (ly < b.y + bw || ly >= b.y + bw + hh)
+		return -1;
+	return group_tab_at(v, (int)(lx - b.x));
+}
+
+/* redraw the tabs in v's header, v being the shown tab */
+void ui_frame_tabs(struct aro_view *v)
+{
+	if (v->group && v->group->active == v && v->output)
+		tabs_layout(v, aro_view_box(v).w, v->output->scale);
+}
+
 /* update title using target width */
 void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 {
@@ -441,6 +552,14 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 		avail = 1;
 
 	const int hh = frame_header(v);
+	if (v->group) {
+		/* the tabs live in the shown tab's header, whoever's title changed */
+		if (v->group->active == v)
+			tabs_layout(v, frame_w, scale);
+		else
+			ui_frame_tabs(v->group->active);
+		return;
+	}
 	if (hh == 0)
 		return;         /* no header to put a title in */
 

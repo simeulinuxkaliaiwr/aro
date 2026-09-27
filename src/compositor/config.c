@@ -210,6 +210,23 @@ bool config_parse_action(const char *name, const char *arg,
 	if (!strcasecmp(name, "sticky"))     { *action = Q_STICKY;     return true; }
 	if (!strcasecmp(name, "maximize"))   { *action = Q_MAXIMIZE;   return true; }
 	if (!strcasecmp(name, "scratchpad")) { *action = Q_SCRATCH;    return true; }
+	if (!strcasecmp(name, "ungroup"))    { *action = Q_UNGROUP;    return true; }
+	if (!strcasecmp(name, "group")) {
+		if (!arg || !parse_edge(arg, num))
+			return false;
+		*action = Q_GROUP;
+		return true;
+	}
+	if (!strcasecmp(name, "tab")) {
+		if (!arg || !*arg || !strcasecmp(arg, "next"))
+			*num = 1;
+		else if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "previous"))
+			*num = -1;
+		else
+			return false;
+		*action = Q_TAB;
+		return true;
+	}
 	if (!strcasecmp(name, "scratchpad_show")) {
 		*action = Q_SCRATCH_SHOW;       /* arg, if any, stays in arg */
 		return true;
@@ -376,6 +393,9 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_r, Q_WIDTH, 1, NULL);
 	bind_add(c, M | S, XKB_KEY_minus, Q_SCRATCH, 0, NULL);
 	bind_add(c, M, XKB_KEY_minus, Q_SCRATCH_SHOW, 0, NULL);
+	bind_add(c, M | S, XKB_KEY_g, Q_UNGROUP, 0, NULL);
+	bind_add(c, M, XKB_KEY_bracketright, Q_TAB, 1, NULL);
+	bind_add(c, M, XKB_KEY_bracketleft, Q_TAB, -1, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -385,6 +405,7 @@ static void install_default_binds(struct aro_config *c)
 		bind_add(c, M,     hjkl[i], Q_FOCUS,  edge[i], NULL);
 		bind_add(c, M | S, hjkl[i], Q_MOVE,   edge[i], NULL);
 		bind_add(c, M | C, hjkl[i], Q_RESIZE, edge[i], NULL);
+		bind_add(c, M | WLR_MODIFIER_ALT, hjkl[i], Q_GROUP, edge[i], NULL);
 	}
 
 	const xkb_keysym_t num[4] = {

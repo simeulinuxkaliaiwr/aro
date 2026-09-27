@@ -553,6 +553,19 @@ app_id matches the glob, to the current workspace and focus it; if it is
 already showing there, hide it again.
 Clicking a hidden one in a taskbar brings it out too.
 .TP
+.BR group " " left | right | up | down
+Put the focused window into the tile that way as a tab.
+A tile of tabs shows one window at a time, with the others' titles as tabs
+in its header; it moves, resizes and swaps as one.
+Dragging a window by its title onto another's title does the same.
+.TP
+.B ungroup
+Take the focused window out of its tabs, into a tile of its own beside them.
+.TP
+.BR tab " [" next | prev ]
+Show the next or previous tab.
+Clicking a tab, or turning the wheel over the tabs, does too.
+.TP
 .BR move_workspace " " left | right | up | down
 Move the current workspace, with its windows and layout, to the monitor in
 that direction: to the same number there if it is free, otherwise to the

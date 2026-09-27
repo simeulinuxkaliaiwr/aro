@@ -156,6 +156,7 @@ if get_option('compositor')
     'src/compositor/config.c',
     'src/compositor/extws.c',
     'src/compositor/gestures.c',
+    'src/compositor/group.c',
     'src/compositor/protocols.c',
     'src/compositor/tablet.c',
     'src/compositor/toplevels.c',

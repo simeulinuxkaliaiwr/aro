@@ -15,6 +15,7 @@
 #include "config.h"
 #include "extws.h"
 #include "gestures.h"
+#include "group.h"
 #include "tablet.h"
 #include "touch.h"
 #include "protocols.h"
@@ -111,6 +112,7 @@ struct aro_view {
 	bool sticky;            /* floating, and on every workspace of its output */
 	bool scratch;           /* in the scratchpad: floating, shown on demand */
 	bool stashed;           /* a scratchpad window while hidden */
+	struct aro_group *group;        /* tabbed with others in one tile; NULL alone */
 	bool no_border, no_header, no_radius;   /* from rules */
 	double rule_opacity[2]; /* focused, unfocused; 0: the config's */
 	struct wlr_scene_blur *blur;    /* behind it when see-through; effects only */
@@ -419,6 +421,7 @@ struct aro_server {
 	struct aro_preview preview;
 	struct aro_view *drop_target;
 	ly_edge drop_edge;
+	bool drop_join;         /* over the target's header: dropping makes a tab */
 
 	struct wl_listener new_output;
 	struct wl_listener new_xdg_toplevel;
@@ -527,6 +530,9 @@ void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf);
 void ui_frame_clip_content(struct aro_view *v);
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen);
 void ui_frame_hold_opacity(struct aro_view *v);
+void ui_frame_tabs(struct aro_view *v);
+int ui_frame_tab_at(struct aro_view *v, double lx, double ly);
+bool ui_frame_in_header(struct aro_view *v, double lx, double ly);
 void ui_frame_retheme(struct aro_view *v);
 void ui_color(uint32_t rgba, float out[4]);
 

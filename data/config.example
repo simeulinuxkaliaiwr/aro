@@ -281,6 +281,9 @@ resize_step = 0.04          # resize amount per keypress
 #          move_workspace left|right|up|down   (to the monitor in that direction)
 #          sticky   (floating, on every workspace of its monitor)
 #          scratchpad   (hide the window in the scratchpad, or take it out)
+#          group left|right|up|down   (into that tile as a tab; a tile of tabs shows one window)
+#          ungroup   (out of its tabs, into a tile of its own)
+#          tab next|prev   (the next or previous tab; clicking a tab or the wheel works too)
 #          scratchpad_show [app_id]   (bring the latest scratchpad window, or the
 #                   latest matching the glob, to this workspace; again hides it)
 #          maximize (layout = scroll: the column fills the screen, or goes back)
@@ -302,6 +305,13 @@ bind = mod+m, maximize
 bind = mod+r, width, next
 bind = mod+shift+minus, scratchpad
 bind = mod+minus, scratchpad_show
+bind = mod+alt+h, group, left
+bind = mod+alt+j, group, down
+bind = mod+alt+k, group, up
+bind = mod+alt+l, group, right
+bind = mod+shift+g, ungroup
+bind = mod+bracketright, tab, next
+bind = mod+bracketleft, tab, prev
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

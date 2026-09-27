@@ -760,6 +760,14 @@ void cursor_button(struct wl_listener *l, void *data)
 		uint32_t zone = edge_zone(box, s->cursor->x, s->cursor->y,
 		                          s->cfg.theme.resize_zone);
 
+		/* a click on another tab shows it; on the shown one, it drags as usual */
+		const int tab = on_chrome && !zone && !(mods & s->cfg.modkey)
+		              ? ui_frame_tab_at(v, s->cursor->x, s->cursor->y) : -1;
+		if (tab >= 0 && v->group->v[tab] != v) {
+			aro_focus(s, v->group->v[tab]);
+			return;
+		}
+
 		/* start move/resize */
 		bool want_resize = (ev->button == BTN_RIGHT && (mods & s->cfg.modkey)) ||
 		                   (on_chrome && zone != 0);
@@ -848,6 +856,16 @@ void cursor_axis(struct wl_listener *l, void *data)
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_axis(s, ev->delta, ev->delta_discrete);
 		return;
+	}
+	/* a wheel over a group's tabs steps through them */
+	if (!aro_locked(s) && ev->delta_discrete && ev->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+		double sx, sy;
+		struct wlr_surface *surface = NULL;
+		struct aro_view *v = view_at(s, s->cursor->x, s->cursor->y, &surface, &sx, &sy);
+		if (v && !surface && ui_frame_tab_at(v, s->cursor->x, s->cursor->y) >= 0) {
+			aro_focus(s, group_step(v, ev->delta_discrete > 0 ? 1 : -1));
+			return;
+		}
 	}
 	wlr_seat_pointer_notify_axis(s->seat, ev->time_msec, ev->orientation,
 	                             ev->delta, ev->delta_discrete, ev->source,

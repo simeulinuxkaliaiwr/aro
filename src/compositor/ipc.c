@@ -349,6 +349,7 @@ static void cmd_workspaces(struct req *r)
 static const char *view_state(struct aro_view *v)
 {
 	return v->stashed ? "scratchpad" : v->fullscreen ? "fullscreen" : v->sticky ? "sticky"
+	     : v->group ? "tabbed"
 	     : v->floating ? "floating" : "tiled";
 }
 
@@ -380,7 +381,7 @@ static void view_json(struct req *r, struct aro_view *v)
 	          v->sticky ? "true" : "false",
 	          v->fullscreen ? "true" : "false",
 	          v == r->s->focused ? "true" : "false",
-	          v->output && !v->stashed && v->workspace == v->output->cur_ws
+	          v->output && !v->stashed && !view_tab_hidden(v) && v->workspace == v->output->cur_ws
 	              ? "true" : "false",
 	          box.x, box.y, box.w, box.h);
 }

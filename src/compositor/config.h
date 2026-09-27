@@ -67,6 +67,9 @@ enum q_action {
 	Q_WIDTH,        /* layout = scroll, num: +1 next preset width, -1 previous */
 	Q_SCRATCH,      /* the focused window into the scratchpad, or out */
 	Q_SCRATCH_SHOW, /* arg: app_id glob, or NULL for any */
+	Q_GROUP,        /* num: ly_edge; into the neighbour's tile as a tab */
+	Q_UNGROUP,      /* out of its group, into a tile of its own */
+	Q_TAB,          /* num: +1 next tab, -1 previous */
 };
 
 struct q_bind {

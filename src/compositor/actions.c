@@ -166,6 +166,34 @@ static bool ws_empty(struct aro_server *s, struct aro_output *o, int ws)
 }
 
 /* the current workspace, windows and layout, to the monitor in direction e */
+/* f, as a tab, into the tile that way */
+static void group_toward(struct aro_server *s, struct aro_view *f, ly_edge e)
+{
+	if (!f || !f->node || f->fullscreen || !f->output)
+		return;
+	ly_node *t = ly_focus(f->output->ws[f->workspace], f->node, e);
+	struct aro_view *into = t && t != f->node ? t->user : NULL;
+	if (!into || (into->group && into->group->n == ARO_GROUP_MAX))
+		return;
+	view_detach(f);
+	if (!group_join(s, f, into))
+		f->node = tree_insert(s, f->output, f->workspace, f, NULL, LY_ROW, false);
+	aro_focus(s, f);
+	aro_arrange(s);
+}
+
+/* f out of its group, into a tile beside it */
+static void ungroup(struct aro_server *s, struct aro_view *f)
+{
+	if (!f || !f->group || !f->node || f->fullscreen)
+		return;
+	ly_node *leaf = view_detach(f);
+	f->node = tree_insert(s, f->output, f->workspace, f, leaf, LY_ROW, true);
+	view_set_visible(f, f->workspace == f->output->cur_ws);
+	aro_focus(s, f);
+	aro_arrange(s);
+}
+
 static void workspace_move_to_output(struct aro_server *s, ly_edge e)
 {
 	struct aro_output *o = aro_focused_output(s);
@@ -300,6 +328,16 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	case Q_SCRATCH:
 		scratch_toggle(s, f);
+		return;
+	case Q_GROUP:
+		group_toward(s, f, (ly_edge)b->num);
+		return;
+	case Q_UNGROUP:
+		ungroup(s, f);
+		return;
+	case Q_TAB:
+		if (f && f->group)
+			aro_focus(s, group_step(f, b->num));
 		return;
 	case Q_SCRATCH_SHOW:
 		scratch_show(s, b->arg);
