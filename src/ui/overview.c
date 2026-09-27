@@ -6,8 +6,10 @@
 #include "aro.h"
 #include "theme.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -129,6 +131,64 @@ static bool clip_box(ly_box b, ly_box clip, ly_box *out)
 		return false;
 	*out = (ly_box){ x0, y0, x1 - x0, y1 - y0 };
 	return true;
+}
+
+/* a scroll workspace's strip, scaled to fit its screen, so the overview shows every column */
+struct strip_fit {
+	bool on;
+	double k;
+	int x0;
+	ly_box view;
+};
+
+static struct strip_fit strip_fit(struct aro_server *s, struct aro_output *o, int ws)
+{
+	struct strip_fit f = { .k = 1.0 };
+	if (aro_ws_layout(o, ws) != Q_LAYOUT_SCROLL)
+		return f;
+	int x0 = INT_MAX, x1 = INT_MIN;
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link) {
+		if (!v->mapped || v->output != o || v->workspace != ws || !v->node || v->fullscreen)
+			continue;
+		ly_box b = aro_view_box(v);
+		x0 = b.x < x0 ? b.x : x0;
+		x1 = b.x + b.w > x1 ? b.x + b.w : x1;
+	}
+	const int g = s->cfg.theme.outer_gap;
+	ly_box u = aro_output_usable(o);
+	f.view = (ly_box){ u.x + g, u.y + g, u.w - 2 * g, u.h - 2 * g };
+	if (x0 >= x1 || f.view.w < 1 || x1 - x0 <= f.view.w)
+		return f;               /* every column already on screen */
+	f.on = true;
+	f.k = (double)f.view.w / (x1 - x0);
+	f.x0 = x0;
+	return f;
+}
+
+static ly_box strip_map(const struct strip_fit *f, ly_box b)
+{
+	if (!f->on)
+		return b;
+	double top = f->view.y + f->view.h * (1.0 - f->k) / 2.0;
+	return (ly_box){ f->view.x + round_i((b.x - f->x0) * f->k),
+	                 round_i(top + (b.y - f->view.y) * f->k),
+	                 round_i(b.w * f->k), round_i(b.h * f->k) };
+}
+
+/* how far the overview has scrolled v's strip sideways; rest: where it is heading */
+static int strip_pan(struct aro_server *s, const struct ov_output *oo, struct aro_view *v, bool rest)
+{
+	if (s->cfg.ws_slide != Q_SLIDE_VERTICAL || !v->node || v->fullscreen ||
+	    v->workspace < 0 || v->workspace >= ARO_MAX_WS)
+		return 0;
+	const struct ov_pan *pn = &oo->pan[v->workspace];
+	return round_i(rest ? pn->to : pn->at);
+}
+
+static ly_box shift_x(ly_box b, int dx)
+{
+	return (ly_box){ b.x + dx, b.y, b.w, b.h };
 }
 
 static bool in_box(ly_box b, double x, double y)
@@ -464,6 +524,35 @@ static void scroll_to(struct ov_output *oo, int slot, uint32_t now)
 	oo->c_start = now;
 }
 
+static void pan_to(struct ov_pan *pn, double to, uint32_t now)
+{
+	if (pn->to == to)
+		return;
+	pn->from = pn->at;
+	pn->to = to;
+	pn->start = now;
+}
+
+/* scroll a strip sideways until v is on screen */
+static void pan_follow(struct aro_server *s, struct ov_output *oo, struct aro_view *v)
+{
+	struct aro_output *o = oo->output;
+	const struct ov_geom g = geom_for(s, o);
+	if (!g.vertical || !v->node || v->fullscreen ||
+	    aro_ws_layout(o, v->workspace) != Q_LAYOUT_SCROLL)
+		return;
+	struct ov_pan *pn = &oo->pan[v->workspace];
+	ly_box b = ov_map(&g, shift_x(aro_view_box(v), strip_pan(s, oo, v, true)), 0, 1.0);
+	const int x0 = o->box.x + g.gap, x1 = o->box.x + o->box.w - g.gap;
+	double d = 0;
+	if (b.x + b.w > x1)
+		d = x1 - (b.x + b.w);
+	if (b.x + d < x0)
+		d = x0 - b.x;
+	if (d != 0)
+		pan_to(pn, pn->to + d / g.z, aro_now_ms());
+}
+
 static void select_view(struct aro_server *s, struct aro_view *v)
 {
 	struct aro_overview *ov = &s->overview;
@@ -471,8 +560,10 @@ static void select_view(struct aro_server *s, struct aro_view *v)
 	ov->sel_out = v->output;
 	ov->sel_ws = v->workspace;
 	struct ov_output *oo = ov_find(s, v->output);
-	if (oo)
+	if (oo) {
 		scroll_to(oo, card_slot(oo, v->workspace), aro_now_ms());
+		pan_follow(s, oo, v);
+	}
 	schedule_all(s);
 }
 
@@ -525,7 +616,8 @@ static bool sel_box(struct aro_server *s, struct ov_output *oo, ly_box *out)
 		int slot = card_slot(oo, ov->sel_view->workspace);
 		if (slot < 0)
 			return false;
-		*out = ov_map(&g, aro_view_box(ov->sel_view), slot, 1.0);
+		*out = ov_map(&g, shift_x(aro_view_box(ov->sel_view), strip_pan(s, oo, ov->sel_view, true)),
+		              slot, 1.0);
 		return true;
 	}
 	int slot = card_slot(oo, ov->sel_ws);
@@ -558,7 +650,7 @@ static void nav(struct aro_server *s, ly_edge e)
 		int slot = card_slot(oo, v->workspace);
 		if (slot < 0 || v == ov->sel_view)
 			continue;
-		boxes[n] = ov_map(&g, aro_view_box(v), slot, 1.0);
+		boxes[n] = ov_map(&g, shift_x(aro_view_box(v), strip_pan(s, oo, v, true)), slot, 1.0);
 		views[n] = v;
 		ws[n++] = v->workspace;
 	}
@@ -617,6 +709,8 @@ static void close_begin(struct aro_server *s)
 	for (int i = 0; i < ov->nouts; i++) {
 		struct ov_output *oo = &ov->outs[i];
 		scroll_to(oo, card_slot(oo, oo->output->cur_ws), now);
+		for (int ws = 0; ws < ARO_MAX_WS; ws++)
+			pan_to(&oo->pan[ws], 0, now);
 		for (int j = 0; j < oo->ncards; j++)
 			qtext_show(&oo->cards[j].label, false);
 	}
@@ -641,8 +735,20 @@ static void ov_commit(struct aro_server *s)
 	int ws = ov->sel_ws;
 
 	if (v && v->mapped && v->output) {
+		struct aro_output *vo = v->output;
+		const int vws = v->workspace;
+		const double before = vo->scroll[vws];
 		view_raise_and_focus(s, v);
 		mru_touch(s);
+		/* the strip jumped to the pick: the pan takes the jump, then eases home */
+		struct ov_output *oo = ov_find(s, vo);
+		if (oo && v->output == vo && v->workspace == vws) {
+			struct ov_pan *pn = &oo->pan[vws];
+			const double d = vo->scroll[vws] - before;
+			pn->at += d;
+			pn->from += d;
+			pn->to += d;
+		}
 	} else if (o && ov_find(s, o)) {
 		s->focused_output = o;
 		struct q_bind b = { .action = Q_WORKSPACE, .num = ws };
@@ -740,6 +846,7 @@ void overview_rebuild(struct aro_server *s)
 		oo->c_from = keep[i].c_from;
 		oo->c_to = keep[i].c_to;
 		oo->c_start = keep[i].c_start;
+		memcpy(oo->pan, keep[i].pan, sizeof oo->pan);
 	}
 	free(keep);
 	if (ov->open)
@@ -902,9 +1009,20 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		}
 
 		const bool dragged = ov->dragging && v == ov->drag_view;
-		const ly_box cl = dragged ? ANYWHERE : clip;
+		/* a strip runs on past its card when cards stack vertically; side by side, it is fitted */
+		const bool strip = v->node && !v->fullscreen &&
+		                   aro_ws_layout(o, v->workspace) == Q_LAYOUT_SCROLL;
+		ly_box area = oo->cards[slot].drawn;
+		if (strip && g.vertical)
+			area = (ly_box){ clip.x, area.y, clip.w, area.h };
+		ly_box cl = ANYWHERE;
+		if (!dragged && !clip_box(area, clip, &cl))
+			cl = (ly_box){ 0 };
 		ly_box real = aro_view_box(v);
-		ly_box b = dragged ? drag_box(ov) : ov_map(&g, real, slot - oo->c, p);
+		const int dx = strip_pan(s, oo, v, false);
+		const struct strip_fit fit = strip && !g.vertical
+		                           ? strip_fit(s, o, v->workspace) : (struct strip_fit){ .k = 1.0 };
+		ly_box b = dragged ? drag_box(ov) : ov_map(&g, strip_map(&fit, shift_x(real, dx)), slot - oo->c, p);
 		it->drawn = dragged ? (ly_box){ 0 } : b;        /* not a drop target */
 		if (!it->chrome) {
 			if (it->snap)
@@ -922,7 +1040,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		ui_frame_content_box(v, real, &cb);
 		if (it->snap)
 			snap_place(it->snap, v, dragged ? carry(real, cb, b)
-			           : ov_map(&g, cb, slot - oo->c, p), cl);
+			           : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p), cl);
 
 		ly_box in = inset(b, bw);
 		wlr_scene_node_set_enabled(&it->ring->node, sel);
@@ -962,7 +1080,21 @@ static bool drop_find(struct aro_server *s, double x, double y, ly_box *show)
 					continue;
 				ov->drop_target = t;
 				ov->drop_side = aro_nearest_edge(it->drawn, x, y);
-				*show = aro_drop_slot(it->drawn, ov->drop_side);
+				/* beside a window on a strip is beside its whole column */
+				ly_box at = it->drawn;
+				if (ov->drop_side == LY_LEFT || ov->drop_side == LY_RIGHT)
+					for (int m = 0; m < oo->nitems; m++) {
+						struct ov_item *o2 = &oo->items[m];
+						if (o2->view == v || o2->drawn.w <= 0 || !aro_same_column(t, o2->view))
+							continue;
+						int x1 = at.x + at.w > o2->drawn.x + o2->drawn.w ? at.x + at.w : o2->drawn.x + o2->drawn.w;
+						int y1 = at.y + at.h > o2->drawn.y + o2->drawn.h ? at.y + at.h : o2->drawn.y + o2->drawn.h;
+						at.x = at.x < o2->drawn.x ? at.x : o2->drawn.x;
+						at.y = at.y < o2->drawn.y ? at.y : o2->drawn.y;
+						at.w = x1 - at.x;
+						at.h = y1 - at.y;
+					}
+				*show = aro_drop_slot(at, ov->drop_side);
 				return true;
 			}
 			/* its own workspace, off any window: stays put */
@@ -1177,6 +1309,10 @@ bool overview_tick(struct aro_server *s, uint32_t now)
 	for (int i = 0; i < ov->nouts; i++) {
 		struct ov_output *oo = &ov->outs[i];
 		oo->c = advance(oo->c_from, oo->c_to, oo->c_start, now, ms, &moving);
+		for (int ws = 0; ws < ARO_MAX_WS; ws++) {
+			struct ov_pan *pn = &oo->pan[ws];
+			pn->at = advance(pn->from, pn->to, pn->start, now, ms, &moving);
+		}
 	}
 
 	if (!moving && !ov->open && ov->p <= 0.0) {

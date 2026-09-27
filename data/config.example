@@ -1,7 +1,7 @@
 # aro example config
 # copy this to ~/.config/aro/config
 #
-# everything is optional. missing keys just use the defaults from src/theme.h.
+# everything is optional. missing keys just use the defaults from src/ui/theme.h.
 # colors accept 0xRRGGBBAA, #rrggbbaa, or just rrggbbaa. alpha is optional (defaults to ff).
 
 mod = super                 # or: alt (useful if you're running nested inside another compositor)
@@ -18,10 +18,19 @@ allow_tearing = false
 # dwindle: splits follow the longer axis of the frame, spiraling automatically (Hyprland style).
 # monocle: one window at a time, filling the screen; mod+hjkl steps through
 #   them. the split layout is kept underneath and comes back when you leave.
+# scroll: windows in columns on an endless strip; the screen scrolls to the
+#   focused one and the neighbours peek in. beside a window (mod+v, or a drop
+#   at its side) makes a new column; below it (mod+s, or a drop above/below)
+#   stacks in that column. mod+ctrl+h/l change a column's width.
 # mod+v / mod+s will temporarily override either mode for the next window.
 layout = dwindle
 
-# per-workspace layout. mod+t cycles manual, dwindle and monocle for the
+# scroll layout: a new column's share of the screen, and how much of the
+# neighbouring columns stays visible (0 = whole columns only).
+scroll_width = 0.5
+scroll_peek = 40
+
+# per-workspace layout. mod+t cycles manual, dwindle, monocle and scroll for the
 # current workspace; bind `layout, monocle` to jump straight to one.
 # workspace = 3 layout manual
 # workspace = 4 layout monocle
@@ -222,6 +231,7 @@ resize_step = 0.04          # resize amount per keypress
 #          focus|move|resize left|right|up|down
 #          move_workspace left|right|up|down   (to the monitor in that direction)
 #          sticky   (floating, on every workspace of its monitor)
+#          maximize (layout = scroll: the column fills the screen, or goes back)
 #          workspace|sendto 1..32
 #          split right|down
 #          switch next|prev
@@ -235,6 +245,7 @@ bind = mod+Tab, switch, next
 bind = mod+shift+Tab, switch, prev
 bind = mod+t, layout, toggle
 bind = mod+o, overview
+bind = mod+m, maximize
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

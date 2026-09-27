@@ -64,7 +64,7 @@ Input lag drops, at the cost of visible tearing.
 Only that app is affected, and only while it is fullscreen.
 Default: false.
 .TP
-.BR layout " = " manual | dwindle | monocle
+.BR layout " = " manual | dwindle | monocle | scroll
 How new windows are placed.
 .B manual
 splits beside the focused window, the way
@@ -76,8 +76,30 @@ last said;
 splits along the longer side, so the layout spirals;
 .B monocle
 shows one window at a time, filling the screen, with the splits kept
-underneath for when you leave it.
+underneath for when you leave it;
+.B scroll
+puts windows in columns on an endless strip that the screen scrolls
+along, following focus, with the neighbouring columns peeking in at the
+edges.
+A window opened or dropped beside another starts a new column; one opened
+below it
+.RB ( mod+s )
+or dropped above or below it shares that column.
 Default: manual.
+.TP
+.BI "scroll_width = " share
+How wide a new column is in the scroll layout, from 0.1 to 1.0 of the
+screen.
+.B mod+ctrl+h
+and
+.B mod+ctrl+l
+change the focused column's width.
+Default: 0.5.
+.TP
+.BI "scroll_peek = " pixels
+How much of the neighbouring columns stays visible at the screen's edges
+in the scroll layout; 0 shows whole columns only.
+Default: 40.
 .TP
 .BI "workspace = " "n " layout " name"
 The layout of workspace
@@ -377,6 +399,12 @@ is the same.
 .TP
 .BR focus ", " move ", " resize " " left | right | up | down
 Across monitors too, by the same rule.
+.TP
+.B maximize
+On a
+.B scroll
+workspace, widen the focused column to the whole screen; again, and it
+goes back to the width it had.
 .TP
 .B sticky
 Keep the focused window on every workspace of its monitor, floating; a

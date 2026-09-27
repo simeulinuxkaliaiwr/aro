@@ -106,6 +106,8 @@ struct aro_view {
 	/* floating windows are outside the tree. fullscreen is separate. */
 	bool floating;
 	bool sticky;            /* floating, and on every workspace of its output */
+	double scroll_w;        /* layout = scroll: this column's width share; 0 = the default */
+	double scroll_w_prev;   /* what maximize goes back to */
 	bool fullscreen;
 
 	/* float_follow: client controls floating size after initial configure */
@@ -192,6 +194,7 @@ struct aro_output {
 	int cur_ws;
 	/* runtime layout per workspace; Q_LAYOUT_INHERIT = config */
 	int ws_layout[ARO_MAX_WS];
+	double scroll[ARO_MAX_WS];      /* layout = scroll: where the screen sits on the strip */
 
 	/*
 	 * Workspace slide. Draw-time only: geo stays the real position and
@@ -450,6 +453,12 @@ void aro_pointer_moved(struct aro_server *s, uint32_t time);
 void aro_pointer_button(struct aro_server *s, uint32_t time, uint32_t button,
                         bool pressed);
 struct wlr_surface *aro_surface_at(struct aro_server *s, double *sx, double *sy);
+
+/* for ui.c: a scroll column is cut at its screen's edge rather than drawn on the next */
+bool aro_view_clipped(struct aro_view *v);
+
+/* for overview.c: on a scroll strip, whether two windows share a column */
+bool aro_same_column(struct aro_view *a, struct aro_view *b);
 void aro_focus_at_cursor(struct aro_server *s);
 void aro_config_reload(struct aro_server *s);
 /* tiling area: usable minus our bar */

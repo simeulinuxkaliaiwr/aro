@@ -206,6 +206,7 @@ bool config_parse_action(const char *name, const char *arg,
 	if (!strcasecmp(name, "close"))      { *action = Q_CLOSE;      return true; }
 	if (!strcasecmp(name, "overview"))   { *action = Q_OVERVIEW;   return true; }
 	if (!strcasecmp(name, "sticky"))     { *action = Q_STICKY;     return true; }
+	if (!strcasecmp(name, "maximize"))   { *action = Q_MAXIMIZE;   return true; }
 	if (!strcasecmp(name, "quit"))       { *action = Q_QUIT;       return true; }
 	if (!strcasecmp(name, "float"))      { *action = Q_FLOAT;      return true; }
 	if (!strcasecmp(name, "fullscreen")) { *action = Q_FULLSCREEN; return true; }
@@ -269,6 +270,8 @@ bool config_parse_action(const char *name, const char *arg,
 			*num = Q_LAYOUT_DWINDLE;
 		else if (!strcasecmp(arg, "monocle"))
 			*num = Q_LAYOUT_MONOCLE;
+		else if (!strcasecmp(arg, "scroll"))
+			*num = Q_LAYOUT_SCROLL;
 		else
 			return false;
 		*action = Q_LAYOUT;
@@ -283,6 +286,7 @@ static bool parse_layout(const char *s, enum q_layout *out)
 	if (!strcasecmp(s, "manual"))  { *out = Q_LAYOUT_MANUAL;  return true; }
 	if (!strcasecmp(s, "dwindle")) { *out = Q_LAYOUT_DWINDLE; return true; }
 	if (!strcasecmp(s, "monocle")) { *out = Q_LAYOUT_MONOCLE; return true; }
+	if (!strcasecmp(s, "scroll"))  { *out = Q_LAYOUT_SCROLL;  return true; }
 	return false;
 }
 
@@ -291,6 +295,7 @@ const char *config_layout_name(enum q_layout l)
 	switch (l) {
 	case Q_LAYOUT_DWINDLE: return "dwindle";
 	case Q_LAYOUT_MONOCLE: return "monocle";
+	case Q_LAYOUT_SCROLL:  return "scroll";
 	default:               return "manual";
 	}
 }
@@ -349,6 +354,7 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M | S, XKB_KEY_Tab, Q_SWITCH, -1, NULL);
 	bind_add(c, M, XKB_KEY_t, Q_LAYOUT, Q_LAYOUT_TOGGLE, NULL);
 	bind_add(c, M, XKB_KEY_o, Q_OVERVIEW, 0, NULL);
+	bind_add(c, M, XKB_KEY_m, Q_MAXIMIZE, 0, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -397,6 +403,8 @@ void config_defaults(struct aro_config *c)
 	c->tp_tap = true;
 	c->tp_dwt = true;
 	c->gesture_fingers = 3;
+	c->scroll_width = 0.5;
+	c->scroll_peek = 40;
 	c->bar = TH_BAR;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
@@ -596,7 +604,7 @@ static void parse_workspace(struct aro_config *c, int lineno, char *value)
 			enum q_layout ql;
 			if (!l || !parse_layout(l, &ql)) {
 				config_err(c, lineno, "workspace %d: layout is manual, "
-				           "dwindle or monocle", ws);
+				           "dwindle, monocle or scroll", ws);
 				return;
 			}
 			layout = ql;
@@ -1220,6 +1228,16 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->tp_natural_scroll);
 		} else if (!strcasecmp(key, "touchpad_disable_while_typing")) {
 			ok = parse_bool(value, &c->tp_dwt);
+		} else if (!strcasecmp(key, "scroll_width")) {
+			double d;
+			ok = parse_double(value, &d) && d >= 0.1 && d <= 1.0;
+			if (ok)
+				c->scroll_width = d;
+		} else if (!strcasecmp(key, "scroll_peek")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 0 && n <= 400;
+			if (ok)
+				c->scroll_peek = n;
 		} else if (!strcasecmp(key, "gesture_fingers")) {
 			int n;
 			ok = parse_int(value, &n) && (n == 0 || (n >= 3 && n <= 5));

@@ -26,6 +26,7 @@ enum q_layout {
 	Q_LAYOUT_MANUAL = 0,
 	Q_LAYOUT_DWINDLE,
 	Q_LAYOUT_MONOCLE,       /* one window at a time, the tree kept underneath */
+	Q_LAYOUT_SCROLL,        /* columns on an endless strip, the screen a window onto it */
 };
 #define Q_LAYOUT_INHERIT (-1)   /* use global layout */
 #define Q_LAYOUT_TOGGLE  (-1)
@@ -62,6 +63,7 @@ enum q_action {
 	Q_OVERVIEW,
 	Q_MOVE_WS,      /* num: ly_edge; the current workspace to that monitor */
 	Q_STICKY,
+	Q_MAXIMIZE,     /* layout = scroll: the column fills the screen, or goes back */
 };
 
 struct q_bind {
@@ -172,6 +174,10 @@ struct aro_config {
 	/* touchpad (libinput) */
 	bool tp_tap, tp_natural_scroll, tp_dwt;
 	int gesture_fingers;    /* a swipe with this many changes workspace; 0 = off */
+
+	/* layout = scroll */
+	double scroll_width;    /* a new column's width, as a share of the screen */
+	int scroll_peek;        /* pixels of the neighbouring columns left showing */
 	double tp_speed;        /* -1..1 */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */

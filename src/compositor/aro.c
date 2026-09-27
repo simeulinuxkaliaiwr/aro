@@ -223,6 +223,179 @@ static ly_box monocle_box(struct aro_output *o)
 	return b;
 }
 
+/* layout = scroll: side-by-side splits make columns on a strip, stacked splits share one */
+static bool node_under(ly_node *x, ly_node *anc)
+{
+	for (; x; x = x->parent)
+		if (x == anc)
+			return true;
+	return false;
+}
+
+/* the column a leaf lives in: go down through side-by-side splits only */
+static ly_node *scroll_column(ly_node *root, ly_node *leaf)
+{
+	ly_node *n = root;
+	while (n && n->kind == LY_SPLIT && n->dir == LY_ROW)
+		n = node_under(leaf, n->a) ? n->a : n->b;
+	return n;
+}
+
+static int scroll_columns(ly_node *n, ly_node **out, int max, int count)
+{
+	if (!n || count >= max)
+		return count;
+	if (n->kind == LY_SPLIT && n->dir == LY_ROW) {
+		count = scroll_columns(n->a, out, max, count);
+		return scroll_columns(n->b, out, max, count);
+	}
+	out[count] = n;
+	return count + 1;
+}
+
+/* the windows of a column, top to bottom, sharing its height by the tree's ratios */
+static void scroll_stack(ly_node *n, ly_box b, int gap)
+{
+	if (n->kind != LY_SPLIT) {
+		n->box = b;
+		return;
+	}
+	int room = b.h - gap;
+	int ha = (int)(room * n->ratio + 0.5);
+	ha = ha < 1 ? 1 : ha > room - 1 ? room - 1 : ha;
+	scroll_stack(n->a, (ly_box){ b.x, b.y, b.w, ha }, gap);
+	scroll_stack(n->b, (ly_box){ b.x, b.y + ha + gap, b.w, room - ha }, gap);
+}
+
+static void scroll_place(struct aro_server *s, struct aro_output *o, int ws)
+{
+	ly_node *cols[256];
+	int n = scroll_columns(o->ws[ws], cols, 256, 0);
+	const int g = s->cfg.theme.outer_gap, gap = s->cfg.theme.gap;
+	ly_box u = usable_area(o);
+	ly_box view = { u.x + g, u.y + g, u.w - 2 * g, u.h - 2 * g };
+	if (n == 0 || view.w < 1 || view.h < 1)
+		return;
+
+	int x[256], w[256], f = -1, end = 0;
+	for (int i = 0; i < n; i++) {
+		/* a column is as wide as its widest window asked to be */
+		ly_node *leaves[256];
+		int nl = ly_collect(cols[i], leaves, 256);
+		double share = 0;
+		for (int k = 0; k < nl; k++) {
+			struct aro_view *v = leaves[k]->user;
+			if (v && v->scroll_w > share)
+				share = v->scroll_w;
+			if (v && v == s->focused)
+				f = i;
+		}
+		w[i] = (int)((share > 0 ? share : s->cfg.scroll_width) * view.w + 0.5);
+		if (w[i] < s->cfg.theme.min)
+			w[i] = s->cfg.theme.min;
+		if (w[i] > view.w)
+			w[i] = view.w;
+		x[i] = end;
+		end += w[i] + gap;
+	}
+	const int total = end - gap;
+
+	/* move just enough to show the focused column, its neighbours peeking in */
+	double off = o->scroll[ws];
+	if (f >= 0) {
+		int peek = s->cfg.scroll_peek;
+		int left = f > 0 ? peek + gap : 0;
+		int right = f < n - 1 ? peek + gap : 0;
+		if (w[f] + left + right > view.w)
+			left = right = 0;       /* no room to peek beside a wide column */
+		if (x[f] + w[f] + right > off + view.w)
+			off = x[f] + w[f] + right - view.w;
+		if (x[f] - left < off)
+			off = x[f] - left;      /* last: a wide column shows its left edge */
+	}
+	double max = total > view.w ? total - view.w : 0;
+	off = off > max ? max : off < 0 ? 0 : off;
+	o->scroll[ws] = off;
+
+	for (int i = 0; i < n; i++)
+		scroll_stack(cols[i], (ly_box){ view.x + x[i] - (int)off, view.y, w[i], view.h }, gap);
+}
+
+/* the width share of v's column: its widest window's */
+static double column_share(struct aro_server *s, struct aro_view *v)
+{
+	ly_node *leaves[256];
+	int n = ly_collect(scroll_column(v->output->ws[v->workspace], v->node), leaves, 256);
+	double share = 0;
+	for (int i = 0; i < n; i++) {
+		struct aro_view *lv = leaves[i]->user;
+		if (lv && lv->scroll_w > share)
+			share = lv->scroll_w;
+	}
+	return share > 0 ? share : s->cfg.scroll_width;
+}
+
+static void column_set_share(struct aro_view *v, double share, double prev)
+{
+	ly_node *leaves[256];
+	int n = ly_collect(scroll_column(v->output->ws[v->workspace], v->node), leaves, 256);
+	for (int i = 0; i < n; i++) {
+		struct aro_view *lv = leaves[i]->user;
+		if (lv) {
+			lv->scroll_w = share;
+			lv->scroll_w_prev = prev;
+		}
+	}
+}
+
+/* for a drop or a new window beside v on a scroll workspace: its whole column */
+static ly_node *scroll_beside(struct aro_server *s, struct aro_output *o, int ws, ly_node *leaf)
+{
+	if (!leaf || ws_layout(s, o, ws) != Q_LAYOUT_SCROLL)
+		return leaf;
+	return scroll_column(o->ws[ws], leaf);
+}
+
+/* a drop beside a window on a strip lands beside its column: preview that */
+static ly_box drop_target_box(struct aro_server *s, struct aro_view *t, ly_edge e)
+{
+	ly_box b = t->node->box;
+	if ((e == LY_LEFT || e == LY_RIGHT) && ws_layout(s, t->output, t->workspace) == Q_LAYOUT_SCROLL) {
+		ly_node *col = scroll_column(t->output->ws[t->workspace], t->node);
+		ly_node *first = ly_first_leaf(col), *last = ly_last_leaf(col);
+		int y1 = last->box.y + last->box.h;
+		b = (ly_box){ first->box.x, first->box.y, first->box.w, y1 - first->box.y };
+	}
+	return b;
+}
+
+bool aro_same_column(struct aro_view *a, struct aro_view *b)
+{
+	if (!a->node || !b->node || a->output != b->output || a->workspace != b->workspace ||
+	    ws_layout(a->server, a->output, a->workspace) != Q_LAYOUT_SCROLL)
+		return a == b;
+	ly_node *root = a->output->ws[a->workspace];
+	return scroll_column(root, a->node) == scroll_column(root, b->node);
+}
+
+/* lay out one workspace's tree, then the scroll strip if that is its layout */
+static void ws_arrange(struct aro_server *s, struct aro_output *o, int ws)
+{
+	if (!o || ws < 0 || ws >= ARO_MAX_WS || !o->ws[ws])
+		return;
+	ly_arrange(o->ws[ws], usable_area(o), &(ly_metrics){
+		.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap,
+		.min = s->cfg.theme.min });
+	if (ws_layout(s, o, ws) == Q_LAYOUT_SCROLL)
+		scroll_place(s, o, ws);
+}
+
+bool aro_view_clipped(struct aro_view *v)
+{
+	return v->node && !v->fullscreen && v->output &&
+	       ws_layout(v->server, v->output, v->workspace) == Q_LAYOUT_SCROLL;
+}
+
 /* final target geometry */
 static ly_box view_target(struct aro_view *v)
 {
@@ -258,18 +431,20 @@ static ly_node *tree_insert(struct aro_server *s, struct aro_output *o,
 		leaf = *root = ly_leaf(v);
 	} else {
 		bool dwindle = ws_layout(s, o, ws) == Q_LAYOUT_DWINDLE;
-		/* dwindle continues the spiral */
+		bool scroll = ws_layout(s, o, ws) == Q_LAYOUT_SCROLL;
+		/* dwindle continues the spiral; a scroll strip grows at its end */
 		if (!target)
-			target = dwindle ? ly_last_leaf(*root) : ly_first_leaf(*root);
+			target = dwindle || scroll ? ly_last_leaf(*root) : ly_first_leaf(*root);
 		if (dwindle && !forced)
 			dir = target->box.w > target->box.h ? LY_ROW : LY_COL;
+		/* side by side on a strip is a new column: beside the whole column */
+		if (dir == LY_ROW)
+			target = scroll_beside(s, o, ws, target);
 		leaf = ly_split(root, target, dir, v);
 	}
 	/* hidden trees too, so dwindle reads real boxes */
 	if (leaf)
-		ly_arrange(*root, usable_area(o), &(ly_metrics){
-			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap,
-			.min = s->cfg.theme.min });
+		ws_arrange(s, o, ws);
 	return leaf;
 }
 
@@ -561,19 +736,13 @@ static void monocle_sync(struct aro_server *s, struct aro_output *o)
 
 void aro_arrange(struct aro_server *s)
 {
-	const ly_metrics m = {
-		.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min,
-	};
-
 	uint32_t now = aro_now_ms();
 	slides_reap(s, now);
 
 	/* arrange each output's current workspace */
 	struct aro_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
-		ly_node *root = o->ws[o->cur_ws];
-		if (root)
-			ly_arrange(root, usable_area(o), &m);
+		ws_arrange(s, o, o->cur_ws);
 		monocle_sync(s, o);
 	}
 
@@ -669,8 +838,7 @@ static void workspace_show(struct aro_server *s, int ws)
 
 	/* place incoming windows before drawing */
 	if (root) {
-		ly_arrange(root, usable_area(o), &(ly_metrics){
-			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
+		ws_arrange(s, o, ws);
 		ly_node *leaves[256];
 		int n = ly_collect(root, leaves, 256);
 		for (int i = 0; i < n; i++) {
@@ -689,7 +857,16 @@ static void workspace_show(struct aro_server *s, int ws)
 	}
 
 	struct aro_view *next = NULL;
-	if (root) {
+	/* a scroll strip comes back to the column you left, not its first */
+	if (root && ws_layout(s, o, ws) == Q_LAYOUT_SCROLL) {
+		struct aro_view *m;
+		wl_list_for_each(m, &s->switcher.mru, mru_link)
+			if (m->mapped && m->node && m->output == o && m->workspace == ws) {
+				next = m;
+				break;
+			}
+	}
+	if (!next && root) {
 		ly_node *first = ly_first_leaf(root);
 		next = first ? first->user : NULL;
 	}
@@ -755,6 +932,8 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 	focus_apply(s, v);
 	if (v)
 		monocle_sync(s, v->output);
+	if (v && aro_view_clipped(v))
+		aro_arrange(s);         /* the strip scrolls to the new focus */
 	keyboard_focus_changed(s);
 	ftl_sync_activated(s);
 	mru_focus(s, s->focused);
@@ -1427,7 +1606,7 @@ static void drop_update(struct aro_server *s)
 	}
 
 	ly_edge e = nearest_edge(target->node->box, s->cursor->x, s->cursor->y);
-	ly_box slot = drop_slot_box(target->node->box, e);
+	ly_box slot = drop_slot_box(drop_target_box(s, target, e), e);
 
 	bool fresh = !s->preview.active;
 	s->drop_target = target;
@@ -1457,17 +1636,33 @@ static void view_tile_into(struct aro_server *s, struct aro_view *v,
 	v->workspace = target->workspace;
 	ly_node **root = &v->output->ws[v->workspace];
 
-	ly_node *leaf = ly_split(root, target->node, dir, v);
+	/* on a strip, beside a window is beside its whole column */
+	ly_node *at = dir == LY_ROW ? scroll_beside(s, v->output, v->workspace, target->node)
+	                            : target->node;
+	ly_node *leaf = ly_split(root, at, dir, v);
 	if (!leaf)
 		return;                 /* out of memory: stay floating */
+	if (at != target->node) {
+		/* the new column goes first when dropped on the left */
+		if (e == LY_LEFT) {
+			ly_node *sp = leaf->parent;
+			sp->a = leaf;
+			sp->b = at;
+		}
+		v->node = leaf;
+		v->floating = false;
+		v->float_follow = false;
+		wlr_scene_node_reparent(&v->frame_tree->node, s->l_tiled);
+		ws_arrange(s, v->output, v->workspace);
+		return;
+	}
 
 	v->node = leaf;
 	v->floating = false;
 	v->float_follow = false;        /* back in the tree: the tree decides */
 	wlr_scene_node_reparent(&v->frame_tree->node, s->l_tiled);
 
-	ly_arrange(*root, usable_area(v->output),
-	           &(ly_metrics){ .gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
+	ws_arrange(s, v->output, v->workspace);
 
 	bool want_first = (e == LY_LEFT || e == LY_UP);
 	bool is_first = (dir == LY_ROW)
@@ -1634,8 +1829,7 @@ static void arrange_live(struct aro_server *s)
 	if (!root)
 		return;
 
-	ly_arrange(root, usable_area(o),
-	           &(ly_metrics){ .gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap, .min = s->cfg.theme.min });
+	ws_arrange(s, o, o->cur_ws);
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
@@ -2672,9 +2866,7 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 	/* place adopted views before drawing */
 	ly_node *root = o->ws[o->cur_ws];
 	if (root)
-		ly_arrange(root, usable_area(o), &(ly_metrics){
-			.gap = s->cfg.theme.gap, .outer_gap = s->cfg.theme.outer_gap,
-			.min = s->cfg.theme.min });
+		ws_arrange(s, o, o->cur_ws);
 	wl_list_for_each(v, &s->views, link)
 		if (v->mapped && v->output == o)
 			anim_box_set(&v->geo, view_target(v));
@@ -3544,6 +3736,8 @@ static void workspace_move_to_output(struct aro_server *s, ly_edge e)
 	o->ws[from] = NULL;
 	dest->ws_layout[to] = o->ws_layout[from];
 	o->ws_layout[from] = Q_LAYOUT_INHERIT;
+	dest->scroll[to] = o->scroll[from];
+	o->scroll[from] = 0;
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
@@ -3579,10 +3773,11 @@ static void layout_set(struct aro_server *s, int want)
 		return;
 	const int ws = o->cur_ws;
 	enum q_layout cur = ws_layout(s, o, ws);
-	/* toggle cycles manual, dwindle, monocle */
+	/* toggle cycles manual, dwindle, monocle, scroll */
 	enum q_layout next = want == Q_LAYOUT_TOGGLE
 	                   ? (cur == Q_LAYOUT_MANUAL  ? Q_LAYOUT_DWINDLE
 	                   :  cur == Q_LAYOUT_DWINDLE ? Q_LAYOUT_MONOCLE
+	                   :  cur == Q_LAYOUT_MONOCLE ? Q_LAYOUT_SCROLL
 	                   :                            Q_LAYOUT_MANUAL)
 	                   : (enum q_layout)want;
 
@@ -3593,7 +3788,7 @@ static void layout_set(struct aro_server *s, int want)
 	if (next != cur) {
 		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
 		       config_layout_name(next));
-		aro_arrange(s);         /* monocle places windows differently */
+		aro_arrange(s);         /* monocle and scroll place windows differently */
 	}
 }
 
@@ -3662,6 +3857,17 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 			        f->sticky ? "on" : "off");
 		}
 		return;
+	case Q_MAXIMIZE:
+		if (f && f->node && f->output && !f->fullscreen &&
+		    ws_layout(s, f->output, f->workspace) == Q_LAYOUT_SCROLL) {
+			const double share = column_share(s, f);
+			if (share < 1.0)
+				column_set_share(f, 1.0, share);
+			else
+				column_set_share(f, f->scroll_w_prev > 0 ? f->scroll_w_prev : s->cfg.scroll_width, 0);
+			aro_arrange(s);
+		}
+		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);
 		return;
@@ -3688,10 +3894,21 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 	ly_edge e = (ly_edge)b->num;
 	struct aro_output *o = f->output;
 	const bool mono = ws_monocle(s, o, o->cur_ws);
+	const bool scroll = ws_layout(s, o, o->cur_ws) == Q_LAYOUT_SCROLL;
+	const bool across = e == LY_LEFT || e == LY_RIGHT;
 
 	if (b->action == Q_RESIZE) {
 		if (mono)
 			return;         /* would move boundaries nobody can see */
+		if (scroll && across) {
+			/* the whole column gets wider or narrower; up and down split it as usual */
+			double share = column_share(s, f) +
+			        (e == LY_RIGHT ? s->cfg.theme.resize_step : -s->cfg.theme.resize_step);
+			share = share < 0.1 ? 0.1 : share > 1.0 ? 1.0 : share;
+			column_set_share(f, share, 0);
+			aro_arrange(s);
+			return;
+		}
 		if (ly_resize(f->node, e, s->cfg.theme.resize_step))
 			aro_arrange(s);
 		return;
@@ -3711,6 +3928,7 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	}
 
+	/* monocle steps through windows in order; the others go by where windows are */
 	ly_node *next = mono ? monocle_step(o->ws[o->cur_ws], f->node, e)
 	                     : ly_focus(o->ws[o->cur_ws], f->node, e);
 	if (next) {

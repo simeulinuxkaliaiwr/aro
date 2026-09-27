@@ -46,6 +46,11 @@ struct ov_card {
 	ly_box drawn;
 };
 
+struct ov_pan {
+	double at, from, to;            /* a strip scrolled sideways, in layout px */
+	uint32_t start;
+};
+
 struct ov_output {
 	struct aro_output *output;
 	struct wlr_scene_tree *tree;
@@ -57,6 +62,7 @@ struct ov_output {
 	int nitems;
 	double c, c_from, c_to;         /* strip position, in cards */
 	uint32_t c_start;
+	struct ov_pan pan[ARO_MAX_WS];
 };
 
 struct aro_overview {

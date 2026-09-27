@@ -33,19 +33,38 @@ static void set_radius(struct wlr_scene_rect *rect, int radius)
 #endif
 }
 
-/* hollow out border ring */
-static void clip_border(struct aro_view *v, int inner_w, int inner_h)
+/* hollow out border ring; at is where the border rect starts after edge clipping */
+static void clip_border(struct aro_view *v, ly_box at, int inner_w, int inner_h)
 {
 #ifdef ARO_EFFECTS
 	const struct q_theme *th = &v->server->cfg.theme;
 	wlr_scene_rect_set_clipped_region(v->frame, (struct clipped_region){
-		.area = { th->border, th->border, inner_w, inner_h },
+		.area = { th->border - at.x, th->border - at.y, inner_w, inner_h },
 		.corners = corner_radii_all(th->radius - th->border > 0
 		                            ? th->radius - th->border : 0),
 	});
 #else
-	(void)v; (void)inner_w; (void)inner_h;
+	(void)v; (void)at; (void)inner_w; (void)inner_h;
 #endif
+}
+
+static bool box_meet(ly_box a, ly_box b, ly_box *out)
+{
+	int x0 = a.x > b.x ? a.x : b.x, y0 = a.y > b.y ? a.y : b.y;
+	int x1 = a.x + a.w < b.x + b.w ? a.x + a.w : b.x + b.w;
+	int y1 = a.y + a.h < b.y + b.h ? a.y + a.h : b.y + b.h;
+	*out = x1 > x0 && y1 > y0 ? (ly_box){ x0, y0, x1 - x0, y1 - y0 } : (ly_box){ 0 };
+	return out->w > 0;
+}
+
+/* a frame rect trimmed to what may be drawn; nothing left draws nothing */
+static ly_box place_rect(struct wlr_scene_rect *r, ly_box want, ly_box vis)
+{
+	ly_box got;
+	box_meet(want, vis, &got);
+	wlr_scene_node_set_position(&r->node, got.x, got.y);
+	wlr_scene_rect_set_size(r, got.w, got.h);
+	return got;
 }
 
 #ifdef ARO_EFFECTS
@@ -170,6 +189,7 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 
 	if (v->fullscreen) {
 		wlr_scene_node_set_position(&v->frame_tree->node, b.x, b.y);
+		wlr_scene_node_set_enabled(&v->content->node, true);   /* edge clipping may have hidden it */
 		wlr_scene_node_set_position(&v->content->node, 0, 0);
 		wlr_scene_node_set_position(&v->popups->node, 0, 0);
 		if (v->surface_tree)
@@ -188,26 +208,28 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 
 	wlr_scene_node_set_position(&v->frame_tree->node, b.x, b.y);
 
-	wlr_scene_rect_set_size(v->frame, b.w, b.h);
+	/* a scroll column is cut at its screen's edge, not drawn on the next screen */
+	ly_box vis = { 0, 0, b.w, b.h };
+	if (aro_view_clipped(v)) {
+		ly_box ob = v->output->box;
+		box_meet(vis, (ly_box){ ob.x - b.x, ob.y - b.y, ob.w, ob.h }, &vis);
+	}
+	const bool cut = vis.x != 0 || vis.y != 0 || vis.w != b.w || vis.h != b.h;
 
-	wlr_scene_node_set_position(&v->bg->node, bw, bw);
-	wlr_scene_rect_set_size(v->bg, inner_w, inner_h);
-
-	/* place inner ring */
-	wlr_scene_node_set_position(&v->ring->node, bw, bw);
-	wlr_scene_rect_set_size(v->ring, inner_w, 1);
+	ly_box border = place_rect(v->frame, (ly_box){ 0, 0, b.w, b.h }, vis);
+	place_rect(v->bg, (ly_box){ bw, bw, inner_w, inner_h }, vis);
+	place_rect(v->ring, (ly_box){ bw, bw, inner_w, 1 }, vis);
 
 	wlr_scene_node_set_enabled(&v->header->node, hh > 0);
-	qtext_show(&v->title, hh > 0 && !v->fullscreen);
-	wlr_scene_node_set_position(&v->header->node, bw, bw);
-	wlr_scene_rect_set_size(v->header, inner_w, hh < inner_h ? hh : inner_h);
+	qtext_show(&v->title, hh > 0 && !v->fullscreen && !cut);
+	place_rect(v->header, (ly_box){ bw, bw, inner_w, hh < inner_h ? hh : inner_h }, vis);
 
 	ly_box cb;
 	ui_frame_content_box(v, b, &cb);
 	const int cw = cb.w;
 	const int ch = cb.h;
 
-	clip_border(v, inner_w, inner_h);
+	clip_border(v, border, inner_w, inner_h);
 
 	wlr_scene_node_set_position(&v->content->node, bw, bw + hh);
 
@@ -215,10 +237,15 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 	wlr_scene_node_set_position(&v->popups->node, bw, bw + hh);
 
 	/* verify wlroots/scenefx calls against current headers */
-	/* clip actual surface tree, not wrapper */
-	if (v->surface_tree)
+	/* clip actual surface tree, not wrapper; and to the visible part */
+	ly_box shown;
+	bool any = box_meet((ly_box){ g.x, g.y, cw, ch },
+	                    (ly_box){ vis.x - bw + g.x, vis.y - bw - hh + g.y, vis.w, vis.h },
+	                    &shown);
+	wlr_scene_node_set_enabled(&v->content->node, any);
+	if (v->surface_tree && any)
 		wlr_scene_subsurface_tree_set_clip(&v->surface_tree->node,
-		                                   &(struct wlr_box){ g.x, g.y, cw, ch });
+			&(struct wlr_box){ shown.x, shown.y, shown.w, shown.h });
 
 	/* don't re-render title every frame */
 	qtext_move(&v->title, bw + th->text_pad, bw + (hh - v->title.h) / 2);

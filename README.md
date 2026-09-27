@@ -29,8 +29,9 @@ says "this is the window you are in".
 
 - **Tiling, split on demand.** New windows open beside the focused one, or
   wherever `mod+v` / `mod+s` said; `dwindle` splits along the longer axis
-  instead, so the layout spirals on its own, and `monocle` shows one
-  window at a time without losing the splits underneath.
+  instead, so the layout spirals on its own, `monocle` shows one
+  window at a time without losing the splits underneath, and `scroll`
+  puts windows in columns on a strip the screen slides along.
 - **Spatial focus.** `mod+hjkl` moves to the window that is actually up,
   left or right on screen, not to the next one in a tree, and across
   monitors by the same rule.
@@ -279,7 +280,8 @@ replaces this table entirely.
 | `mod+ctrl+hjkl` | resize |
 | `mod+tab` / `mod+shift+tab` | window switcher, recently used order |
 | `mod+o` | overview: every workspace, zoomed out |
-| `mod+t` | cycle this workspace's layout: manual, dwindle, monocle |
+| `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll |
+| `mod+m` | scroll layout: column fills the screen, or goes back |
 | `mod+space` | toggle floating |
 | `mod+f` | toggle fullscreen |
 | `mod+1..4` | workspace |

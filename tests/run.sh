@@ -213,6 +213,81 @@ fi
 wait "$CS"
 alive
 
+# 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
+# focus follows mouse too: aro moving the pointer after a key press must not steal focus back
+config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"
+sleep 0.3
+# geometry of window N as "x w", from aroctl's WxH+X+Y column
+geo() {
+	ctl windows | awk -v id="$1" '{
+		i = ($1 == "*") ? 2 : 1
+		if ($i != id) next
+		split($(i + 4), a, "x"); r = a[2]; r = substr(r, match(r, /[+-]/))
+		print substr(r, 1, match(substr(r, 2), /[+-]/)) + 0, a[1]
+	}'
+}
+focus_id() { ctl windows | awk '$1 == "*" { print $2 }'; }
+client window 4 8 > "$T/scroll.out" 2>&1 &
+CW=$!
+if wait_for "$T/scroll.out" "4 windows open"; then
+	sleep 0.3
+	ids=$(ctl windows | awk 'NR > 1 { print ($1 == "*") ? $2 : $1 }' | sort -n | tr '\n' ' ')
+	set -- $ids
+	ctl dispatch focus left > /dev/null; ctl dispatch focus left > /dev/null
+	sleep 0.3
+	f=$(focus_id)
+	read fx fw <<< "$(geo "$f")"
+	read lx lw <<< "$(geo "$1")"
+	[ "$f" = "$2" ] && [ "$fx" -ge 0 ] && [ $((fx + fw)) -le 1280 ] \
+		&& ok "scroll: the strip follows focus" || bad "scroll: the strip follows focus ($f at $fx+$fw)"
+	edge=$((lx + lw))
+	[ "$edge" -gt 0 ] && [ "$edge" -lt "$fx" ] && ok "scroll: the previous column peeks in ($edge px)" \
+		|| bad "scroll: the previous column peeks in ($lx+$lw)"
+	ctl dispatch resize right > /dev/null
+	sleep 0.2
+	read fx2 fw2 <<< "$(geo "$f")"
+	[ "$fw2" -gt "$fw" ] && ok "scroll: resize widens the column" || bad "scroll: resize widens the column"
+	ctl dispatch maximize > /dev/null; sleep 0.2
+	read mx mw <<< "$(geo "$f")"
+	ctl dispatch maximize > /dev/null; sleep 0.2
+	read bx bw <<< "$(geo "$f")"
+	[ "$mw" -ge 1200 ] && [ "$mx" -ge 0 ] && [ $((mx + mw)) -le 1280 ] && [ "$bw" = "$fw2" ] && ok "scroll: maximize fills the screen and goes back" \
+		|| bad "scroll: maximize fills the screen and goes back ($fw2 -> $mx+$mw -> $bw)"
+	ctl dispatch workspace 2 > /dev/null; sleep 0.2
+	ctl dispatch workspace 1 > /dev/null; sleep 0.3
+	[ "$(focus_id)" = "$f" ] && ok "scroll: coming back keeps the column" || bad "scroll: coming back keeps the column"
+	ctl dispatch layout manual > /dev/null
+	sleep 0.3
+	neg=$(ctl windows | awk 'NR > 1 { i = ($1 == "*") ? 2 : 1; if ($(i + 4) ~ /x[0-9]+-/) print "off" }')
+	[ -z "$neg" ] && ok "scroll: leaving it restores the splits" || bad "scroll: leaving it restores the splits"
+	c=$(client capture output 2>&1)
+	case $c in *captured*) ok "scroll: screen capture still works" ;; *) bad "scroll: screen capture: $c" ;; esac
+	ctl dispatch layout scroll > /dev/null
+	# split down stacks the next window in the focused column, like tiling
+	ctl dispatch split down > /dev/null
+	client window 1 3 > "$T/stack.out" 2>&1 &
+	CK=$!
+	if wait_for "$T/stack.out" "1 windows open"; then
+		sleep 0.3
+		new=$(focus_id)
+		ctl dispatch focus up > /dev/null
+		above=$(focus_id)
+		read nx nw <<< "$(geo "$new")"
+		read ax aw <<< "$(geo "$above")"
+		[ "$above" != "$new" ] && [ "$nx" = "$ax" ] && ok "scroll: split down stacks in the column" \
+			|| bad "scroll: split down stacks in the column ($new at $nx, $above at $ax)"
+	fi
+	wait "$CK"
+	ctl dispatch overview > /dev/null; sleep 0.6
+	ctl dispatch overview > /dev/null; sleep 0.4
+	alive
+	ok "scroll: the overview shows the strip"
+fi
+wait "$CW" || bad "scroll client exited with an error"
+config
+sleep 0.3
+alive
+
 # 4f. a bound mouse button runs its action: the back button goes to workspace 3
 config "bind = mouse_back, workspace, 3" "bind = mod+Return, spawn, foot"
 sleep 0.3
@@ -303,6 +378,31 @@ if wait_for "$T/mv.out" "2 windows open"; then
 fi
 wait "$CV"
 alive
+
+# 5b. a scroll strip on one monitor draws nothing on the monitor next to it
+config "layout = scroll"
+sleep 0.3
+client window 4 5 > "$T/clip.out" 2>&1 &
+CC=$!
+if wait_for "$T/clip.out" "4 windows open"; then
+	sleep 0.4
+	mon=$(ctl -j windows | grep -o '"output":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+	ox=$(ctl -j monitors | tr '}' '\n' | grep "\"name\":\"$mon\"" | grep -oE '"x":-?[0-9]+' | cut -d: -f2)
+	other=$(( ox == 0 ? 1280 : 0 ))
+	if command -v grim > /dev/null; then
+		px=$(env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$((other + 640)),360 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n')
+		[ "$px" != "203040" ] && ok "scroll strip stays on its own monitor ($px next door)" \
+			|| bad "scroll strip drew on the other monitor"
+	else
+		echo "skip  scroll clipping (no grim)"
+	fi
+fi
+wait "$CC"
+config
+sleep 0.3
+alive
+
 
 fi
 
