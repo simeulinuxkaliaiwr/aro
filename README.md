@@ -58,7 +58,8 @@ says "this is the window you are in".
   XWayland, session lock, idle inhibit, clipboard, drag and drop,
   screencopy and xdg-decoration all work, and so do drawing tablets and
   touchscreens: apps that take touch get it, and elsewhere a finger is a
-  mouse.
+  mouse. With the Vulkan renderer, colour-managed apps and HDR monitors
+  (`hdr = on`) work too.
 
 ## Installing
 

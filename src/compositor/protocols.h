@@ -11,6 +11,9 @@ void protocols_init(struct aro_server *s);
 
 void protocols_finish(struct aro_server *s);
 
+/* after the scene: colour management, when the renderer can convert */
+void colour_init(struct aro_server *s);
+
 /* keyboard focus moved: an app's shortcut inhibitor holds only while it has focus */
 void shortcuts_inhibit_sync(struct aro_server *s);
 

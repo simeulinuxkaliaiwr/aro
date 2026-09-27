@@ -77,6 +77,7 @@ monitor * {
     position = auto         # places it to the right of existing screens
     transform = auto        # normal orientation
     adaptive_sync = auto    # defaults to off
+    hdr = auto              # off; on needs WLR_RENDERER=vulkan and no effects
 }
 
 # monitor "Dell Inc. DELL U2419H*" {
@@ -85,6 +86,7 @@ monitor * {
 #     scale = 1.25
 #     transform = normal      # 90, 180, 270, flipped, etc.
 #     adaptive_sync = false
+#     hdr = true
 #     enabled = true
 # }
 #

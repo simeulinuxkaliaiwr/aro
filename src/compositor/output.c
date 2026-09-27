@@ -13,6 +13,9 @@
 #include <string.h>
 #include <time.h>
 
+#include <drm_fourcc.h>
+#include <wlr/render/color.h>
+#include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
@@ -204,6 +207,17 @@ static void output_adopt_parked(struct aro_server *s, struct aro_output *o)
 /* ── output configuration ──────────────────────────────────────────────── */
 /* output config paths */
 
+/* why this output cannot show HDR, or NULL if it can */
+static const char *hdr_unsupported(struct aro_server *s, struct wlr_output *wo)
+{
+	if (!s->renderer->features.output_color_transform)
+		return "the renderer cannot (start aro with WLR_RENDERER=vulkan and -Deffects=false)";
+	if (!(wo->supported_primaries & WLR_COLOR_NAMED_PRIMARIES_BT2020) ||
+	    !(wo->supported_transfer_functions & WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ))
+		return "the monitor does not report HDR";
+	return NULL;
+}
+
 /* output request defaults */
 struct out_req {
 	int enabled;                    /* -1 leave, 0, 1 */
@@ -216,9 +230,10 @@ struct out_req {
 	float scale;                    /* 0 leave; -1 work it out from the DPI */
 	int transform;                  /* -1 leave */
 	int adaptive_sync;              /* -1 leave */
+	int hdr;                        /* -1 leave */
 };
 
-#define OUT_REQ_NONE { .enabled = -1, .transform = -1, .adaptive_sync = -1 }
+#define OUT_REQ_NONE { .enabled = -1, .transform = -1, .adaptive_sync = -1, .hdr = -1 }
 
 /* notify output management clients */
 void output_mgr_update(struct aro_server *s)
@@ -500,6 +515,22 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 		wlr_output_state_set_transform(&st, (enum wl_output_transform)r->transform);
 	if (r->adaptive_sync >= 0)
 		wlr_output_state_set_adaptive_sync_enabled(&st, r->adaptive_sync == 1);
+	if (r->hdr >= 0) {
+		/* HDR: PQ in BT.2020, ten bits a channel; off: back to plain sRGB */
+		const char *no = r->hdr == 1 ? hdr_unsupported(s, wo) : NULL;
+		if (no)
+			wlr_log(WLR_INFO, "%s: hdr stays off: %s", wo->name, no);
+		const bool on = r->hdr == 1 && !no;
+		static const struct wlr_output_image_description pq = {
+			.primaries = WLR_COLOR_NAMED_PRIMARIES_BT2020,
+			.transfer_function = WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ,
+		};
+		if (on || wo->image_description) {
+			wlr_output_state_set_image_description(&st, on ? &pq : NULL);
+			wlr_output_state_set_render_format(&st, on ? DRM_FORMAT_XRGB2101010
+			                                           : DRM_FORMAT_XRGB8888);
+		}
+	}
 
 	bool ok = wlr_output_test_state(wo, &st);
 	if (ok && !test)
@@ -507,7 +538,7 @@ static bool output_configure(struct aro_output *o, const struct out_req *r,
 	wlr_output_state_finish(&st);
 	if (!ok) {
 		snprintf(why, why_len, "the output refused that combination%s",
-		         r->adaptive_sync == 1 ? " (adaptive_sync?)" : "");
+		         r->adaptive_sync == 1 ? " (adaptive_sync?)" : r->hdr == 1 ? " (hdr?)" : "");
 		return false;
 	}
 	if (test)
@@ -628,6 +659,10 @@ static bool monitor_req(const struct q_monitor_set *m,
 	if (m->adaptive_sync != Q_RULE_UNSET &&
 	    (!last || last->adaptive_sync != m->adaptive_sync)) {
 		r->adaptive_sync = m->adaptive_sync;
+		any = true;
+	}
+	if (m->hdr != Q_RULE_UNSET && (!last || last->hdr != m->hdr)) {
+		r->hdr = m->hdr;
 		any = true;
 	}
 	return any;

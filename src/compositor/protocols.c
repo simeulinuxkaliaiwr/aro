@@ -6,6 +6,7 @@
 
 #include <wlr/backend.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_color_management_v1.h>
 #include <wlr/types/wlr_drm_lease_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_ext_image_capture_source_v1.h>
@@ -227,6 +228,45 @@ static void lease_init(struct aro_server *s)
 	s->lease_request.notify = lease_request;
 	wl_signal_add(&s->drm_lease->events.request, &s->lease_request);
 	wlr_log(WLR_INFO, "VR headsets: can be leased");
+}
+
+/* apps say what colour space they draw in; only if the renderer can convert */
+void colour_init(struct aro_server *s)
+{
+	const struct wlr_renderer *r = s->renderer;
+	wlr_log(WLR_INFO, "renderer colour transforms: input %s, output %s",
+	        r->features.input_color_transform ? "yes" : "no",
+	        r->features.output_color_transform ? "yes" : "no");
+	if (!r->features.input_color_transform)
+		return;
+
+	size_t ntf = 0, nprim = 0;
+	enum wp_color_manager_v1_transfer_function *tf =
+		wlr_color_manager_v1_transfer_function_list_from_renderer(s->renderer, &ntf);
+	enum wp_color_manager_v1_primaries *prim =
+		wlr_color_manager_v1_primaries_list_from_renderer(s->renderer, &nprim);
+	static const enum wp_color_manager_v1_render_intent intents[] = {
+		WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL,
+	};
+	struct wlr_color_manager_v1 *cm = NULL;
+	if (tf && prim)
+		cm = wlr_color_manager_v1_create(s->display, 1, &(struct wlr_color_manager_v1_options){
+			.features = { .parametric = true, .set_mastering_display_primaries = true },
+			.render_intents = intents,
+			.render_intents_len = sizeof intents / sizeof *intents,
+			.transfer_functions = tf,
+			.transfer_functions_len = ntf,
+			.primaries = prim,
+			.primaries_len = nprim,
+		});
+	free(tf);
+	free(prim);
+	if (!cm) {
+		wlr_log(WLR_ERROR, "colour management: could not start");
+		return;
+	}
+	wlr_scene_set_color_manager_v1(s->scene, cm);
+	wlr_log(WLR_INFO, "colour management: on");
 }
 
 void protocols_init(struct aro_server *s)

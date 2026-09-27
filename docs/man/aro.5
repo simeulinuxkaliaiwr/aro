@@ -224,6 +224,15 @@ Rotation.
 .BR adaptive_sync " = " \fIbool\fP | auto
 Variable refresh rate.
 Default: off.
+.TP
+.BR hdr " = " \fIbool\fP | auto
+Drive an HDR monitor in HDR, ten bits a channel.
+It needs a renderer that converts colours, which today is only
+.B WLR_RENDERER=vulkan
+in a build without effects; otherwise, and on a monitor that does not
+report HDR, the screen stays as it is and the log says why.
+That renderer also lets apps tell aro what colours they draw in.
+Default: off.
 .PP
 A key left out keeps whatever the screen has, so changes made with tools
 such as wlr-randr survive a reload;

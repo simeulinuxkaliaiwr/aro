@@ -756,6 +756,7 @@ void config_monitor_unset(struct q_monitor_set *m)
 		.enabled = Q_RULE_UNSET,
 		.transform = Q_RULE_UNSET,
 		.adaptive_sync = Q_RULE_UNSET,
+		.hdr = Q_RULE_UNSET,
 	};
 }
 
@@ -791,6 +792,8 @@ void config_monitor_eval(const struct aro_config *c, const char *name,
 			out->transform = b->transform;
 		if (b->adaptive_sync != Q_RULE_UNSET)
 			out->adaptive_sync = b->adaptive_sync;
+		if (b->hdr != Q_RULE_UNSET)
+			out->hdr = b->hdr;
 	}
 }
 
@@ -925,9 +928,16 @@ static void monitor_key(struct aro_config *c, int lineno,
 		} else if ((ok = parse_bool(value, &b))) {
 			m->adaptive_sync = b;
 		}
+	} else if (!strcasecmp(key, "hdr")) {
+		if (is_auto) {
+			m->hdr = 0;
+			ok = true;
+		} else if ((ok = parse_bool(value, &b))) {
+			m->hdr = b;
+		}
 	} else {
 		config_err(c, lineno, "monitor: unknown key '%s' (enabled, mode, "
-		           "position, scale, transform, adaptive_sync)", key);
+		           "position, scale, transform, adaptive_sync, hdr)", key);
 		return;
 	}
 

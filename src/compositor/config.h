@@ -107,6 +107,7 @@ struct q_monitor_set {
 	int transform;          /* -1 unset, else an enum wl_output_transform
 	                         * (auto = NORMAL) */
 	int adaptive_sync;      /* -1 unset, 0, 1 (auto = 0, the default) */
+	int hdr;                /* -1 unset, 0, 1 (auto = 0) */
 };
 
 struct q_monitor {

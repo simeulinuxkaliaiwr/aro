@@ -2322,6 +2322,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	s.scene_layout = wlr_scene_attach_output_layout(s.scene, s.output_layout);
+	colour_init(&s);
 
 	/* stacking layers */
 	float bg[4];
