@@ -16,6 +16,7 @@
 #include "extws.h"
 #include "gestures.h"
 #include "tablet.h"
+#include "touch.h"
 #include "protocols.h"
 #include "ghost.h"
 #include "idle.h"
@@ -318,6 +319,7 @@ struct aro_server {
 	bool capture_toplevels;
 	struct aro_gestures gestures;   /* gestures.c */
 	struct aro_tablets tablets;     /* tablet.c */
+	struct aro_touch touch;         /* touch.c */
 	uint32_t mouse_binds_held;      /* buttons whose release is ours: bit n is BTN_MOUSE + n */
 	bool warping;                   /* aro is moving the pointer, focus-follows-mouse holds off */
 	struct wl_listener new_kb_inhibitor;

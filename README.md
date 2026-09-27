@@ -56,7 +56,9 @@ says "this is the window you are in".
 - **Window rules**, monitor configuration, an exit prompt, and rounded
   corners through [SceneFX](https://github.com/wlrfx/scenefx). Layer shell,
   XWayland, session lock, idle inhibit, clipboard, drag and drop,
-  screencopy and xdg-decoration all work.
+  screencopy and xdg-decoration all work, and so do drawing tablets and
+  touchscreens: apps that take touch get it, and elsewhere a finger is a
+  mouse.
 
 ## Installing
 

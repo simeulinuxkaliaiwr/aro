@@ -90,6 +90,7 @@ void pointer_motion_common(struct aro_server *s, uint32_t time);
 void request_activate(struct wl_listener *l, void *data);
 void request_cursor(struct wl_listener *l, void *data);
 void request_set_shape(struct wl_listener *l, void *data);
+void seat_update_caps(struct aro_server *s);
 struct aro_view *view_at(struct aro_server *s, double lx, double ly, struct wlr_surface **surface, double *sx, double *sy);
 
 /* layers.c */

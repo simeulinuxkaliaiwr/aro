@@ -195,11 +195,13 @@ void apply_keymap(struct aro_server *s, struct wlr_keyboard *wlr_kb)
 	wlr_keyboard_set_repeat_info(wlr_kb, 25, 600);
 }
 
-static void seat_update_caps(struct aro_server *s)
+void seat_update_caps(struct aro_server *s)
 {
 	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&s->keyboards))
 		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	if (touch_present(s))
+		caps |= WL_SEAT_CAPABILITY_TOUCH;
 	wlr_seat_set_capabilities(s->seat, caps);
 }
 
@@ -290,6 +292,8 @@ void new_input(struct wl_listener *l, void *data)
 		new_keyboard(s, dev, false);
 	} else if (dev->type == WLR_INPUT_DEVICE_TABLET) {
 		tablet_add(s, dev);
+	} else if (dev->type == WLR_INPUT_DEVICE_TOUCH) {
+		touch_add(s, dev);
 	} else if (dev->type == WLR_INPUT_DEVICE_POINTER) {
 		wlr_cursor_attach_input_device(s->cursor, dev);
 		new_pointer(s, dev);

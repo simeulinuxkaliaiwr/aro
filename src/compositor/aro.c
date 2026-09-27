@@ -2441,6 +2441,7 @@ int main(int argc, char *argv[])
 	s.relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(s.display);
 	gestures_init(&s);
 	tablet_init(&s);
+	touch_init(&s);
 	s.pointer_constraints = wlr_pointer_constraints_v1_create(s.display);
 	s.new_constraint.notify = new_constraint;
 	wl_signal_add(&s.pointer_constraints->events.new_constraint,
@@ -2590,6 +2591,7 @@ teardown:
 	extws_finish(&s);
 	protocols_finish(&s);
 	gestures_finish(&s);
+	touch_finish(&s);
 	tablet_finish(&s);
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;

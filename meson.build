@@ -159,6 +159,7 @@ if get_option('compositor')
     'src/compositor/protocols.c',
     'src/compositor/tablet.c',
     'src/compositor/toplevels.c',
+    'src/compositor/touch.c',
     'src/compositor/idle.c',
     'src/compositor/ime.c',
     'src/compositor/input.c',
