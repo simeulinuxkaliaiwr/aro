@@ -3587,9 +3587,11 @@ static void layout_set(struct aro_server *s, int want)
 	                 ? Q_LAYOUT_INHERIT : (int)next;
 	wlr_log(WLR_INFO, "layout: workspace %d on %s is %s", ws + 1,
 	        o->wlr_output->name, config_layout_name(next));
-	if (next != cur)
+	if (next != cur) {
 		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
 		       config_layout_name(next));
+		aro_arrange(s);         /* monocle places windows differently */
+	}
 }
 
 /* monocle focus: h/k previous, j/l next, in tree order; NULL at the ends */

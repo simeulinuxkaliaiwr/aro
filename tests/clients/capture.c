@@ -1,4 +1,4 @@
-/* capture: grab one frame of the first output ("output") or of window APP_ID ("window APP_ID"), print its middle pixel */
+/* capture: grab one frame of the first output ("output") or of window APP_ID ("window APP_ID"); print a pixel inside it */
 #define _GNU_SOURCE /* memfd_create */
 
 #include "common.h"
@@ -91,8 +91,9 @@ static void f_damage(void *d, struct ext_image_copy_capture_frame_v1 *f, int32_t
 static void f_time(void *d, struct ext_image_copy_capture_frame_v1 *f, uint32_t a, uint32_t b, uint32_t c)
 { (void)d; (void)f; (void)a; (void)b; (void)c; }
 static void f_ready(void *d, struct ext_image_copy_capture_frame_v1 *f) { (void)d; (void)f; frame_state = 1; }
+static uint32_t fail_reason;
 static void f_failed(void *d, struct ext_image_copy_capture_frame_v1 *f, uint32_t r)
-{ (void)d; (void)f; fprintf(stderr, "frame failed: %u\n", r); frame_state = -1; }
+{ (void)d; (void)f; fail_reason = r; frame_state = -1; }
 
 static const struct ext_image_copy_capture_frame_v1_listener frame_listener = {
 	f_transform, f_damage, f_time, f_ready, f_failed,
@@ -125,36 +126,48 @@ int main(int argc, char **argv)
 	struct ext_image_copy_capture_session_v1 *session =
 		ext_image_copy_capture_manager_v1_create_session(copy, src, 0);
 	ext_image_copy_capture_session_v1_add_listener(session, &session_listener, NULL);
-	for (int i = 0; i < 20 && !constraints_done; i++)
-		roundtrip(&g);
-	if (!constraints_done || !width || !height || shm_format == UINT32_MAX)
-		fail("no buffer constraints from aro");
+	/* a window that is resizing changes its size under us: take the new one and retry */
+	uint32_t *px = NULL;
+	for (int attempt = 0; attempt < 5; attempt++) {
+		for (int i = 0; i < 20 && !constraints_done; i++)
+			roundtrip(&g);
+		if (!constraints_done || !width || !height || shm_format == UINT32_MAX)
+			fail("no buffer constraints from aro");
 
-	int stride = width * 4, size = stride * height;
-	int fd = memfd_create("capture", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, size) < 0)
-		fail("no shared memory");
-	uint32_t *px = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	struct wl_shm_pool *pool = wl_shm_create_pool(g.shm, fd, size);
-	struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, width, height, stride, shm_format);
+		int stride = width * 4, size = stride * height;
+		int fd = memfd_create("capture", MFD_CLOEXEC);
+		if (fd < 0 || ftruncate(fd, size) < 0)
+			fail("no shared memory");
+		px = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		struct wl_shm_pool *pool = wl_shm_create_pool(g.shm, fd, size);
+		struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, width, height, stride, shm_format);
+		wl_shm_pool_destroy(pool);
+		close(fd);
 
-	struct ext_image_copy_capture_frame_v1 *frame =
-		ext_image_copy_capture_session_v1_create_frame(session);
-	ext_image_copy_capture_frame_v1_add_listener(frame, &frame_listener, NULL);
-	ext_image_copy_capture_frame_v1_attach_buffer(frame, buf);
-	ext_image_copy_capture_frame_v1_damage_buffer(frame, 0, 0, width, height);
-	ext_image_copy_capture_frame_v1_capture(frame);
-	for (int i = 0; i < 50 && !frame_state; i++) {
-		roundtrip(&g);
-		usleep(20000);
+		frame_state = 0;
+		struct ext_image_copy_capture_frame_v1 *frame =
+			ext_image_copy_capture_session_v1_create_frame(session);
+		ext_image_copy_capture_frame_v1_add_listener(frame, &frame_listener, NULL);
+		ext_image_copy_capture_frame_v1_attach_buffer(frame, buf);
+		ext_image_copy_capture_frame_v1_damage_buffer(frame, 0, 0, width, height);
+		ext_image_copy_capture_frame_v1_capture(frame);
+		for (int i = 0; i < 50 && !frame_state; i++) {
+			roundtrip(&g);
+			usleep(20000);
+		}
+		ext_image_copy_capture_frame_v1_destroy(frame);
+		if (frame_state == 1)
+			break;
+		if (fail_reason != EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_BUFFER_CONSTRAINTS)
+			fail("frame failed: %u", fail_reason);
+		constraints_done = 0;   /* aro sends the new size; wait for it */
+		usleep(100000);
 	}
 	if (frame_state != 1)
 		fail("no frame captured");
 
-	if (getenv("CAPTURE_DEBUG"))
-		fprintf(stderr, "chose shm format %08x\n", shm_format);
-	/* as 0xRRGGBB, whichever byte order aro chose */
-	uint32_t p = px[(height / 2) * width + width / 2];
+	/* a quarter across, half down: inside a window in every layout, never in a gap */
+	uint32_t p = px[(height / 2) * width + width / 4];
 	if (shm_format == WL_SHM_FORMAT_XBGR8888 || shm_format == WL_SHM_FORMAT_ABGR8888)
 		p = (p & 0xff) << 16 | (p & 0xff00) | (p >> 16 & 0xff);
 	printf("captured %ux%u, middle pixel %06x\n", width, height, p & 0xffffff);
