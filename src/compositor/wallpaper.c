@@ -214,7 +214,7 @@ static void start(struct aro_wallpaper *w)
 		signal(SIGPIPE, SIG_DFL);
 		setsid();
 		/* auto: no argument, aropaper picks aro's own art */
-		char *argv[] = { "aropaper", file, NULL };
+		char *argv[] = { "aropaper", "--by-aro", file, NULL };
 		execv(bin, argv);
 		_exit(127);
 	}

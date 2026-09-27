@@ -34,6 +34,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -489,6 +491,43 @@ static void usage(FILE *f)
 		"wallpaper from %s.\n", ARO_WALLPAPER_DIR);
 }
 
+/* under aro, hand the file to the aropaper aro runs, so there is only one */
+static bool hand_to_aro(const char *file)
+{
+	/* $ARO_SOCKET, or where aro puts it for our WAYLAND_DISPLAY */
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	const char *sock = getenv("ARO_SOCKET");
+	const char *rt = getenv("XDG_RUNTIME_DIR"), *wl = getenv("WAYLAND_DISPLAY");
+	int len = sock && *sock ? snprintf(addr.sun_path, sizeof addr.sun_path, "%s", sock)
+		: rt && *rt ? snprintf(addr.sun_path, sizeof addr.sun_path, "%s/aro-%s.sock",
+		                       rt, wl && *wl ? wl : "wayland-0")
+		: -1;
+	if (len <= 0 || (size_t)len >= sizeof addr.sun_path)
+		return false;
+
+	char *abs = file ? realpath(file, NULL) : NULL;
+	if (file && !abs)
+		return false;
+	char req[4200];
+	int n = snprintf(req, sizeof req, "text wallpaper %s\n", abs ? abs : "auto");
+	free(abs);
+	if (n <= 0 || (size_t)n >= sizeof req || strchr(req, '\n') != req + n - 1)
+		return false;
+
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return false;
+	bool ok = false;
+	if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0 &&
+	    write(fd, req, (size_t)n) == n) {
+		shutdown(fd, SHUT_WR);
+		char reply[3] = { 0 };
+		ok = read(fd, reply, 2) == 2 && !memcmp(reply, "ok", 2);
+	}
+	close(fd);
+	return ok;
+}
+
 /* true when gdk-pixbuf can read the file; stores its intrinsic size */
 static bool probe(struct paper *p, const char *path)
 {
@@ -506,11 +545,16 @@ int main(int argc, char **argv)
 	static const struct option longopts[] = {
 		{"help", no_argument, NULL, 'h'},
 		{"version", no_argument, NULL, 'v'},
+		{"by-aro", no_argument, NULL, 'A'},     /* aro's own child: draw */
 		{0},
 	};
+	bool by_aro = false;
 	int c;
 	while ((c = getopt_long(argc, argv, "hv", longopts, NULL)) != -1) {
 		switch (c) {
+		case 'A':
+			by_aro = true;
+			break;
 		case 'h':
 			usage(stdout);
 			return 0;
@@ -549,6 +593,10 @@ int main(int argc, char **argv)
 				ARO_WALLPAPER_DIR);
 			return 1;
 		}
+	}
+	if (!by_aro && hand_to_aro(optind < argc ? p.path : NULL)) {
+		LOG("aro is showing %s\n", p.path);
+		return 0;
 	}
 	LOG("%s (%dx%d)\n", p.path, p.img_w, p.img_h);
 

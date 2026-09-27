@@ -23,6 +23,9 @@ runs it by itself, following the
 setting in
 .BR aro (5),
 so there is rarely a reason to start it by hand there.
+Started by hand under aro anyway, it hands the file to aro, as
+.B aroctl wallpaper
+would, and exits: aro's own aropaper switches to it, and no second one runs.
 It is an ordinary layer-shell client, so it also works on other compositors
 with wlr-layer-shell, such as sway, Hyprland, niri and river.
 .SH OPTIONS

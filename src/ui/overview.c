@@ -448,8 +448,9 @@ static bool out_build(struct aro_server *s, struct ov_output *oo,
 		c->bg = rect(oo->tree, fade(th->bg, 0), th->radius);
 		if (!c->edge || !c->bg)
 			return false;
+		/* oldest first, so the newest ends on top as on screen */
 		struct aro_layer *l;
-		wl_list_for_each(l, &s->layers, link) {
+		wl_list_for_each_reverse(l, &s->layers, link) {
 			if (c->nwall == OV_MAX_WALL || !is_wall(l, o))
 				continue;
 			struct wlr_scene_buffer *w = wlr_scene_buffer_create(oo->tree,
