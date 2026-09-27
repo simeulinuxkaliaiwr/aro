@@ -55,7 +55,8 @@ touchpad_natural_scroll = false
 touchpad_disable_while_typing = true
 touchpad_speed = 0.0            # -1.0 to 1.0
 # a swipe with this many fingers changes workspace when you lift them:
-# left for the next one, right for the previous (up/down with workspace_slide = vertical).
+# left for the next one, right for the previous (up/down with workspace_slide = vertical;
+# then a sideways swipe on a scroll workspace moves along its columns).
 # 0 passes every gesture to apps instead. 3 to 5.
 gesture_fingers = 3
 

@@ -68,10 +68,23 @@ static void swipe_end(struct wl_listener *l, void *data)
 	}
 	g->swiping = false;
 
+	struct aro_output *o = output_under_cursor(s);
+	if (ev->cancelled || !o)
+		return;
+
+	/* sideways, when workspaces slide up and down: a scroll strip's next column */
+	struct aro_view *f = s->focused;
+	if (s->cfg.ws_slide == Q_SLIDE_VERTICAL && fabs(g->dx) > fabs(g->dy)) {
+		if (fabs(g->dx) >= SWIPE_DISTANCE && f && f->output == o &&
+		    f->workspace == o->cur_ws && aro_ws_layout(o, o->cur_ws) == Q_LAYOUT_SCROLL)
+			aro_run_action(s, &(struct q_bind){ .action = Q_FOCUS,
+				.num = g->dx < 0 ? LY_RIGHT : LY_LEFT });
+		return;
+	}
+
 	/* along the axis workspaces slide on; fingers moving left bring the next one in */
 	double d = s->cfg.ws_slide == Q_SLIDE_VERTICAL ? g->dy : g->dx;
-	struct aro_output *o = output_under_cursor(s);
-	if (ev->cancelled || fabs(d) < SWIPE_DISTANCE || !o)
+	if (fabs(d) < SWIPE_DISTANCE)
 		return;
 	int ws = o->cur_ws + (d < 0 ? 1 : -1);
 	if (ws < 0 || ws >= ARO_MAX_WS)
