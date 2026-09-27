@@ -12,6 +12,7 @@ foreach xml : [
   wl_protocol_dir / 'staging/security-context/security-context-v1.xml',
   wl_protocol_dir / 'staging/xdg-dialog/xdg-dialog-v1.xml',
   wl_protocol_dir / 'staging/tearing-control/tearing-control-v1.xml',
+  wl_protocol_dir / 'staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml',
   wl_protocol_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
   wl_protocol_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
   wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',

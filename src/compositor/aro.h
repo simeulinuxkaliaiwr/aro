@@ -33,6 +33,7 @@
 struct wlr_scene_tree;
 struct wlr_scene_rect;
 struct wlr_scene_buffer;
+struct wlr_buffer;
 struct wlr_fbox;
 struct wlr_scene_layer_surface_v1;
 struct wlr_layer_surface_v1;
@@ -134,6 +135,7 @@ struct aro_view {
 	/* popups sit outside the clipped content */
 	struct wlr_scene_tree *popups;
 	struct qtext title;
+	struct wlr_scene_buffer *icon;  /* the app's icon, left of the title; NULL: none */
 
 	anim_box geo;                   /* current vs target geometry */
 	bool mapped;
@@ -405,6 +407,8 @@ struct aro_server {
 
 	struct wl_listener new_output;
 	struct wl_listener new_xdg_toplevel;
+	struct wlr_xdg_toplevel_icon_manager_v1 *toplevel_icons;
+	struct wl_listener set_toplevel_icon;
 	struct wl_listener new_xdg_popup;
 #ifdef ARO_XWAYLAND
 	struct wlr_xwayland *xwayland;
@@ -501,6 +505,8 @@ void ui_frame_geometry(struct aro_view *v, ly_box b);
 void ui_frame_content_box(struct aro_view *v, ly_box b, ly_box *out);
 void ui_frame_focus(struct aro_view *v, bool focused);
 void ui_frame_title(struct aro_view *v, int frame_w, float scale);
+/* the app's icon in the header; NULL takes it away */
+void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf);
 void ui_frame_clip_content(struct aro_view *v);
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen);
 void ui_frame_retheme(struct aro_view *v);

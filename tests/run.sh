@@ -296,6 +296,25 @@ config
 sleep 0.3
 alive
 
+# 4j. an app's icon is drawn in its header, left of the title
+client window 1 3 icon > "$T/icon.out" 2>&1 &
+CI=$!
+if wait_for "$T/icon.out" "1 windows open"; then
+	if command -v grim > /dev/null; then
+		sleep 0.5
+		# the frame's corner, then border 2, text padding 10, half the 16 px icon; half the 26 px header
+		read -r FX FY <<< "$(ctl windows | awk 'NR == 2 { g = ($1 == "*") ? $6 : $5; sub(/^[0-9]+x[0-9]+/, "", g); split(g, a, "+"); print a[2], a[3] }')"
+		px=$(env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$((FX + 20)),$((FY + 15)) 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n')
+		[ "$px" = "ff0000" ] && ok "app icon drawn in the header" || bad "app icon drawn in the header: pixel is '$px'"
+	else
+		echo "skip  app icon drawn in the header (no grim)"
+	fi
+else
+	bad "icon window did not open: $(cat "$T/icon.out")"
+fi
+wait "$CI"
+
 # 4i. aroctl subscribe: a line per change, and a subscriber that vanishes costs aro nothing
 ctl subscribe > "$T/sub.txt" 2>&1 &
 SUB=$!

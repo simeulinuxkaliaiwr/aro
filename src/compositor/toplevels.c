@@ -1,4 +1,4 @@
-/* toplevels.c: window lists for taskbars, docks and screen-sharing pickers */
+/* toplevels.c: window lists for taskbars, docks and screen-sharing pickers, and app icons */
 
 /* scene.h must come first */
 #include "scene.h"
@@ -6,10 +6,18 @@
 #include "bar.h"
 #include "aro.h"
 #include "core.h"
+#include "text.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_xdg_toplevel_icon_v1.h>
 
 /* ── foreign toplevel ──────────────────────────────────────────────────── */
 /*
@@ -158,3 +166,95 @@ int clock_tick(void *data)
 	wl_event_source_timer_update(s->clock_timer, 1000);
 	return 0;
 }
+
+/* ── app icons ─────────────────────────────────────────────────────────── */
+
+/* a theme icon name, looked up as a PNG in hicolor or pixmaps */
+static struct wlr_buffer *icon_by_name(const char *name)
+{
+	if (!name || !*name || strchr(name, '/'))
+		return NULL;
+	static const char *const sizes[] = {
+		"48x48", "64x64", "32x32", "128x128", "256x256", "24x24", "16x16",
+	};
+	/* $XDG_DATA_HOME, then $XDG_DATA_DIRS, with their usual defaults */
+	char dirs[4096];
+	const char *dh = getenv("XDG_DATA_HOME"), *dd = getenv("XDG_DATA_DIRS");
+	const char *home = getenv("HOME");
+	if (dh && *dh)
+		snprintf(dirs, sizeof dirs, "%s:", dh);
+	else
+		snprintf(dirs, sizeof dirs, "%s/.local/share:", home ? home : "");
+	size_t n = strlen(dirs);
+	snprintf(dirs + n, sizeof dirs - n, "%s", dd && *dd ? dd : "/usr/local/share:/usr/share");
+	char path[4096];
+	for (size_t i = 0; i < sizeof sizes / sizeof *sizes; i++) {
+		char *save = NULL, list[4096];
+		snprintf(list, sizeof list, "%s", dirs);
+		for (char *d = strtok_r(list, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
+			snprintf(path, sizeof path, "%s/icons/hicolor/%s/apps/%s.png", d, sizes[i], name);
+			struct wlr_buffer *b = ui_png_load(path);
+			if (b)
+				return b;
+		}
+	}
+	snprintf(path, sizeof path, "/usr/share/pixmaps/%s.png", name);
+	return ui_png_load(path);
+}
+
+static void set_icon(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, set_toplevel_icon);
+	struct wlr_xdg_toplevel_icon_manager_v1_set_icon_event *ev = data;
+	struct aro_view *v, *found = NULL;
+	wl_list_for_each(v, &s->views, link)
+		if (v->toplevel == ev->toplevel)
+			found = v;
+	if (!found)
+		return;
+	if (!ev->icon) {
+		ui_frame_icon(found, NULL);
+		return;
+	}
+
+	/* the smallest image that is sharp at twice the header's size, else the largest */
+	const int want = (s->cfg.theme.header_h - 10) * 2;
+	struct wlr_xdg_toplevel_icon_v1_buffer *ib, *best = NULL;
+	wl_list_for_each(ib, &ev->icon->buffers, link) {
+		int w = ib->buffer->width;
+		int bw = best ? best->buffer->width : 0;
+		if (!best || (bw < want ? w > bw : (w >= want && w < bw)))
+			best = ib;
+	}
+	if (best) {
+		ui_frame_icon(found, best->buffer);
+		return;
+	}
+	struct wlr_buffer *named = icon_by_name(ev->icon->name);
+	ui_frame_icon(found, named);
+	if (named)
+		wlr_buffer_drop(named);         /* the scene holds its own lock */
+}
+
+void toplevel_icons_init(struct aro_server *s)
+{
+	struct wlr_xdg_toplevel_icon_manager_v1 *m =
+		wlr_xdg_toplevel_icon_manager_v1_create(s->display, 1);
+	if (!m)
+		return;
+	/* the sizes a header wants: as drawn, and for a doubled screen */
+	int sz = s->cfg.theme.header_h - 10;
+	int sizes[] = { sz > 8 ? sz : 16, sz > 8 ? sz * 2 : 32 };
+	wlr_xdg_toplevel_icon_manager_v1_set_sizes(m, sizes, 2);
+	s->set_toplevel_icon.notify = set_icon;
+	wl_signal_add(&m->events.set_icon, &s->set_toplevel_icon);
+	s->toplevel_icons = m;
+}
+
+void toplevel_icons_finish(struct aro_server *s)
+{
+	if (s->toplevel_icons)
+		wl_list_remove(&s->set_toplevel_icon.link);
+	s->toplevel_icons = NULL;
+}
+

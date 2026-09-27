@@ -2366,6 +2366,7 @@ int main(int argc, char *argv[])
 	s.xdg_shell = wlr_xdg_shell_create(s.display, 3);
 	s.new_xdg_toplevel.notify = new_xdg_toplevel;
 	wl_signal_add(&s.xdg_shell->events.new_toplevel, &s.new_xdg_toplevel);
+	toplevel_icons_init(&s);
 	s.new_xdg_popup.notify = new_xdg_popup;
 	wl_signal_add(&s.xdg_shell->events.new_popup, &s.new_xdg_popup);
 
@@ -2593,6 +2594,7 @@ teardown:
 	protocols_finish(&s);
 	gestures_finish(&s);
 	touch_finish(&s);
+	toplevel_icons_finish(&s);
 	tablet_finish(&s);
 	s.pointer_constraints = NULL;
 	s.active_constraint = NULL;

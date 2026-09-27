@@ -55,6 +55,35 @@ static const struct wlr_buffer_impl cb_impl = {
 	.end_data_ptr_access = cb_end_data_ptr_access,
 };
 
+/* a PNG file as a buffer; NULL if it cannot be read */
+struct wlr_buffer *ui_png_load(const char *path)
+{
+	cairo_surface_t *png = cairo_image_surface_create_from_png(path);
+	if (cairo_surface_status(png) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(png);
+		return NULL;
+	}
+	/* whatever the file held, as premultiplied ARGB like everything else */
+	int w = cairo_image_surface_get_width(png), h = cairo_image_surface_get_height(png);
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_t *cr = cairo_create(surface);
+	cairo_set_source_surface(cr, png, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(png);
+	cairo_surface_flush(surface);
+
+	struct cairo_buffer *cb = calloc(1, sizeof *cb);
+	if (!cb || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		free(cb);
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	cb->surface = surface;
+	wlr_buffer_init(&cb->base, &cb_impl, w, h);
+	return &cb->base;
+}
+
 /* ── rendering ─────────────────────────────────────────────────────────── */
 
 static PangoLayout *layout_for(cairo_t *cr, const char *font, const char *text,

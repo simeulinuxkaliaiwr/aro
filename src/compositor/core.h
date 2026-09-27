@@ -120,6 +120,8 @@ void ftl_destroy(struct aro_view *v);
 void ftl_sync_activated(struct aro_server *s);
 void ftl_sync_view(struct aro_view *v);
 void ftl_update_ids(struct aro_view *v);
+void toplevel_icons_finish(struct aro_server *s);
+void toplevel_icons_init(struct aro_server *s);
 
 /* xwayland.c */
 #ifdef ARO_XWAYLAND

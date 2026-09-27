@@ -1,9 +1,10 @@
-/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game */
+/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
 #include "xdg-dialog-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "xdg-toplevel-icon-v1-client-protocol.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ static struct globals g;
 static struct win wins[MAX_WINDOWS];
 static struct xdg_wm_dialog_v1 *dialogs;
 static struct wp_tearing_control_manager_v1 *tearing;
+static struct xdg_toplevel_icon_manager_v1 *icons;
 
 static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t v)
 {
@@ -32,6 +34,8 @@ static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char
 		dialogs = wl_registry_bind(r, name, &xdg_wm_dialog_v1_interface, 1);
 	else if (!strcmp(iface, wp_tearing_control_manager_v1_interface.name))
 		tearing = wl_registry_bind(r, name, &wp_tearing_control_manager_v1_interface, 1);
+	else if (!strcmp(iface, xdg_toplevel_icon_manager_v1_interface.name))
+		icons = wl_registry_bind(r, name, &xdg_toplevel_icon_manager_v1_interface, 1);
 }
 
 static void reg_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
@@ -72,6 +76,9 @@ int main(int argc, char **argv)
 	int hold = argc > 2 ? atoi(argv[2]) : 3;
 	int modal = argc > 3 && !strcmp(argv[3], "modal");
 	int tear = argc > 3 && !strcmp(argv[3], "tear");
+	int icon = argc > 3 && !strcmp(argv[3], "icon");
+	const char *icon_name = argc > 4 && !strcmp(argv[3], "iconname") ? argv[4] : NULL;
+	icon |= icon_name != NULL;
 	if (n < 1 || n > MAX_WINDOWS)
 		fail("usage: window N HOLD [modal], N from 1 to %d", MAX_WINDOWS);
 	connect_globals(&g);
@@ -81,6 +88,8 @@ int main(int argc, char **argv)
 		fail("aro does not offer xdg-dialog");
 	if (tear && !tearing)
 		fail("aro does not offer tearing-control");
+	if (icon && !icons)
+		fail("aro does not offer xdg-toplevel-icon");
 
 	for (int i = 0; i < n; i++) {
 		struct win *w = &wins[i];
@@ -92,6 +101,15 @@ int main(int argc, char **argv)
 		xdg_toplevel_set_app_id(w->top, "aro-test");
 		if (modal && i == 0)
 			xdg_dialog_v1_set_modal(xdg_wm_dialog_v1_get_xdg_dialog(dialogs, w->top));
+		if (icon && i == 0) {
+			struct xdg_toplevel_icon_v1 *ic = xdg_toplevel_icon_manager_v1_create_icon(icons);
+			if (icon_name)
+				xdg_toplevel_icon_v1_set_name(ic, icon_name);
+			else
+				xdg_toplevel_icon_v1_add_buffer(ic, solid_buffer(&g, 32, 32, 0xffff0000), 1);
+			xdg_toplevel_icon_manager_v1_set_icon(icons, w->top, ic);
+			xdg_toplevel_icon_v1_destroy(ic);
+		}
 		if (tear && i == 0) {
 			xdg_toplevel_set_fullscreen(w->top, NULL);
 			wp_tearing_control_v1_set_presentation_hint(

@@ -138,6 +138,8 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 	wlr_scene_node_set_enabled(&v->bg->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->header->node, !fullscreen);
 	qtext_show(&v->title, !fullscreen);
+	if (v->icon)
+		wlr_scene_node_set_enabled(&v->icon->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->ring->node,
 	                           !fullscreen && v->server->focused == v);
 
@@ -167,6 +169,23 @@ void ui_frame_content_box(struct aro_view *v, ly_box b, ly_box *out)
 	if (ch < 1)
 		ch = 1;
 	*out = (ly_box){ b.x + bw, b.y + bw + hh, cw, ch };
+}
+
+/* an app icon's side in the header; 0 when the header is too short for one */
+static int icon_size(const struct q_theme *th)
+{
+	int sz = th->header_h - 10;
+	return sz >= 8 ? sz : 0;
+}
+
+/* where the title starts: after the icon, when there is one */
+static int title_x(struct aro_view *v)
+{
+	const struct q_theme *th = &v->server->cfg.theme;
+	int x = th->border + th->text_pad;
+	if (v->icon && icon_size(th))
+		x += icon_size(th) + th->text_pad / 2;
+	return x;
 }
 
 void ui_frame_geometry(struct aro_view *v, ly_box b)
@@ -222,6 +241,12 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 
 	wlr_scene_node_set_enabled(&v->header->node, hh > 0);
 	qtext_show(&v->title, hh > 0 && !v->fullscreen && !cut);
+	if (v->icon) {
+		/* the icon goes where the title goes */
+		const int isz = icon_size(th);
+		wlr_scene_node_set_enabled(&v->icon->node, isz && hh >= isz && !v->fullscreen && !cut);
+		wlr_scene_node_set_position(&v->icon->node, bw + th->text_pad, bw + (hh - isz) / 2);
+	}
 	place_rect(v->header, (ly_box){ bw, bw, inner_w, hh < inner_h ? hh : inner_h }, vis);
 
 	ly_box cb;
@@ -248,7 +273,7 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 			&(struct wlr_box){ shown.x, shown.y, shown.w, shown.h });
 
 	/* don't re-render title every frame */
-	qtext_move(&v->title, bw + th->text_pad, bw + (hh - v->title.h) / 2);
+	qtext_move(&v->title, title_x(v), bw + (hh - v->title.h) / 2);
 
 	/* configure client size */
 	/* X11 needs absolute position */
@@ -278,12 +303,37 @@ void ui_frame_focus(struct aro_view *v, bool focused)
 	          v->title.scale, v->title.max_w);
 }
 
+/* the app's icon in the header; NULL takes it away. The scene keeps its own lock */
+void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf)
+{
+	const struct q_theme *th = &v->server->cfg.theme;
+	if (v->icon) {
+		wlr_scene_node_destroy(&v->icon->node);
+		v->icon = NULL;
+	}
+	if (buf && icon_size(th)) {
+		v->icon = wlr_scene_buffer_create(v->frame_tree, buf);
+		if (v->icon) {
+			wlr_scene_node_place_above(&v->icon->node, &v->header->node);
+			wlr_scene_buffer_set_dest_size(v->icon, icon_size(th), icon_size(th));
+			wlr_scene_buffer_set_filter_mode(v->icon, WLR_SCALE_FILTER_BILINEAR);
+			/* shown where and when the title is */
+			wlr_scene_node_set_position(&v->icon->node, th->border + th->text_pad,
+			                            th->border + (th->header_h - icon_size(th)) / 2);
+			wlr_scene_node_set_enabled(&v->icon->node,
+				v->title.node && v->title.node->node.enabled);
+		}
+	}
+	if (v->mapped && v->output)
+		ui_frame_title(v, aro_view_box(v).w, v->output->scale);
+}
+
 /* update title using target width */
 void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
 	const char *title = view_title(v);
-	int avail = frame_w - th->border * 2 - th->text_pad * 2;
+	int avail = frame_w - title_x(v) - th->border - th->text_pad;
 	if (avail < 1)
 		avail = 1;
 
@@ -293,8 +343,7 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 	bool focused = v->server->focused == v;
 	qtext_set(&v->title, title ? title : "", focused ? th->accent : th->dim,
 	          scale, avail);
-	qtext_move(&v->title, th->border + th->text_pad,
-	           th->border + (th->header_h - v->title.h) / 2);
+	qtext_move(&v->title, title_x(v), th->border + (th->header_h - v->title.h) / 2);
 }
 
 /* ── snapshots ─────────────────────────────────────────────────────────── */

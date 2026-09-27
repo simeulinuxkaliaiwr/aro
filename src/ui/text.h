@@ -7,6 +7,7 @@
 
 struct wlr_scene_tree;
 struct wlr_scene_buffer;
+struct wlr_buffer;
 
 struct qtext {
 	struct wlr_scene_buffer *node;
@@ -32,5 +33,8 @@ void qtext_set_font(struct qtext *t, const char *font);
 void qtext_move(struct qtext *t, int x, int y);
 void qtext_show(struct qtext *t, bool visible);
 void qtext_finish(struct qtext *t);
+
+/* a PNG file as a buffer, to drop when done; NULL if it cannot be read */
+struct wlr_buffer *ui_png_load(const char *path);
 
 #endif
