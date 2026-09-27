@@ -3868,6 +3868,26 @@ static void run_action(struct aro_server *s, const struct q_bind *b)
 			aro_arrange(s);
 		}
 		return;
+	case Q_WIDTH:
+		if (f && f->node && f->output && !f->fullscreen &&
+		    ws_layout(s, f->output, f->workspace) == Q_LAYOUT_SCROLL &&
+		    s->cfg.nscroll_presets > 0) {
+			/* the next preset past the current width, wrapping round */
+			const double *p = s->cfg.scroll_presets;
+			const int n = s->cfg.nscroll_presets;
+			const double cur = column_share(s, f);
+			double to = b->num > 0 ? p[0] : p[n - 1];
+			for (int i = 0; i < n; i++) {
+				int k = b->num > 0 ? i : n - 1 - i;
+				if (b->num > 0 ? p[k] > cur + 0.01 : p[k] < cur - 0.01) {
+					to = p[k];
+					break;
+				}
+			}
+			column_set_share(f, to, 0);
+			aro_arrange(s);
+		}
+		return;
 	case Q_WORKSPACE:
 		workspace_show(s, b->num);
 		return;

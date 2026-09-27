@@ -282,6 +282,7 @@ replaces this table entirely.
 | `mod+o` | overview: every workspace, zoomed out |
 | `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll |
 | `mod+m` | scroll layout: column fills the screen, or goes back |
+| `mod+r` | scroll layout: next preset column width |
 | `mod+space` | toggle floating |
 | `mod+f` | toggle fullscreen |
 | `mod+1..4` | workspace |

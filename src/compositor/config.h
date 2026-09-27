@@ -64,6 +64,7 @@ enum q_action {
 	Q_MOVE_WS,      /* num: ly_edge; the current workspace to that monitor */
 	Q_STICKY,
 	Q_MAXIMIZE,     /* layout = scroll: the column fills the screen, or goes back */
+	Q_WIDTH,        /* layout = scroll, num: +1 next preset width, -1 previous */
 };
 
 struct q_bind {
@@ -178,6 +179,8 @@ struct aro_config {
 	/* layout = scroll */
 	double scroll_width;    /* a new column's width, as a share of the screen */
 	int scroll_peek;        /* pixels of the neighbouring columns left showing */
+	double scroll_presets[8];       /* what the width action steps through, ascending */
+	int nscroll_presets;
 	double tp_speed;        /* -1..1 */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */

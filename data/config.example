@@ -29,6 +29,8 @@ layout = dwindle
 # neighbouring columns stays visible (0 = whole columns only).
 scroll_width = 0.5
 scroll_peek = 40
+# the widths mod+r steps a column through
+scroll_presets = 0.333 0.5 0.667
 
 # per-workspace layout. mod+t cycles manual, dwindle, monocle and scroll for the
 # current workspace; bind `layout, monocle` to jump straight to one.
@@ -232,6 +234,7 @@ resize_step = 0.04          # resize amount per keypress
 #          move_workspace left|right|up|down   (to the monitor in that direction)
 #          sticky   (floating, on every workspace of its monitor)
 #          maximize (layout = scroll: the column fills the screen, or goes back)
+#          width next|prev   (layout = scroll: the next preset column width)
 #          workspace|sendto 1..32
 #          split right|down
 #          switch next|prev
@@ -246,6 +249,7 @@ bind = mod+shift+Tab, switch, prev
 bind = mod+t, layout, toggle
 bind = mod+o, overview
 bind = mod+m, maximize
+bind = mod+r, width, next
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

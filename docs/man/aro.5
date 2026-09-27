@@ -96,6 +96,12 @@ and
 change the focused column's width.
 Default: 0.5.
 .TP
+.BI "scroll_presets = " "share ..."
+The widths
+.B width
+steps a column through, up to eight.
+Default: 0.333 0.5 0.667.
+.TP
 .BI "scroll_peek = " pixels
 How much of the neighbouring columns stays visible at the screen's edges
 in the scroll layout; 0 shows whole columns only.
@@ -405,6 +411,15 @@ On a
 .B scroll
 workspace, widen the focused column to the whole screen; again, and it
 goes back to the width it had.
+.TP
+.BR width " [" next | prev ]
+On a
+.B scroll
+workspace, give the focused column the next wider
+.RB ( prev :
+narrower) width from
+.BR scroll_presets ,
+wrapping round at the end.
 .TP
 .B sticky
 Keep the focused window on every workspace of its monitor, floating; a

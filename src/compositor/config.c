@@ -237,6 +237,17 @@ bool config_parse_action(const char *name, const char *arg,
 		return true;
 	}
 
+	if (!strcasecmp(name, "width")) {
+		if (!arg || !*arg || !strcasecmp(arg, "next"))
+			*num = 1;
+		else if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "previous"))
+			*num = -1;
+		else
+			return false;
+		*action = Q_WIDTH;
+		return true;
+	}
+
 	if (!strcasecmp(name, "switch")) {
 		if (!arg || !*arg || !strcasecmp(arg, "next"))
 			*num = 1;
@@ -355,6 +366,7 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_t, Q_LAYOUT, Q_LAYOUT_TOGGLE, NULL);
 	bind_add(c, M, XKB_KEY_o, Q_OVERVIEW, 0, NULL);
 	bind_add(c, M, XKB_KEY_m, Q_MAXIMIZE, 0, NULL);
+	bind_add(c, M, XKB_KEY_r, Q_WIDTH, 1, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -405,6 +417,10 @@ void config_defaults(struct aro_config *c)
 	c->gesture_fingers = 3;
 	c->scroll_width = 0.5;
 	c->scroll_peek = 40;
+	c->scroll_presets[0] = 1.0 / 3;
+	c->scroll_presets[1] = 0.5;
+	c->scroll_presets[2] = 2.0 / 3;
+	c->nscroll_presets = 3;
 	c->bar = TH_BAR;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
@@ -1233,6 +1249,31 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_double(value, &d) && d >= 0.1 && d <= 1.0;
 			if (ok)
 				c->scroll_width = d;
+		} else if (!strcasecmp(key, "scroll_presets")) {
+			/* "0.333 0.5 0.667", ascending once read */
+			double p[8];
+			int n = 0;
+			char *save = NULL;
+			ok = true;
+			for (char *tok = strtok_r(value, " ,", &save); tok && ok;
+			     tok = strtok_r(NULL, " ,", &save)) {
+				double d;
+				ok = n < 8 && parse_double(tok, &d) && d >= 0.1 && d <= 1.0;
+				if (ok)
+					p[n++] = d;
+			}
+			ok = ok && n > 0;
+			for (int i = 1; ok && i < n; i++)
+				for (int j = i; j > 0 && p[j] < p[j - 1]; j--) {
+					double t = p[j];
+					p[j] = p[j - 1];
+					p[j - 1] = t;
+				}
+			if (ok) {
+				for (int i = 0; i < n; i++)
+					c->scroll_presets[i] = p[i];
+				c->nscroll_presets = n;
+			}
 		} else if (!strcasecmp(key, "scroll_peek")) {
 			int n;
 			ok = parse_int(value, &n) && n >= 0 && n <= 400;

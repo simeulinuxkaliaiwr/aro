@@ -254,6 +254,13 @@ if wait_for "$T/scroll.out" "4 windows open"; then
 	read bx bw <<< "$(geo "$f")"
 	[ "$mw" -ge 1200 ] && [ "$mx" -ge 0 ] && [ $((mx + mw)) -le 1280 ] && [ "$bw" = "$fw2" ] && ok "scroll: maximize fills the screen and goes back" \
 		|| bad "scroll: maximize fills the screen and goes back ($fw2 -> $mx+$mw -> $bw)"
+	# presets 1/3, 1/2, 2/3 of 1262: from the resized width, next is 2/3, then round to 1/3
+	ctl dispatch width > /dev/null; sleep 0.2
+	read px pw1 <<< "$(geo "$f")"
+	ctl dispatch width > /dev/null; sleep 0.2
+	read px pw2 <<< "$(geo "$f")"
+	[ "$pw1" = 841 ] && [ "$pw2" = 421 ] && ok "scroll: width steps through the presets" \
+		|| bad "scroll: width steps through the presets ($fw2 -> $pw1 -> $pw2)"
 	ctl dispatch workspace 2 > /dev/null; sleep 0.2
 	ctl dispatch workspace 1 > /dev/null; sleep 0.3
 	[ "$(focus_id)" = "$f" ] && ok "scroll: coming back keeps the column" || bad "scroll: coming back keeps the column"
