@@ -19,7 +19,7 @@ struct wlr_scene_buffer;
 
 struct switcher_tile {
 	struct wlr_scene_rect *edge, *bg, *ring;
-	struct wlr_scene_buffer *preview;       /* NULL: no buffer to show */
+	struct ui_snap *preview;        /* NULL: no buffer to show */
 	struct qtext title;
 	ly_box box;                             /* relative to the card */
 };

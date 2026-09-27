@@ -259,17 +259,6 @@ static void buf_place(struct wlr_scene_buffer *sb, struct wlr_fbox src,
 	wlr_scene_node_set_position(&sb->node, vis.x, vis.y);
 }
 
-static void snap_place(struct wlr_scene_buffer *sb, struct aro_view *v,
-                       ly_box b, ly_box clip)
-{
-	struct wlr_fbox src;
-	if (!ui_snapshot_src(v, &src)) {
-		wlr_scene_node_set_enabled(&sb->node, false);
-		return;
-	}
-	buf_place(sb, src, b, clip);
-}
-
 /* a wallpaper: a mapped background-layer surface on this output */
 static bool is_wall(struct aro_layer *l, struct aro_output *o)
 {
@@ -394,7 +383,7 @@ static bool item_add(struct aro_server *s, struct ov_output *oo,
 		if (!it->edge || !it->bg)
 			return false;
 	}
-	it->snap = ui_snapshot_create(oo->tree, v, 1, 1, chrome ? ri : 0);
+	it->snap = ui_snap_create(oo->tree, v, chrome ? ri : 0);
 	if (chrome) {
 		it->ring = rect(oo->tree, th->accent_soft, 0);
 		if (!it->ring)
@@ -1004,7 +993,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 				wlr_scene_node_set_enabled(&it->ring->node, false);
 			}
 			if (it->snap)
-				wlr_scene_node_set_enabled(&it->snap->node, false);
+				wlr_scene_node_set_enabled(ui_snap_node(it->snap), false);
 			it->drawn = (ly_box){ 0 };
 			continue;
 		}
@@ -1027,7 +1016,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		it->drawn = dragged ? (ly_box){ 0 } : b;        /* not a drop target */
 		if (!it->chrome) {
 			if (it->snap)
-				snap_place(it->snap, v, b, cl);
+				ui_snap_place(it->snap, b, cl);
 			continue;
 		}
 
@@ -1040,7 +1029,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		ly_box cb;
 		ui_frame_content_box(v, real, &cb);
 		if (it->snap)
-			snap_place(it->snap, v, dragged ? carry(real, cb, b)
+			ui_snap_place(it->snap, dragged ? carry(real, cb, b)
 			           : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p), cl);
 
 		ly_box in = inset(b, bw);
@@ -1179,7 +1168,7 @@ static bool drag_begin(struct aro_server *s)
 	if (it->bg)
 		wlr_scene_node_reparent(&it->bg->node, ov->drag_tree);
 	if (it->snap)
-		wlr_scene_node_reparent(&it->snap->node, ov->drag_tree);
+		wlr_scene_node_reparent(ui_snap_node(it->snap), ov->drag_tree);
 	if (it->ring)
 		wlr_scene_node_reparent(&it->ring->node, ov->drag_tree);
 
@@ -1364,7 +1353,7 @@ void overview_view_commit(struct aro_server *s, struct aro_view *v)
 			overview_rebuild(s);    /* its first buffer */
 			return;
 		}
-		ui_snapshot_update(it->snap, v);
+		ui_snap_sync(it->snap, v);
 		wlr_output_schedule_frame(v->output->wlr_output);
 		return;
 	}

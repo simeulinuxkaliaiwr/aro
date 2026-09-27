@@ -278,6 +278,21 @@ wait "$CF"
 alive
 config
 
+# 4f4. the overview shows a window's subsurfaces too, not just its main surface (Firefox)
+client window 2 4 sub > "$T/sub.out" 2>&1 &
+CU=$!
+if wait_for "$T/sub.out" "2 windows open" && command -v grim > /dev/null; then
+	ctl dispatch overview > /dev/null
+	sleep 0.8
+	red=$(env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 grim -t ppm - 2>/dev/null \
+		| tail -c +17 | od -An -tx1 -v -w3 | grep -c ' ff 00 00')
+	[ "$red" -gt 1000 ] && ok "overview shows subsurfaces ($red red pixels)" \
+		|| bad "overview shows subsurfaces: $red red pixels"
+	ctl dispatch overview > /dev/null
+fi
+wait "$CU"
+alive
+
 # 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
 # focus follows mouse too: aro moving the pointer after a key press must not steal focus back
 config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"

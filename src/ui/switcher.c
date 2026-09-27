@@ -284,7 +284,7 @@ static bool card_build(struct aro_server *s)
 		set_radius(t->edge, th->radius);
 		set_radius(t->bg, inner_radius(th));
 
-		t->preview = ui_snapshot_create(w->tree, v, pw, ph, inner_radius(th));
+		t->preview = ui_snap_create(w->tree, v, inner_radius(th));
 		t->ring = rect(w->tree, th->accent_soft);   /* over the preview */
 		if (!t->ring || !qtext_init(&t->title, w->tree, th->font_small)) {
 			tiles_free(w);
@@ -295,9 +295,10 @@ static bool card_build(struct aro_server *s)
 		rect_place(t->edge, t->box.x, t->box.y, t->box.w, t->box.h);
 		rect_place(t->bg, t->box.x + bw, t->box.y + bw, pw, ph);
 		rect_place(t->ring, t->box.x + bw, t->box.y + bw, pw, 1);
-		if (t->preview)
-			wlr_scene_node_set_position(&t->preview->node,
-			                            t->box.x + bw, t->box.y + bw);
+		if (t->preview) {
+			const ly_box pb = { t->box.x + bw, t->box.y + bw, pw, ph };
+			ui_snap_place(t->preview, pb, pb);
+		}
 
 		tile_colors(s, t, v, w->first + i == w->sel);
 		title_h = max_i(title_h, t->title.h);

@@ -452,67 +452,154 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale)
 
 /* ── snapshots ─────────────────────────────────────────────────────────── */
 
-/* buffer crop to the window geometry (no CSD shadow); false: no buffer */
-bool ui_snapshot_src(struct aro_view *v, struct wlr_fbox *out)
-{
-	struct wlr_surface *surf = view_surface(v);
-	if (!surf || !surf->buffer)
-		return false;
-	struct wlr_buffer *buf = &surf->buffer->base;
-	*out = (struct wlr_fbox){ 0, 0, buf->width, buf->height };
+/* a copy of a window: a buffer per surface, subsurfaces too (Firefox draws its page in one) */
+#define SNAP_PARTS 16
 
+struct snap_part {
+	struct wlr_scene_buffer *buf;
+	struct wlr_fbox src;            /* in buffer pixels */
+	double x, y, w, h;              /* from the window's top-left, logical */
+};
+
+struct ui_snap {
+	struct wlr_scene_tree *tree;
+	struct wl_listener destroy;
+	int radius, n;
+	double gw, gh;                  /* the window's size when copied */
+	struct snap_part part[SNAP_PARTS];
+};
+
+static void snap_destroyed(struct wl_listener *l, void *data)
+{
+	(void)data;
+	struct ui_snap *s = wl_container_of(l, s, destroy);
+	wl_list_remove(&s->destroy.link);
+	free(s);
+}
+
+struct snap_walk {
+	struct ui_snap *s;
+	int i;
+};
+
+static void snap_collect(struct wlr_scene_buffer *b, int sx, int sy, void *data)
+{
+	struct snap_walk *w = data;
+	struct ui_snap *s = w->s;
+	if (!b->buffer || w->i == SNAP_PARTS)
+		return;
+	struct snap_part *p = &s->part[w->i];
+	if (!p->buf) {
+		p->buf = wlr_scene_buffer_create(s->tree, b->buffer);
+		if (!p->buf)
+			return;
+	} else if (p->buf->buffer != b->buffer) {
+		wlr_scene_buffer_set_buffer(p->buf, b->buffer);
+	}
+	const bool whole = wlr_fbox_empty(&b->src_box);
+	p->src = whole ? (struct wlr_fbox){ 0, 0, b->buffer->width, b->buffer->height } : b->src_box;
+	p->x = sx;
+	p->y = sy;
+	p->w = b->dst_width > 0 ? b->dst_width : b->buffer->width;
+	p->h = b->dst_height > 0 ? b->dst_height : b->buffer->height;
+	w->i++;
+}
+
+/* copy the window's surfaces as they are now */
+void ui_snap_sync(struct ui_snap *s, struct aro_view *v)
+{
+	if (!s || !v->surface_tree)
+		return;
 	struct wlr_box g = { 0 };
 	view_geometry(v, &g);
-	float sc = surf->current.scale > 0 ? (float)surf->current.scale : 1.0f;
-	if (g.width <= 0 || g.height <= 0)
-		return true;
-	struct wlr_fbox src = { g.x * sc, g.y * sc, g.width * sc, g.height * sc };
-	if (src.x < 0)
-		src.x = 0;
-	if (src.y < 0)
-		src.y = 0;
-	if (src.x + src.width > buf->width)
-		src.width = buf->width - src.x;
-	if (src.y + src.height > buf->height)
-		src.height = buf->height - src.y;
-	if (src.width > 0 && src.height > 0)
-		*out = src;
-	return true;
+	struct snap_walk w = { s, 0 };
+	wlr_scene_node_for_each_buffer(&v->surface_tree->node, snap_collect, &w);
+	if (w.i == 0)
+		return;         /* nothing drawn yet: keep the last copy */
+	for (int i = w.i; i < s->n; i++) {
+		wlr_scene_node_destroy(&s->part[i].buf->node);
+		s->part[i].buf = NULL;
+	}
+	s->n = w.i;
+	/* no geometry: the main surface's size */
+	s->gw = g.width > 0 ? g.width : s->part[0].w;
+	s->gh = g.height > 0 ? g.height : s->part[0].h;
 }
 
-/* the window's current buffer; the scene holds a lock on it */
-struct wlr_scene_buffer *ui_snapshot_create(struct wlr_scene_tree *parent,
-                                            struct aro_view *v, int w, int h,
-                                            int radius)
+struct ui_snap *ui_snap_create(struct wlr_scene_tree *parent, struct aro_view *v,
+                               int radius)
 {
-	struct wlr_surface *surf = view_surface(v);
-	if (!surf || !surf->buffer)
+	struct ui_snap *s = calloc(1, sizeof *s);
+	if (!s)
 		return NULL;
-
-	struct wlr_buffer *buf = &surf->buffer->base;
-	struct wlr_scene_buffer *b = wlr_scene_buffer_create(parent, buf);
-	if (!b)
+	s->tree = wlr_scene_tree_create(parent);
+	if (!s->tree) {
+		free(s);
 		return NULL;
+	}
+	s->radius = radius;
+	s->destroy.notify = snap_destroyed;
+	wl_signal_add(&s->tree->node.events.destroy, &s->destroy);
+	ui_snap_sync(s, v);
+	if (s->n == 0) {
+		wlr_scene_node_destroy(&s->tree->node);         /* frees s */
+		return NULL;
+	}
+	return s;
+}
 
-	struct wlr_fbox src;
-	if (ui_snapshot_src(v, &src))
-		wlr_scene_buffer_set_source_box(b, &src);
-	wlr_scene_buffer_set_dest_size(b, w, h);
+struct wlr_scene_node *ui_snap_node(struct ui_snap *s)
+{
+	return &s->tree->node;
+}
+
+/* lay the copy out in box b, cut to clip (in the parent's coordinates) */
+void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip)
+{
+	if (b.w < 1 || b.h < 1 || s->gw <= 0 || s->gh <= 0) {
+		wlr_scene_node_set_enabled(&s->tree->node, false);
+		return;
+	}
+	wlr_scene_node_set_enabled(&s->tree->node, true);
+	ly_box keep;
+	if (!box_meet(b, clip, &keep)) {
+		wlr_scene_node_set_enabled(&s->tree->node, false);
+		return;
+	}
+	const double kx = b.w / s->gw, ky = b.h / s->gh;
+	for (int i = 0; i < s->n; i++) {
+		struct snap_part *p = &s->part[i];
+		ly_box d = {
+			b.x + (int)(p->x * kx + 0.5), b.y + (int)(p->y * ky + 0.5),
+			(int)(p->w * kx + 0.5), (int)(p->h * ky + 0.5),
+		};
+		ly_box vis;
+		if (d.w < 1 || d.h < 1 || !box_meet(d, keep, &vis)) {
+			wlr_scene_node_set_enabled(&p->buf->node, false);
+			continue;
+		}
+		struct wlr_fbox cut = {
+			p->src.x + (double)(vis.x - d.x) / d.w * p->src.width,
+			p->src.y + (double)(vis.y - d.y) / d.h * p->src.height,
+			(double)vis.w / d.w * p->src.width,
+			(double)vis.h / d.h * p->src.height,
+		};
+		wlr_scene_node_set_enabled(&p->buf->node, true);
+		wlr_scene_buffer_set_source_box(p->buf, &cut);
+		wlr_scene_buffer_set_dest_size(p->buf, vis.w, vis.h);
+		wlr_scene_node_set_position(&p->buf->node, vis.x, vis.y);
 #ifdef ARO_EFFECTS
-	if (radius > 0)
-		wlr_scene_buffer_set_corner_radius(b, radius);
-#else
-	(void)radius;
+		/* round what reaches the corners; a cut edge stays square */
+		const bool whole = vis.x == b.x && vis.y == b.y && vis.w == b.w && vis.h == b.h;
+		wlr_scene_buffer_set_corner_radius(p->buf, whole ? s->radius : 0);
 #endif
-	return b;
+	}
 }
 
-/* after a commit: show the new buffer */
-void ui_snapshot_update(struct wlr_scene_buffer *b, struct aro_view *v)
+void ui_snap_opacity(struct ui_snap *s, float a)
 {
-	struct wlr_surface *surf = view_surface(v);
-	if (b && surf && surf->buffer)
-		wlr_scene_buffer_set_buffer_with_damage(b, &surf->buffer->base, NULL);
+	for (int i = 0; i < s->n; i++)
+		wlr_scene_buffer_set_opacity(s->part[i].buf, a);
 }
 
 /* ── the drop indicator ────────────────────────────────────────────────── */

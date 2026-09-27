@@ -29,7 +29,7 @@ struct ov_item {
 	struct aro_view *view;
 	int slot;                       /* index into the output's cards */
 	struct wlr_scene_rect *edge, *bg, *ring;
-	struct wlr_scene_buffer *snap;
+	struct ui_snap *snap;
 	bool chrome;                    /* false for fullscreen */
 	ly_box drawn;
 };

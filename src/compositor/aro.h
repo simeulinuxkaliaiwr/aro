@@ -531,11 +531,12 @@ void ui_frame_retheme(struct aro_view *v);
 void ui_color(uint32_t rgba, float out[4]);
 
 /* a window's buffer as a scene node; shared by switcher and overview */
-bool ui_snapshot_src(struct aro_view *v, struct wlr_fbox *out);
-struct wlr_scene_buffer *ui_snapshot_create(struct wlr_scene_tree *parent,
-                                            struct aro_view *v, int w, int h,
-                                            int radius);
-void ui_snapshot_update(struct wlr_scene_buffer *b, struct aro_view *v);
+struct ui_snap;
+struct ui_snap *ui_snap_create(struct wlr_scene_tree *parent, struct aro_view *v, int radius);
+void ui_snap_sync(struct ui_snap *s, struct aro_view *v);
+void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip);
+void ui_snap_opacity(struct ui_snap *s, float a);
+struct wlr_scene_node *ui_snap_node(struct ui_snap *s);
 
 /* drop preview */
 bool ui_preview_create(struct aro_preview *p, struct aro_server *s);

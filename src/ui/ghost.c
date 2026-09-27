@@ -20,7 +20,7 @@ struct aro_ghost {
 	struct wlr_scene_rect *edge[4]; /* one hollow rect with scenefx */
 	struct wlr_scene_rect *bg;
 	struct wlr_scene_rect *ring;    /* focused only */
-	struct wlr_scene_buffer *snap;
+	struct ui_snap *snap;
 	struct qtext title;
 	bool has_title;
 
@@ -102,8 +102,9 @@ static void ghost_place(struct aro_ghost *g, double p)
 	wlr_scene_node_set_position(&g->tree->node, b.x, b.y);
 
 	if (g->fullscreen) {
-		wlr_scene_buffer_set_dest_size(g->snap, b.w, b.h);
-		wlr_scene_buffer_set_opacity(g->snap, a);
+		const ly_box all = { 0, 0, b.w, b.h };
+		ui_snap_place(g->snap, all, all);
+		ui_snap_opacity(g->snap, a);
 		return;
 	}
 
@@ -138,9 +139,9 @@ static void ghost_place(struct aro_ghost *g, double p)
 		rect_alpha(g->ring, g->ring_col, a);
 	}
 
-	wlr_scene_node_set_position(&g->snap->node, bw, bw + hh);
-	wlr_scene_buffer_set_dest_size(g->snap, iw, max_i(ih - hh, 1));
-	wlr_scene_buffer_set_opacity(g->snap, a);
+	const ly_box cb = { bw, bw + hh, iw, max_i(ih - hh, 1) };
+	ui_snap_place(g->snap, cb, cb);
+	ui_snap_opacity(g->snap, a);
 
 	if (g->has_title) {
 		qtext_move(&g->title, bw + g->text_pad, bw + (hh - g->title.h) / 2);
@@ -207,8 +208,7 @@ void ghost_spawn(struct aro_server *s, struct aro_view *v, ly_box from)
 			g->ring = rect(g->tree, g->ring_col);
 	}
 
-	int sw = g->fullscreen ? from.w : cb.w, sh = g->fullscreen ? from.h : cb.h;
-	g->snap = ui_snapshot_create(g->tree, v, sw, sh, g->fullscreen ? 0 : inner);
+	g->snap = ui_snap_create(g->tree, v, g->fullscreen ? 0 : inner);
 
 	bool ok = g->snap != NULL;
 	if (!g->fullscreen) {
