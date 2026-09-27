@@ -38,6 +38,37 @@ The focused window; fails if there is none.
 .B reload
 Read the config again and print any problems.
 .TP
+.B subscribe
+Print a line for each change until aro exits, for bar modules and scripts:
+.RS
+.TP
+.BI "focus " "id app_id title"
+The focused window, or
+.B focus -
+for none.
+.TP
+.BI "open " "id app_id title" "\fR, \fPtitle " "id app_id title" "\fR, \fPclose " id
+A window appeared, was renamed, or went.
+.TP
+.BI "moved " "id output workspace"
+A window is somewhere new; it follows every
+.BR open .
+.TP
+.BI "workspace " "output workspace" "\fR, \fPlayout " "output workspace name"
+A monitor shows another workspace, or its layout changed.
+.TP
+.BR "monitor add" | remove " \fIname\fP"
+A monitor came or went.
+.RE
+.IP
+Empty fields are
+.BR - .
+With
+.BR -j ,
+each line is a JSON object with an
+.B event
+key.
+.TP
 .BR wallpaper " [" \fIfile\fP | auto | none ]
 Show
 .I file
@@ -96,6 +127,7 @@ aroctl -j monitors | jq '.[].name'
 aroctl dispatch spawn foot --server
 aroctl wallpaper "$(find ~/pictures -name '*.jpg' | shuf -n 1)"
 aroctl log -f
+aroctl subscribe | while read -r ev rest; do ...; done
 .fi
 .SH SEE ALSO
 .BR aro (1),

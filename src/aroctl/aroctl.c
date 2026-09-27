@@ -42,6 +42,10 @@ static void usage(FILE *f)
 	        "                      show FILE, aro's own art or nothing, until the\n"
 	        "                      config's wallpaper line changes; alone, prints\n"
 	        "                      what is shown\n"
+	        "  subscribe           print a line for each change, until aro exits:\n"
+	        "                        focus ID APP_ID TITLE, open, title, close ID,\n"
+	        "                        moved ID OUTPUT WS, workspace OUTPUT WS,\n"
+	        "                        layout OUTPUT WS NAME, monitor add|remove NAME\n"
 	        "  dispatch ACTION     run an action, written as in a bind line:\n"
 	        "                        dispatch focus left\n"
 	        "                        dispatch workspace 3\n"
@@ -185,6 +189,57 @@ static int exchange(int fd, const char *req, char **reply, const char **body)
 	else
 		fprintf(stderr, "aroctl: unexpected reply: %s\n", r);
 	return 1;
+}
+
+/* ── aroctl subscribe ──────────────────────────────────────────────────── */
+
+/* print events as they come, until aro goes away */
+static int do_subscribe(int fd, bool json)
+{
+	const char *req = json ? "json subscribe\n" : "text subscribe\n";
+	if (!send_all(fd, req, strlen(req))) {
+		fprintf(stderr, "aroctl: could not send the request: %s\n", strerror(errno));
+		close(fd);
+		return 1;
+	}
+	shutdown(fd, SHUT_WR);
+
+	char buf[4096], status[256];
+	size_t slen = 0;
+	bool started = false;
+	for (;;) {
+		ssize_t n = read(fd, buf, sizeof buf);
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n <= 0)
+			break;
+		size_t off = 0;
+		/* the status line first: ok, or why not */
+		while (!started && off < (size_t)n) {
+			char ch = buf[off++];
+			if (ch != '\n') {
+				if (slen + 1 < sizeof status)
+					status[slen++] = ch;
+				continue;
+			}
+			status[slen] = '\0';
+			if (strcmp(status, "ok")) {
+				fprintf(stderr, "aroctl: %s\n", !strncmp(status, "error ", 6) ? status + 6 : status);
+				close(fd);
+				return 1;
+			}
+			started = true;
+		}
+		if (off < (size_t)n && fwrite(buf + off, 1, (size_t)n - off, stdout) != (size_t)n - off)
+			break;          /* stdout closed: nobody is listening */
+		fflush(stdout);
+	}
+	close(fd);
+	if (!started) {
+		fprintf(stderr, "aroctl: aro closed the connection without a reply\n");
+		return 1;
+	}
+	return 0;
 }
 
 /* ── aroctl log ────────────────────────────────────────────────────────── */
@@ -397,6 +452,23 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 		argv[i + 1] = wp;
+	}
+
+	if (!strcmp(argv[i], "subscribe")) {
+		if (i + 1 < argc) {
+			fprintf(stderr, "aroctl: subscribe takes no arguments\n");
+			return 2;
+		}
+		if (!sock) {
+			fprintf(stderr, "aroctl: ARO_SOCKET is not set; is aro running? (or pass -s PATH)\n");
+			return 1;
+		}
+		int fd = open_socket(sock);
+		if (fd < 0) {
+			fprintf(stderr, "aroctl: cannot reach aro at %s: %s\n", sock, strerror(errno));
+			return 1;
+		}
+		return do_subscribe(fd, json);
 	}
 
 	/* the request line */

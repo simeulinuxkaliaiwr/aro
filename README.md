@@ -47,6 +47,9 @@ says "this is the window you are in".
   order; a quick tap swaps back without the card ever appearing.
 - **Live config.** Saving the file applies immediately; a line that does
   not parse says so on screen, with its line number.
+- **Scriptable.** `aroctl` lists windows, workspaces and monitors, runs
+  any action, and `aroctl subscribe` prints a line for each change, for
+  bar modules and scripts.
 - **Its own wallpaper**, drawn by `aropaper` at each screen's exact
   resolution, and a status bar that steps aside on its own when waybar or
   quickshell starts.

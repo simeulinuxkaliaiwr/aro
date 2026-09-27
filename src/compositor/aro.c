@@ -125,6 +125,7 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 	keyboard_focus_changed(s);
 	ftl_sync_activated(s);
 	mru_focus(s, s->focused);
+	ipc_notify(s);
 }
 
 static void focus_apply(struct aro_server *s, struct aro_view *v)
@@ -1466,6 +1467,7 @@ void view_set_title(struct wl_listener *l, void *data)
 	(void)data;
 	if (!v->mapped || !v->output)
 		return;
+	ipc_notify(v->server);
 
 	/* reapply rules on title change */
 	view_rules_reapply(v);
@@ -1485,6 +1487,7 @@ void view_set_app_id(struct wl_listener *l, void *data)
 	(void)data;
 	if (!v->mapped || !v->output)
 		return;
+	ipc_notify(v->server);
 	view_rules_reapply(v);
 	ftl_update_ids(v);
 }

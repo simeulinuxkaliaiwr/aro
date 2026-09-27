@@ -7,7 +7,8 @@
  *     text|json <command> [args]\n
  *
  * The reply's first line is `ok` or `error <message>`; the body follows
- * and the server closes the connection.
+ * and the server closes the connection. `subscribe` is the exception: after
+ * `ok` the connection stays open and carries one line per change.
  */
 #ifndef ARO_IPC_H
 #define ARO_IPC_H
@@ -19,6 +20,9 @@ struct aro_server;
 /* create the socket and set ARO_SOCKET; false (and s->ipc NULL) on failure,
  * which is logged and otherwise harmless: aro runs without aroctl */
 bool ipc_init(struct aro_server *s, const char *wl_socket);
+
+/* something a subscriber may care about changed; reported once aro is idle */
+void ipc_notify(struct aro_server *s);
 
 /* close every connection, remove the socket */
 void ipc_finish(struct aro_server *s);

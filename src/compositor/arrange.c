@@ -8,6 +8,7 @@
 #include "aro.h"
 #include "core.h"
 #include "idle.h"
+#include "ipc.h"
 
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_seat.h>
@@ -463,6 +464,7 @@ void aro_arrange(struct aro_server *s)
 {
 	uint32_t now = aro_now_ms();
 	slides_reap(s, now);
+	ipc_notify(s);          /* whatever moved, subscribers hear once aro is idle */
 
 	/* arrange each output's current workspace */
 	struct aro_output *o;

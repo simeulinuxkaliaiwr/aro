@@ -296,6 +296,34 @@ config
 sleep 0.3
 alive
 
+# 4i. aroctl subscribe: a line per change, and a subscriber that vanishes costs aro nothing
+ctl subscribe > "$T/sub.txt" 2>&1 &
+SUB=$!
+ctl -j subscribe > "$T/sub.json" 2>&1 &
+SUBJ=$!
+ctl subscribe > /dev/null 2>&1 &
+GONE=$!
+sleep 0.3
+kill "$GONE" 2> /dev/null
+client window 1 2 > "$T/subwin.out" 2>&1 &
+CS=$!
+if wait_for "$T/subwin.out" "1 windows open"; then
+	ctl dispatch layout monocle > /dev/null
+	ctl dispatch workspace 2 > /dev/null
+	ctl dispatch workspace 1 > /dev/null
+	ctl dispatch layout manual > /dev/null
+fi
+wait "$CS"
+sleep 0.3
+alive
+for ev in "^open [0-9]* aro-test" "^focus [0-9]* aro-test" "^layout [^ ]* 1 monocle" "^workspace [^ ]* 2" "^close [0-9]*" "^focus -"; do
+	grep -q "$ev" "$T/sub.txt" && ok "subscribe: $ev" || bad "subscribe: $ev (got: $(tr '\n' '|' < "$T/sub.txt"))"
+done
+! grep -qv '^{"event":"[a-z]*".*}$' "$T/sub.json" && grep -q '"event":"open","id":[0-9]*,"app_id":"aro-test"' "$T/sub.json" \
+	&& ok "subscribe: JSON lines" || bad "subscribe: JSON lines"
+kill "$SUB" "$SUBJ" 2> /dev/null
+wait "$SUB" "$SUBJ" 2> /dev/null
+
 # 4h. aroctl wallpaper: a file, relative to aroctl, kept over a reload until the config's line changes
 printf 'x' > "$T/wp.png"
 [ "$(ctl wallpaper)" = none ] && ok "wallpaper: shows the config's" || bad "wallpaper: shows the config's"

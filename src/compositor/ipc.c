@@ -7,8 +7,9 @@
  * A listening unix socket on the event loop. Each connection carries one
  * request line; the whole reply is built in memory, written (resuming on
  * EAGAIN if it does not fit the socket buffer), and the connection closed.
- * No subscriptions yet, so nothing here outlives a request by more than
- * the time it takes the client to read the reply.
+ * A subscriber's connection stays open instead: after each burst of
+ * changes, aro compares what it shows with what it showed last time and
+ * sends a line per difference.
  *
  * Text replies are for people: aligned columns, a header, the focused row
  * marked. JSON is for scripts: one line, every field, pipe it to jq.
@@ -43,7 +44,8 @@
 #endif
 
 #define IPC_MAX_REQ     4096    /* one request line, newline included */
-#define IPC_MAX_CONNS   32      /* beyond this a new connection is refused */
+#define IPC_MAX_CONNS   64      /* beyond this a new connection is refused */
+#define IPC_MAX_BACKLOG (1 << 20)       /* a subscriber this far behind is dropped */
 #define IPC_TIMEOUT_MS  2000    /* a client that stalls is dropped */
 
 /* ── a growable string ─────────────────────────────────────────────────── */
@@ -152,6 +154,7 @@ struct req {
 	bool json;
 	const char *args;       /* after the command word; "" when none */
 	struct sbuf *body;
+	bool subscribe;         /* keep the connection open for events */
 	char err[256];          /* set = the reply is `error <err>` */
 };
 
@@ -626,6 +629,12 @@ static void cmd_log(struct req *r)
 	}
 }
 
+/* the reply is only `ok`; the connection then carries events */
+static void cmd_subscribe(struct req *r)
+{
+	r->subscribe = true;
+}
+
 static const struct {
 	const char *name;
 	void (*fn)(struct req *r);
@@ -640,11 +649,14 @@ static const struct {
 	{ "dispatch",   cmd_dispatch,   true },
 	{ "wallpaper",  cmd_wallpaper,  true },
 	{ "log",        cmd_log,        false },
+	{ "subscribe",  cmd_subscribe,  false },
 	{ "version",    cmd_version,    false },
 };
 
-/* one request line in, the whole reply out: status line, then body */
-static void ipc_handle(struct aro_server *s, char *line, struct sbuf *out)
+/* one request line in, the whole reply out: status line, then body;
+ * *json and *subscribe say how a subscription should be fed */
+static void ipc_handle(struct aro_server *s, char *line, struct sbuf *out,
+                       bool *json, bool *subscribe)
 {
 	struct sbuf body = { 0 };
 	struct req r = { .s = s, .body = &body, .args = "" };
@@ -709,9 +721,31 @@ reply:
 			sb_put(out, body.d, body.len);
 	}
 	free(body.d);
+	*json = r.json;
+	*subscribe = r.subscribe && !r.err[0];
 }
 
 /* ── connections ───────────────────────────────────────────────────────── */
+
+/* what subscribers were last told about */
+struct snap_view {
+	uint32_t id;
+	char *app_id, *title, *output;
+	int ws;
+};
+
+struct snap_output {
+	char *name;
+	int ws, layout;
+};
+
+struct snap {
+	struct snap_view *views;
+	int nviews;
+	struct snap_output *outputs;
+	int noutputs;
+	uint32_t focus;                 /* 0: nothing focused */
+};
 
 struct aro_ipc {
 	struct aro_server *s;
@@ -720,6 +754,10 @@ struct aro_ipc {
 	char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 	struct wl_list conns;           /* ipc_conn.link */
 	int nconns;
+
+	int nsubs;
+	struct wl_event_source *idle;   /* a report is due */
+	struct snap last;               /* valid while nsubs > 0 */
 };
 
 struct ipc_conn {
@@ -735,10 +773,17 @@ struct ipc_conn {
 	bool replying;
 	struct sbuf out;
 	size_t out_off;
+
+	bool sub, sub_json;             /* subscribed: stays open for events */
 };
+
+static void snap_free(struct snap *sn);
+static void snap_take(struct aro_server *s, struct snap *sn);
 
 static void conn_close(struct ipc_conn *c)
 {
+	if (c->sub && --c->ipc->nsubs == 0)
+		snap_free(&c->ipc->last);
 	if (c->src)
 		wl_event_source_remove(c->src);
 	if (c->timer)
@@ -770,6 +815,12 @@ static void conn_flush(struct ipc_conn *c)
 		}
 		break;                  /* EPIPE and friends: nobody to tell */
 	}
+	if (c->sub && c->out_off == c->out.len) {
+		/* all sent: wait for the next event, hearing only a hang-up */
+		c->out.len = c->out_off = 0;
+		wl_event_source_fd_update(c->src, 0);
+		return;
+	}
 	conn_close(c);
 }
 
@@ -784,13 +835,23 @@ static void conn_reply(struct ipc_conn *c)
 		c->in[n - 1] = '\0';
 
 	c->replying = true;
-	ipc_handle(c->ipc->s, c->in, &c->out);
+	bool json = false, subscribe = false;
+	ipc_handle(c->ipc->s, c->in, &c->out, &json, &subscribe);
 	if (c->out.oom) {
 		/* not even room for the error: say something short, once */
 		static const char msg[] = "error out of memory\n";
 		send(c->fd, msg, sizeof msg - 1, MSG_NOSIGNAL);
 		conn_close(c);
 		return;
+	}
+	if (subscribe) {
+		struct aro_ipc *ipc = c->ipc;
+		if (ipc->nsubs++ == 0)
+			snap_take(ipc->s, &ipc->last);  /* changes from here on */
+		c->sub = true;
+		c->sub_json = json;
+		wl_event_source_remove(c->timer);       /* may wait forever */
+		c->timer = NULL;
 	}
 	conn_flush(c);
 }
@@ -896,6 +957,233 @@ static int ipc_accept(int fd, uint32_t mask, void *data)
 	}
 }
 
+/* ── events ────────────────────────────────────────────────────────────── */
+
+static char *dup_or_empty(const char *s)
+{
+	return strdup(s ? s : "");
+}
+
+static void snap_free(struct snap *sn)
+{
+	for (int i = 0; i < sn->nviews; i++) {
+		free(sn->views[i].app_id);
+		free(sn->views[i].title);
+		free(sn->views[i].output);
+	}
+	for (int i = 0; i < sn->noutputs; i++)
+		free(sn->outputs[i].name);
+	free(sn->views);
+	free(sn->outputs);
+	*sn = (struct snap){ 0 };
+}
+
+/* what aro shows right now; on failure, an empty snapshot */
+static void snap_take(struct aro_server *s, struct snap *sn)
+{
+	*sn = (struct snap){ 0 };
+	int nv = 0, no = 0;
+	struct aro_view *v;
+	struct aro_output *o;
+	wl_list_for_each(v, &s->views, link)
+		nv += v->mapped;
+	wl_list_for_each(o, &s->outputs, link)
+		no++;
+	sn->views = calloc(nv ? nv : 1, sizeof *sn->views);
+	sn->outputs = calloc(no ? no : 1, sizeof *sn->outputs);
+	if (!sn->views || !sn->outputs) {
+		snap_free(sn);
+		return;
+	}
+	wl_list_for_each(v, &s->views, link) {
+		if (!v->mapped)
+			continue;
+		struct snap_view *sv = &sn->views[sn->nviews++];
+		sv->id = v->id;
+		sv->app_id = dup_or_empty(view_app_id(v));
+		sv->title = dup_or_empty(view_title(v));
+		sv->output = dup_or_empty(v->output ? v->output->wlr_output->name : NULL);
+		sv->ws = v->workspace;
+	}
+	wl_list_for_each(o, &s->outputs, link) {
+		struct snap_output *so = &sn->outputs[sn->noutputs++];
+		so->name = dup_or_empty(o->wlr_output->name);
+		so->ws = o->cur_ws;
+		so->layout = aro_ws_layout(o, o->cur_ws);
+	}
+	sn->focus = s->focused && s->focused->mapped ? s->focused->id : 0;
+}
+
+static struct snap_view *snap_view(struct snap *sn, uint32_t id)
+{
+	for (int i = 0; i < sn->nviews; i++)
+		if (sn->views[i].id == id)
+			return &sn->views[i];
+	return NULL;
+}
+
+static struct snap_output *snap_output(struct snap *sn, const char *name)
+{
+	for (int i = 0; i < sn->noutputs; i++)
+		if (!strcmp(sn->outputs[i].name, name))
+			return &sn->outputs[i];
+	return NULL;
+}
+
+/* one event, as a text line and a JSON line, to every subscriber */
+struct event {
+	struct sbuf text, json;
+};
+
+static void ev_begin(struct event *e, const char *name)
+{
+	sb_puts(&e->text, name);
+	sb_puts(&e->json, "{\"event\":");
+	sb_json_str(&e->json, name);
+}
+
+/* a word in the text line; the last one may hold spaces */
+static void ev_str(struct event *e, const char *key, const char *val)
+{
+	char clean[512];
+	text_clean(clean, sizeof clean, val && *val ? val : "-");
+	sb_printf(&e->text, " %s", clean);
+	sb_printf(&e->json, ",\"%s\":", key);
+	sb_json_str(&e->json, val);
+}
+
+static void ev_int(struct event *e, const char *key, long val)
+{
+	sb_printf(&e->text, " %ld", val);
+	sb_printf(&e->json, ",\"%s\":%ld", key, val);
+}
+
+static void ev_send(struct aro_ipc *ipc, struct event *e)
+{
+	sb_puts(&e->text, "\n");
+	sb_puts(&e->json, "}\n");
+	struct ipc_conn *c, *tmp;
+	wl_list_for_each_safe(c, tmp, &ipc->conns, link) {
+		if (!c->sub)
+			continue;
+		struct sbuf *line = c->sub_json ? &e->json : &e->text;
+		if (line->oom || c->out.len - c->out_off + line->len > IPC_MAX_BACKLOG) {
+			wlr_log(WLR_INFO, "ipc: dropping a subscriber that stopped reading");
+			conn_close(c);
+			continue;
+		}
+		sb_put(&c->out, line->d, line->len);
+		conn_flush(c);
+	}
+	free(e->text.d);
+	free(e->json.d);
+	*e = (struct event){ 0 };
+}
+
+static void ev_view(struct aro_ipc *ipc, const char *name, const struct snap_view *v)
+{
+	struct event e = { 0 };
+	ev_begin(&e, name);
+	ev_int(&e, "id", v->id);
+	ev_str(&e, "app_id", v->app_id);
+	ev_str(&e, "title", v->title);
+	ev_send(ipc, &e);
+}
+
+/* tell subscribers what changed since they were last told */
+static void report(void *data)
+{
+	struct aro_ipc *ipc = data;
+	ipc->idle = NULL;
+	if (!ipc->nsubs)
+		return;
+	/* ours now: a subscriber dropped below must not free it under us */
+	struct snap old = ipc->last, now, *was = &old;
+	ipc->last = (struct snap){ 0 };
+	snap_take(ipc->s, &now);
+	struct event e = { 0 };
+
+	for (int i = 0; i < now.noutputs; i++)
+		if (!snap_output(was, now.outputs[i].name)) {
+			ev_begin(&e, "monitor");
+			ev_str(&e, "change", "add");
+			ev_str(&e, "name", now.outputs[i].name);
+			ev_send(ipc, &e);
+		}
+	for (int i = 0; i < was->noutputs; i++)
+		if (!snap_output(&now, was->outputs[i].name)) {
+			ev_begin(&e, "monitor");
+			ev_str(&e, "change", "remove");
+			ev_str(&e, "name", was->outputs[i].name);
+			ev_send(ipc, &e);
+		}
+
+	for (int i = 0; i < now.nviews; i++) {
+		struct snap_view *n = &now.views[i], *w = snap_view(was, n->id);
+		if (!w) {
+			ev_view(ipc, "open", n);
+		} else if (strcmp(n->title, w->title) || strcmp(n->app_id, w->app_id)) {
+			ev_view(ipc, "title", n);
+		}
+		if (!w || strcmp(n->output, w->output) || n->ws != w->ws) {
+			ev_begin(&e, "moved");
+			ev_int(&e, "id", n->id);
+			ev_str(&e, "output", n->output);
+			ev_int(&e, "workspace", n->ws + 1);
+			ev_send(ipc, &e);
+		}
+	}
+	for (int i = 0; i < was->nviews; i++)
+		if (!snap_view(&now, was->views[i].id)) {
+			ev_begin(&e, "close");
+			ev_int(&e, "id", was->views[i].id);
+			ev_send(ipc, &e);
+		}
+
+	for (int i = 0; i < now.noutputs; i++) {
+		struct snap_output *n = &now.outputs[i], *w = snap_output(was, n->name);
+		if (!w || n->ws != w->ws) {
+			ev_begin(&e, "workspace");
+			ev_str(&e, "output", n->name);
+			ev_int(&e, "workspace", n->ws + 1);
+			ev_send(ipc, &e);
+		}
+		if (!w || n->ws != w->ws || n->layout != w->layout) {
+			ev_begin(&e, "layout");
+			ev_str(&e, "output", n->name);
+			ev_int(&e, "workspace", n->ws + 1);
+			ev_str(&e, "layout", config_layout_name(n->layout));
+			ev_send(ipc, &e);
+		}
+	}
+
+	if (now.focus != was->focus) {
+		struct snap_view *f = snap_view(&now, now.focus);
+		if (f) {
+			ev_view(ipc, "focus", f);
+		} else {
+			ev_begin(&e, "focus");  /* nothing: "focus -", "id":null */
+			sb_puts(&e.text, " -");
+			sb_puts(&e.json, ",\"id\":null");
+			ev_send(ipc, &e);
+		}
+	}
+
+	snap_free(&old);
+	if (ipc->nsubs)
+		ipc->last = now;
+	else
+		snap_free(&now);        /* the last subscriber went while we sent */
+}
+
+void ipc_notify(struct aro_server *s)
+{
+	struct aro_ipc *ipc = s->ipc;
+	if (!ipc || !ipc->nsubs || ipc->idle)
+		return;
+	ipc->idle = wl_event_loop_add_idle(s->loop, report, ipc);
+}
+
 /* ── setup ─────────────────────────────────────────────────────────────── */
 
 bool ipc_init(struct aro_server *s, const char *wl_socket)
@@ -979,6 +1267,8 @@ void ipc_finish(struct aro_server *s)
 	struct ipc_conn *c, *tmp;
 	wl_list_for_each_safe(c, tmp, &ipc->conns, link)
 		conn_close(c);
+	if (ipc->idle)
+		wl_event_source_remove(ipc->idle);
 
 	wl_event_source_remove(ipc->src);
 	close(ipc->fd);
