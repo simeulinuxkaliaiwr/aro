@@ -364,6 +364,10 @@ struct aro_server {
 
 	/* aropaper, run as the `wallpaper` key says */
 	struct aro_wallpaper wallpaper;
+	/* aroctl wallpaper: wins until the config's wallpaper line changes */
+	bool wallpaper_set;
+	enum q_wallpaper wallpaper_mode;
+	char *wallpaper_file;
 
 	/* aroctl: ipc.c; NULL if the socket could not be made */
 	struct aro_ipc *ipc;
@@ -461,6 +465,8 @@ bool aro_view_clipped(struct aro_view *v);
 bool aro_same_column(struct aro_view *a, struct aro_view *b);
 void aro_focus_at_cursor(struct aro_server *s);
 void aro_config_reload(struct aro_server *s);
+/* for ipc.c: aroctl wallpaper; file is absolute, Q_WALLPAPER_FILE only */
+bool aro_wallpaper_set(struct aro_server *s, enum q_wallpaper mode, const char *file);
 /* tiling area: usable minus our bar */
 ly_box aro_output_usable(struct aro_output *o);
 /* where the frame is going (view_target): output box, fbox or leaf box */

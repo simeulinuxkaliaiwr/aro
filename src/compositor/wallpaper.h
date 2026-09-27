@@ -39,7 +39,7 @@ void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop,
  * same setting as last time leaves a running aropaper alone. One that
  * exited on its own is started again, so saving the config is the retry.
  */
-void wallpaper_apply(struct aro_wallpaper *w, const struct aro_config *c);
+void wallpaper_apply(struct aro_wallpaper *w, enum q_wallpaper mode, const char *file);
 
 /* stop it and free everything; before the event loop goes */
 void wallpaper_finish(struct aro_wallpaper *w);

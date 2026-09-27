@@ -99,6 +99,7 @@ monitor * {
 # auto draws aro's own wallpaper. a path draws that instead (png, jpeg, svg;
 # ~ works). none draws nothing: use it to run swaybg or similar yourself.
 # aro runs aropaper for you and restarts it when this line changes.
+# `aroctl wallpaper FILE` changes it on the fly, e.g. from a shuffle script.
 wallpaper = auto
 # wallpaper = ~/pictures/wallpaper.jpg
 

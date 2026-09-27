@@ -519,6 +519,39 @@ static void cmd_reload(struct req *r)
 		sb_printf(r->body, "%s\n", s->cfg.errors[i]);
 }
 
+/* "wallpaper": what is shown; "wallpaper auto|none|/abs/file": show that */
+static void cmd_wallpaper(struct req *r)
+{
+	struct aro_server *s = r->s;
+	const char *a = r->args;
+	while (isspace((unsigned char)*a))
+		a++;
+	if (*a) {
+		enum q_wallpaper mode = !strcasecmp(a, "auto") ? Q_WALLPAPER_AUTO
+		                      : !strcasecmp(a, "none") ? Q_WALLPAPER_NONE
+		                      : Q_WALLPAPER_FILE;
+		if (mode == Q_WALLPAPER_FILE && *a != '/') {
+			req_fail(r, "wallpaper needs an absolute path, auto or none");
+			return;
+		}
+		if (!aro_wallpaper_set(s, mode, a)) {
+			req_fail(r, "out of memory");
+			return;
+		}
+	}
+	enum q_wallpaper mode = s->wallpaper_set ? s->wallpaper_mode : s->cfg.wallpaper;
+	const char *file = s->wallpaper_set ? s->wallpaper_file : s->cfg.wallpaper_file;
+	const char *shown = mode == Q_WALLPAPER_AUTO ? "auto"
+	                  : mode == Q_WALLPAPER_NONE ? "none" : file ? file : "";
+	if (r->json) {
+		sb_puts(r->body, "{\"wallpaper\":");
+		sb_json_str(r->body, shown);
+		sb_puts(r->body, "}\n");
+	} else {
+		sb_printf(r->body, "%s\n", shown);
+	}
+}
+
 static void cmd_dispatch(struct req *r)
 {
 	/* "focus left", "spawn foot --server", "workspace 3" */
@@ -605,6 +638,7 @@ static const struct {
 	{ "focused",    cmd_focused,    false },
 	{ "reload",     cmd_reload,     false },
 	{ "dispatch",   cmd_dispatch,   true },
+	{ "wallpaper",  cmd_wallpaper,  true },
 	{ "log",        cmd_log,        false },
 	{ "version",    cmd_version,    false },
 };

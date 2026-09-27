@@ -38,6 +38,15 @@ The focused window; fails if there is none.
 .B reload
 Read the config again and print any problems.
 .TP
+.BR wallpaper " [" \fIfile\fP | auto | none ]
+Show
+.I file
+(resolved from the current directory), aro's own wallpaper, or nothing.
+It holds over reloads until the config's
+.B wallpaper
+line changes.
+Alone, print what is shown.
+.TP
 .BI dispatch " action " \fR[\fIargument\fR]
 Run an action, written as in a
 .B bind
@@ -85,6 +94,7 @@ Set by aro for every program it starts.
 .nf
 aroctl -j monitors | jq '.[].name'
 aroctl dispatch spawn foot --server
+aroctl wallpaper "$(find ~/pictures -name '*.jpg' | shuf -n 1)"
 aroctl log -f
 .fi
 .SH SEE ALSO

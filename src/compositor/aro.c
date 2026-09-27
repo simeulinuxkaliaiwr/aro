@@ -5509,11 +5509,41 @@ static void cursor_theme_apply(struct aro_server *s)
 	pointer_motion_common(s, aro_now_ms());
 }
 
+/* aroctl's wallpaper if it set one, else the config's */
+static void wallpaper_sync(struct aro_server *s)
+{
+	if (s->wallpaper_set)
+		wallpaper_apply(&s->wallpaper, s->wallpaper_mode, s->wallpaper_file);
+	else
+		wallpaper_apply(&s->wallpaper, s->cfg.wallpaper, s->cfg.wallpaper_file);
+}
+
+bool aro_wallpaper_set(struct aro_server *s, enum q_wallpaper mode, const char *file)
+{
+	char *copy = NULL;
+	if (mode == Q_WALLPAPER_FILE && (!file || !(copy = strdup(file))))
+		return false;
+	free(s->wallpaper_file);
+	s->wallpaper_file = copy;
+	s->wallpaper_mode = mode;
+	s->wallpaper_set = true;
+	wallpaper_sync(s);
+	return true;
+}
+
 static void config_reload(struct aro_server *s)
 {
 	struct aro_config nc;
 	config_defaults(&nc);
 	config_load(&nc, s->cfg_path);
+
+	/* a changed wallpaper line wins over aroctl's */
+	const bool wp_changed = nc.wallpaper != s->cfg.wallpaper ||
+		(nc.wallpaper == Q_WALLPAPER_FILE &&
+		 strcmp(nc.wallpaper_file ? nc.wallpaper_file : "",
+		        s->cfg.wallpaper_file ? s->cfg.wallpaper_file : ""));
+	if (wp_changed)
+		s->wallpaper_set = false;
 
 	/* old layouts, for changed-only reset */
 	enum q_layout was[ARO_MAX_WS];
@@ -5587,7 +5617,7 @@ static void config_reload(struct aro_server *s)
 	monitors_reapply(s);
 
 	/* after the error toasts are redrawn, or they would clear its own */
-	wallpaper_apply(&s->wallpaper, &s->cfg);
+	wallpaper_sync(s);
 
 	for (int i = 0; i < s->cfg.nexec_always; i++)
 		config_spawn(s->cfg.exec_always[i]);
@@ -6118,7 +6148,7 @@ int main(int argc, char *argv[])
 
 	/* before exec lines: the wallpaper is the first thing to come up */
 	wallpaper_init(&s.wallpaper, s.loop, wallpaper_report, &s);
-	wallpaper_apply(&s.wallpaper, &s.cfg);
+	wallpaper_sync(&s);
 
 	for (int i = 0; i < s.cfg.nexec; i++)
 		config_spawn(s.cfg.exec[i]);
@@ -6133,6 +6163,7 @@ int main(int argc, char *argv[])
 	ipc_finish(&s);
 	/* likewise its pidfds; and aropaper goes before the clients do */
 	wallpaper_finish(&s.wallpaper);
+	free(s.wallpaper_file);
 
 teardown:
 	/* teardown order matters */

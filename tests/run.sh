@@ -296,6 +296,22 @@ config
 sleep 0.3
 alive
 
+# 4h. aroctl wallpaper: a file, relative to aroctl, kept over a reload until the config's line changes
+printf 'x' > "$T/wp.png"
+[ "$(ctl wallpaper)" = none ] && ok "wallpaper: shows the config's" || bad "wallpaper: shows the config's"
+w=$(cd "$T" && ctl wallpaper wp.png)
+[ "$w" = "$(realpath "$T/wp.png")" ] && ok "wallpaper: a relative file is set" || bad "wallpaper: a relative file is set ($w)"
+ctl reload > /dev/null
+[ "$(ctl wallpaper)" = "$w" ] && ok "wallpaper: a reload keeps it" || bad "wallpaper: a reload keeps it"
+config "wallpaper = auto"
+sleep 0.3
+[ "$(ctl wallpaper)" = auto ] && ok "wallpaper: a changed config line wins" || bad "wallpaper: a changed config line wins"
+ctl wallpaper "$T/missing.png" > /dev/null 2>&1 && bad "wallpaper: a missing file is refused" \
+	|| ok "wallpaper: a missing file is refused"
+config
+sleep 0.3
+alive
+
 # 4f. a bound mouse button runs its action: the back button goes to workspace 3
 config "bind = mouse_back, workspace, 3" "bind = mod+Return, spawn, foot"
 sleep 0.3

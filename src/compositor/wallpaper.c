@@ -268,10 +268,10 @@ void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop,
 	wl_list_init(&w->children);
 }
 
-void wallpaper_apply(struct aro_wallpaper *w, const struct aro_config *c)
+void wallpaper_apply(struct aro_wallpaper *w, enum q_wallpaper mode, const char *file)
 {
-	enum q_wallpaper mode = c->wallpaper;
-	const char *file = mode == Q_WALLPAPER_FILE ? c->wallpaper_file : NULL;
+	if (mode != Q_WALLPAPER_FILE)
+		file = NULL;
 
 	bool same = mode == w->mode &&
 	            (mode != Q_WALLPAPER_FILE ||

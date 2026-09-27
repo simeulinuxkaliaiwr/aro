@@ -11,13 +11,14 @@
  * first line is `ok` or `error <message>`; the body follows. No wlroots,
  * no libwayland: this is a socket and a line of text.
  */
-#define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE /* realpath */
 
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -37,6 +38,10 @@ static void usage(FILE *f)
 	        "  windows             every window, * marks the focused one\n"
 	        "  focused             the focused window; fails if there is none\n"
 	        "  reload              re-read the config; prints any problems\n"
+	        "  wallpaper [FILE|auto|none]\n"
+	        "                      show FILE, aro's own art or nothing, until the\n"
+	        "                      config's wallpaper line changes; alone, prints\n"
+	        "                      what is shown\n"
 	        "  dispatch ACTION     run an action, written as in a bind line:\n"
 	        "                        dispatch focus left\n"
 	        "                        dispatch workspace 3\n"
@@ -377,6 +382,23 @@ int main(int argc, char *argv[])
 	if (!strcmp(argv[i], "log"))
 		return do_log(sock, sock_given, json, argc, argv, i + 1);
 
+	/* aro runs elsewhere: a wallpaper path must mean the same file there */
+	char *wp = NULL;
+	if (!strcmp(argv[i], "wallpaper") && i + 1 < argc &&
+	    strcasecmp(argv[i + 1], "auto") && strcasecmp(argv[i + 1], "none")) {
+		if (i + 2 < argc) {
+			fprintf(stderr, "aroctl: wallpaper takes one file (quote a path with spaces)\n");
+			return 2;
+		}
+		wp = realpath(argv[i + 1], NULL);
+		if (!wp || access(wp, R_OK) != 0) {
+			fprintf(stderr, "aroctl: %s: %s\n", argv[i + 1], strerror(errno));
+			free(wp);
+			return 1;
+		}
+		argv[i + 1] = wp;
+	}
+
 	/* the request line */
 	size_t len = strlen(json ? "json" : "text") + 1;
 	for (int j = i; j < argc; j++)
@@ -397,6 +419,7 @@ int main(int argc, char *argv[])
 		strcat(req, argv[j]);
 	}
 	strcat(req, "\n");
+	free(wp);
 
 	if (!sock) {
 		fprintf(stderr, "aroctl: ARO_SOCKET is not set; is aro running? "
