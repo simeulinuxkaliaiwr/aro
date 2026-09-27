@@ -55,8 +55,9 @@ says "this is the window you are in".
 - **Its own wallpaper**, drawn by `aropaper` at each screen's exact
   resolution, and a status bar (workspaces, title, battery, clock) that
   steps aside on its own when waybar or quickshell starts.
-- **Window rules**, monitor configuration, an exit prompt, and rounded
-  corners through [SceneFX](https://github.com/wlrfx/scenefx). Layer shell,
+- **Window rules**, monitor configuration, an exit prompt, rounded
+  corners and blur behind see-through windows through [SceneFX](https://github.com/wlrfx/scenefx),
+  and opacity for focused and unfocused windows. Layer shell,
   XWayland, session lock, idle inhibit, clipboard, drag and drop,
   screencopy and xdg-decoration all work, and so do drawing tablets and
   touchscreens: apps that take touch get it, and elsewhere a finger is a

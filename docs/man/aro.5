@@ -348,6 +348,43 @@ notify_color|0x12161deb|on-screen messages
 scrim_color|0x0c0f13b3|behind the quit prompt
 overview_tint|0x0c0f1366|over the wallpaper in the overview
 .TE
+.SS See-through windows
+.TP
+.BI "opacity = " number ", opacity_unfocused = " number
+From 0.05 to 1: the focused window's opacity, and every other one's.
+A fullscreen window is always solid.
+Rules can set their own with
+.B opacity
+and
+.BR opacity_unfocused .
+Default: 1.
+.TP
+.BR window_background " = auto | \fIcolour\fP"
+What shows behind an app's see-through parts, such as a terminal with a
+translucent background.
+.B auto
+is the frame colour;
+.B 00000000
+shows what is behind the window.
+Default: auto.
+.TP
+.BI "blur = " bool
+Blur what shows through see-through windows.
+Needs a SceneFX build, which the Vulkan renderer (and so
+.BR hdr )
+is not, and costs GPU time on every frame.
+Default: false.
+.TP
+.BI "blur_passes = " n ", blur_radius = " n
+How smooth and how wide the blur is, 1 to 10 and 1 to 100; the overview's
+blur uses them too.
+Default: 2 and 5.
+.TP
+.BI "blur_layers = " "namespace ..."
+Layer surfaces to blur behind, by namespace, as globs: bars, launchers,
+notifications.
+.B aroctl
+does not list namespaces; the log does, as each surface maps.
 .SH MOTION
 .TS
 tab(|);
@@ -427,7 +464,11 @@ or
 .B no_header
 and
 .BR no_radius ,
-which take that part of the window's frame away.
+which take that part of the window's frame away,
+or
+.BI opacity " n"
+and
+.BI opacity_unfocused " n"\fR.
 Rules apply top to bottom, the last one winning, whenever a window opens,
 changes title or app_id, or the config is reloaded.
 .PP

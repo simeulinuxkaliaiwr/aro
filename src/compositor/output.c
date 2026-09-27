@@ -81,6 +81,7 @@ static void output_frame(struct wl_listener *l, void *data)
 		if (anim_box_tick(&v->geo, now))
 			moving = true;
 		ui_frame_geometry(v, view_draw_box(v, now));
+		ui_frame_hold_opacity(v);
 	}
 
 	if (notify_tick(s, now))

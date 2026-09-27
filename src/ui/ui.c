@@ -58,6 +58,31 @@ static int inner_radius(struct aro_view *v)
 	return r > 0 ? r : 0;
 }
 
+/* this window's opacity: a rule's, else the config's; fullscreen is solid */
+static float frame_opacity(struct aro_view *v, bool f)
+{
+	if (v->fullscreen)
+		return 1.0f;
+	const struct aro_config *c = &v->server->cfg;
+	const double r = v->rule_opacity[f ? 0 : 1];
+	return (float)(r > 0 ? r : f ? c->opacity : c->opacity_unfocused);
+}
+
+/* what shows behind the content: window_background, else the frame colour */
+static uint32_t frame_bg(struct aro_view *v, bool focused)
+{
+	const struct aro_config *c = &v->server->cfg;
+	return c->win_bg_set ? c->win_bg : focused ? c->theme.frame_on : c->theme.frame;
+}
+
+/* ui_color, faded by a */
+static void color_faded(uint32_t rgba, float a, float out[4])
+{
+	ui_color(rgba, out);
+	for (int i = 0; i < 4; i++)
+		out[i] *= a;
+}
+
 /* hollow out border ring; at is where the border rect starts after edge clipping */
 static void clip_border(struct aro_view *v, ly_box at, int inner_w, int inner_h)
 {
@@ -91,24 +116,45 @@ static ly_box place_rect(struct wlr_scene_rect *r, ly_box want, ly_box vis)
 	return got;
 }
 
-#ifdef ARO_EFFECTS
-static void round_buffer(struct wlr_scene_buffer *buffer, int sx, int sy,
-                         void *data)
+struct paint {
+	int radius;
+	float alpha;
+};
+
+static void paint_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data)
 {
 	(void)sx; (void)sy;
-	wlr_scene_buffer_set_corner_radius(buffer, *(int *)data);
-}
+	const struct paint *p = data;
+#ifdef ARO_EFFECTS
+	wlr_scene_buffer_set_corner_radius(buffer, p->radius);
 #endif
+	wlr_scene_buffer_set_opacity(buffer, p->alpha);
+}
 
-/* round client content corners */
+static void paint_content(struct aro_view *v, float alpha)
+{
+	struct paint p = { v->fullscreen ? 0 : inner_radius(v), alpha };
+	wlr_scene_node_for_each_buffer(&v->content->node, paint_buffer, &p);
+}
+
+static void hold_opacity(struct wlr_scene_buffer *buffer, int sx, int sy, void *data)
+{
+	(void)sx; (void)sy;
+	wlr_scene_buffer_set_opacity(buffer, *(float *)data);
+}
+
+/* before each frame: a surface commit puts its buffer back to opaque */
+void ui_frame_hold_opacity(struct aro_view *v)
+{
+	float a = frame_opacity(v, v->server->focused == v);
+	if (a < 1.0f)
+		wlr_scene_node_for_each_buffer(&v->content->node, hold_opacity, &a);
+}
+
+/* round client content corners and fade it; new buffers come with each commit */
 void ui_frame_clip_content(struct aro_view *v)
 {
-#ifdef ARO_EFFECTS
-	int radius = v->fullscreen ? 0 : inner_radius(v);
-	wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
-#else
-	(void)v;
-#endif
+	paint_content(v, frame_opacity(v, v->server->focused == v));
 }
 
 bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
@@ -119,6 +165,14 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 	v->frame_tree = wlr_scene_tree_create(parent);
 	if (!v->frame_tree)
 		return false;
+
+#ifdef ARO_EFFECTS
+	/* first, so it is under everything else in the frame */
+	v->blur = wlr_scene_blur_create(v->frame_tree, 1, 1);
+	if (!v->blur)
+		return false;
+	wlr_scene_node_set_enabled(&v->blur->node, false);
+#endif
 
 	ui_color(th->line, col);
 	v->frame = wlr_scene_rect_create(v->frame_tree, 1, 1, col);
@@ -153,6 +207,48 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 	return true;
 }
 
+#ifdef ARO_EFFECTS
+/* see-through: faded, or showing what is behind through window_background */
+static bool frame_see_through(struct aro_view *v, bool focused)
+{
+	return frame_opacity(v, focused) < 1.0f || (!v->fullscreen && (frame_bg(v, focused) & 0xff) < 0xff);
+}
+
+/* the blur covers the frame, or the part of it that may be drawn */
+static void place_blur(struct aro_view *v, ly_box vis, int radius)
+{
+	wlr_scene_node_set_position(&v->blur->node, vis.x, vis.y);
+	wlr_scene_blur_set_size(v->blur, vis.w, vis.h);
+	wlr_scene_blur_set_corner_radius(v->blur, radius);
+}
+#endif
+
+/* colours and opacity for focus; blur behind when it can be seen */
+static void frame_paint(struct aro_view *v, bool focused)
+{
+	const struct q_theme *th = &v->server->cfg.theme;
+	const float a = frame_opacity(v, focused);
+	float col[4];
+
+	color_faded(focused ? th->accent : th->line, a, col);
+	wlr_scene_rect_set_color(v->frame, col);
+	color_faded(frame_bg(v, focused), a, col);
+	wlr_scene_rect_set_color(v->bg, col);
+	color_faded(focused ? th->frame_on : th->frame, a, col);
+	wlr_scene_rect_set_color(v->header, col);
+	color_faded(th->accent_soft, a, col);
+	wlr_scene_rect_set_color(v->ring, col);
+	if (v->title.node)
+		wlr_scene_buffer_set_opacity(v->title.node, a);
+	if (v->icon)
+		wlr_scene_buffer_set_opacity(v->icon, a);
+	paint_content(v, a);
+#ifdef ARO_EFFECTS
+	wlr_scene_node_set_enabled(&v->blur->node,
+		v->server->cfg.blur && frame_see_through(v, focused));
+#endif
+}
+
 /* hide chrome in fullscreen */
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 {
@@ -164,12 +260,7 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 		wlr_scene_node_set_enabled(&v->icon->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->ring->node, !fullscreen &&
 	                           v->server->focused == v && ui_frame_border(v) > 0);
-
-#ifdef ARO_EFFECTS
-	/* no rounded corners in fullscreen */
-	int radius = fullscreen ? 0 : inner_radius(v);
-	wlr_scene_node_for_each_buffer(&v->content->node, round_buffer, &radius);
-#endif
+	frame_paint(v, v->server->focused == v);        /* square and solid in fullscreen */
 }
 
 /* content box inside frame */
@@ -220,6 +311,9 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 
 	if (v->fullscreen) {
 		wlr_scene_node_set_position(&v->frame_tree->node, b.x, b.y);
+#ifdef ARO_EFFECTS
+		place_blur(v, (ly_box){ 0, 0, b.w, b.h }, 0);
+#endif
 		wlr_scene_node_set_enabled(&v->content->node, true);   /* edge clipping may have hidden it */
 		wlr_scene_node_set_position(&v->content->node, 0, 0);
 		wlr_scene_node_set_position(&v->popups->node, 0, 0);
@@ -248,6 +342,9 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 	const bool cut = vis.x != 0 || vis.y != 0 || vis.w != b.w || vis.h != b.h;
 
 	ly_box border = place_rect(v->frame, (ly_box){ 0, 0, b.w, b.h }, vis);
+#ifdef ARO_EFFECTS
+	place_blur(v, border, ui_frame_radius(v));
+#endif
 	place_rect(v->bg, (ly_box){ bw, bw, inner_w, inner_h }, vis);
 	place_rect(v->ring, (ly_box){ bw, bw, inner_w, 1 }, vis);
 
@@ -298,15 +395,8 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 void ui_frame_focus(struct aro_view *v, bool focused)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
-	float col[4];
 
-	ui_color(focused ? th->accent : th->line, col);
-	wlr_scene_rect_set_color(v->frame, col);
-
-	ui_color(focused ? th->frame_on : th->frame, col);
-	wlr_scene_rect_set_color(v->bg, col);
-	wlr_scene_rect_set_color(v->header, col);
-
+	frame_paint(v, focused);
 	wlr_scene_node_set_enabled(&v->ring->node, focused && ui_frame_border(v) > 0);
 
 	/* title color follows focus */

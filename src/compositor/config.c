@@ -435,6 +435,9 @@ void config_defaults(struct aro_config *c)
 	c->nscroll_presets = 3;
 	c->bar = TH_BAR;
 	c->bar_battery = true;
+	c->opacity = c->opacity_unfocused = 1.0;
+	c->blur_passes = 2;
+	c->blur_radius = 5;
 	c->wallpaper = Q_WALLPAPER_AUTO;
 	c->layout = Q_LAYOUT_MANUAL;
 	for (int i = 0; i < ARO_MAX_WS; i++)
@@ -745,6 +748,15 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 				}
 			}
 			acts = true;
+		} else if (!strcasecmp(w, "opacity") || !strcasecmp(w, "opacity_unfocused")) {
+			const int i = !strcasecmp(w, "opacity") ? 0 : 1;
+			char *n = next_word(&cur, &bad_quote);
+			if (!n || !parse_double(n, &r.opacity[i]) ||
+			    r.opacity[i] < 0.05 || r.opacity[i] > 1.0) {
+				config_err(c, lineno, "rule: %s needs a number from 0.05 to 1", w);
+				goto fail;
+			}
+			acts = true;
 		} else if (!strcasecmp(w, "monitor")) {
 			char *n = next_word(&cur, &bad_quote);
 			if (!n || !*n) {
@@ -846,6 +858,9 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 			out->pos[0] = r->pos[0];
 			out->pos[1] = r->pos[1];
 		}
+		for (int i = 0; i < 2; i++)
+			if (r->opacity[i])
+				out->opacity[i] = r->opacity[i];
 		if (r->monitor) {
 			out->monitor = r->monitor;
 			unsigned h = 2166136261u;       /* FNV-1a */
@@ -1384,6 +1399,30 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->ms_natural_scroll);
 		} else if (!strcasecmp(key, "lid_switch")) {
 			ok = parse_bool(value, &c->lid_switch);
+		} else if (!strcasecmp(key, "opacity") || !strcasecmp(key, "opacity_unfocused")) {
+			double d;
+			ok = parse_double(value, &d) && d >= 0.05 && d <= 1.0;
+			if (ok)
+				*(!strcasecmp(key, "opacity") ? &c->opacity : &c->opacity_unfocused) = d;
+		} else if (!strcasecmp(key, "window_background")) {
+			if (!strcasecmp(value, "auto"))
+				c->win_bg_set = false;
+			else
+				ok = c->win_bg_set = parse_color(value, &c->win_bg);
+		} else if (!strcasecmp(key, "blur")) {
+			ok = parse_bool(value, &c->blur);
+		} else if (!strcasecmp(key, "blur_passes")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 1 && n <= 10;
+			if (ok)
+				c->blur_passes = n;
+		} else if (!strcasecmp(key, "blur_radius")) {
+			int n;
+			ok = parse_int(value, &n) && n >= 1 && n <= 100;
+			if (ok)
+				c->blur_radius = n;
+		} else if (!strcasecmp(key, "blur_layers")) {
+			ok = set_str(&c->blur_layers, value);
 		} else if (!strcasecmp(key, "touchpad_tap")) {
 			ok = parse_bool(value, &c->tp_tap);
 		} else if (!strcasecmp(key, "touchpad_natural_scroll")) {
@@ -1509,6 +1548,7 @@ void config_finish(struct aro_config *c)
 	free(c->xkb_model);
 	free(c->xkb_rules);
 	free(c->cursor_theme);
+	free(c->blur_layers);
 	free(c->wallpaper_file);
 	clear_binds(c);
 	free(c->binds);

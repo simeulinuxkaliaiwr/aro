@@ -143,6 +143,21 @@ float_min_width = 240
 float_min_height = 120
 float_scale = 0.5           # default size for floating windows (fraction of screen)
 
+# === see-through windows ===
+# 1.0 is solid. a rule can set its own: rule = app_id:foot opacity 0.9
+opacity = 1.0
+opacity_unfocused = 1.0
+# what shows behind an app's own see-through parts, e.g. a terminal with a
+# translucent background. auto is the frame colour; 00000000 shows the desktop.
+window_background = auto
+# blur what is behind see-through windows. needs a SceneFX build, which the
+# vulkan renderer (and so hdr) is not; it costs GPU time on every frame.
+blur = false
+blur_passes = 2                 # 1 to 10: more is smoother and slower
+blur_radius = 5                 # 1 to 100
+# layer surfaces to blur behind, by namespace (globs): bars, launchers, ...
+# blur_layers = waybar rofi fuzzel
+
 # === colors ===
 # the design uses a single accent color, only applied to the focused window.
 background = 0x0c0f13ff     # visible in the gaps
@@ -229,6 +244,7 @@ resize_step = 0.04          # resize amount per keypress
 #          position <x> <y>   floating top-left, from the screen's usable corner
 #          center             floating, centred (the default place)
 #          no_border | no_header | no_radius   take that part of the frame away
+#          opacity <n> | opacity_unfocused <n>   0.05 to 1, over the config's
 #          scratchpad opens the window hidden, for scratchpad_show to bring out.
 #          use `tile` to force tiling on dialogs, or `float` to force floating;
 #          size and position only apply to floating windows.

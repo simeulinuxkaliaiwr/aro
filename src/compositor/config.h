@@ -101,6 +101,7 @@ struct q_rule {
 	int center;             /* 1 only */
 	char *monitor;          /* glob on name or "make model serial"; owned */
 	int no_border, no_header, no_radius;    /* 1 only */
+	double opacity[2];      /* focused, unfocused; 0 unset */
 };
 
 /* merged rule result */
@@ -110,6 +111,7 @@ struct q_rule_result {
 	const char *monitor;    /* the rule's; only good until the next reload */
 	unsigned monitor_hash;  /* what changes are told by; 0 unset */
 	int no_border, no_header, no_radius;
+	double opacity[2];
 };
 
 /* monitor block */
@@ -213,6 +215,14 @@ struct aro_config {
 	int kb_repeat_rate, kb_repeat_delay;
 
 	bool lid_switch;        /* closing the lid turns the built-in screen off */
+
+	/* see-through windows */
+	double opacity, opacity_unfocused;      /* 0.05..1 */
+	bool win_bg_set;        /* else the frame colour, as the header */
+	uint32_t win_bg;        /* behind a window's content */
+	bool blur;              /* behind see-through windows; effects builds only */
+	int blur_passes, blur_radius;
+	char *blur_layers;      /* namespace globs, space-separated; owned */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;

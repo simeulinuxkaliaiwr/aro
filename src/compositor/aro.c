@@ -651,17 +651,32 @@ static void rule_place(struct aro_view *v, const struct q_rule_result *r)
 	view_configure(v, c.x, c.y, c.w, c.h);
 }
 
-/* border, header and corners as the rules say; true if any changed */
+/* border, header, corners and opacity as the rules say; true if any changed */
 static bool rule_chrome(struct aro_view *v, const struct q_rule_result *r)
 {
 	const bool nb = r->no_border == 1, nh = r->no_header == 1, nr = r->no_radius == 1;
-	if (v->no_border == nb && v->no_header == nh && v->no_radius == nr)
+	if (v->no_border == nb && v->no_header == nh && v->no_radius == nr &&
+	    v->rule_opacity[0] == r->opacity[0] && v->rule_opacity[1] == r->opacity[1])
 		return false;
 	v->no_border = nb;
 	v->no_header = nh;
 	v->no_radius = nr;
+	v->rule_opacity[0] = r->opacity[0];
+	v->rule_opacity[1] = r->opacity[1];
 	ui_frame_retheme(v);
 	return true;
+}
+
+/* how strong blur is, for windows, layers and the overview alike */
+static void blur_strength_apply(struct aro_server *s)
+{
+#ifdef ARO_EFFECTS
+	struct blur_data d = blur_data_get_default();
+	wlr_scene_set_blur_data(s->scene, s->cfg.blur_passes, s->cfg.blur_radius,
+	                        d.noise, d.brightness, d.contrast, d.saturation);
+#else
+	(void)s;
+#endif
 }
 
 /* the first enabled output whose name or "make model serial" matches */
@@ -2059,6 +2074,8 @@ static void config_reload(struct aro_server *s)
 	}
 
 	/* retheme views */
+	blur_strength_apply(s);
+	layers_blur_update(s);
 	struct aro_view *v, *vtmp;
 	wl_list_for_each(v, &s->views, link)
 		ui_frame_retheme(v);
@@ -2428,6 +2445,7 @@ int main(int argc, char *argv[])
 	}
 	s.scene_layout = wlr_scene_attach_output_layout(s.scene, s.output_layout);
 	colour_init(&s);
+	blur_strength_apply(&s);
 
 	/* stacking layers */
 	float bg[4];

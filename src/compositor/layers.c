@@ -9,6 +9,7 @@
 #include "core.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
@@ -54,6 +55,47 @@ static void layer_focus(struct aro_server *s, struct aro_layer *l)
 	keyboard_focus_changed(s);
 }
 
+/* blur behind a layer surface whose namespace blur_layers names */
+static void layer_blur_update(struct aro_layer *l)
+{
+#ifdef ARO_EFFECTS
+	struct wlr_layer_surface_v1 *ls = l->layer_surface;
+	const struct aro_config *c = &l->server->cfg;
+	bool on = false;
+	if (c->blur && c->blur_layers && ls->namespace && ls->surface->mapped) {
+		for (const char *p = c->blur_layers + strspn(c->blur_layers, " ,"); *p && !on;) {
+			const size_t n = strcspn(p, " ,");
+			char g[256];
+			if (n < sizeof g) {
+				memcpy(g, p, n);
+				g[n] = '\0';
+				on = glob_match(g, ls->namespace);
+			}
+			p += n;
+			p += strspn(p, " ,");
+		}
+	}
+	if (on && !l->blur) {
+		l->blur = wlr_scene_blur_create(l->scene->tree, 1, 1);
+		if (l->blur)
+			wlr_scene_node_lower_to_bottom(&l->blur->node);
+	}
+	if (!l->blur)
+		return;
+	wlr_scene_node_set_enabled(&l->blur->node, on);
+	wlr_scene_blur_set_size(l->blur, ls->surface->current.width, ls->surface->current.height);
+#else
+	(void)l;
+#endif
+}
+
+void layers_blur_update(struct aro_server *s)
+{
+	struct aro_layer *l;
+	wl_list_for_each(l, &s->layers, link)
+		layer_blur_update(l);
+}
+
 static void layer_map(struct wl_listener *listener, void *data)
 {
 	struct aro_layer *l = wl_container_of(listener, l, map);
@@ -65,6 +107,7 @@ static void layer_map(struct wl_listener *listener, void *data)
 	arrange_layers(l->server);
 	aro_arrange(l->server);
 	overview_rebuild(l->server);
+	layer_blur_update(l);
 
 	/* focus interactive layer surfaces */
 	if (l->layer_surface->current.keyboard_interactive)
@@ -101,6 +144,7 @@ static void layer_commit(struct wl_listener *listener, void *data)
 		arrange_layers(l->server);
 		aro_arrange(l->server);
 	}
+	layer_blur_update(l);
 	overview_layer_commit(l->server, ls->surface);
 }
 

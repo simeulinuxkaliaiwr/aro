@@ -262,6 +262,22 @@ wait "$CR"
 alive
 config
 
+# 4f3. opacity holds on a window that starts floating (a commit resets its buffer)
+config "rule = app_id:aro-test float size 400 300 position 100 100 opacity 0.5"
+sleep 0.3
+client window 1 3 > "$T/fade.out" 2>&1 &
+CF=$!
+if wait_for "$T/fade.out" "1 windows open" && command -v grim > /dev/null; then
+	sleep 0.6
+	px=$(env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+		grim -g "300,250 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n')
+	[ -n "$px" ] && [ "$px" != "203040" ] && ok "rule: opacity fades a floating window ($px)" \
+		|| bad "rule: opacity fades a floating window: pixel is '$px'"
+fi
+wait "$CF"
+alive
+config
+
 # 4g. layout = scroll: columns on a strip, the screen scrolls to focus, neighbours peek in
 # focus follows mouse too: aro moving the pointer after a key press must not steal focus back
 config "layout = scroll" "switcher_debounce_ms = 0" "focus_follows_mouse = true"

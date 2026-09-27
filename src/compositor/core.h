@@ -102,6 +102,7 @@ void arrange_layers(struct aro_server *s);
 void arrange_layers_output(struct aro_output *o);
 void bar_return_cancel(struct aro_output *o);
 void layer_new_popup(struct wl_listener *listener, void *data);
+void layers_blur_update(struct aro_server *s);
 void new_layer_surface(struct wl_listener *listener, void *data);
 
 /* output.c */

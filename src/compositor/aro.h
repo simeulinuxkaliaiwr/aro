@@ -54,6 +54,7 @@ struct aro_layer {
 	struct wl_listener commit;
 	struct wl_listener destroy;
 	struct wl_listener new_popup;   /* tooltips and menus, e.g. waybar's */
+	struct wlr_scene_blur *blur;    /* blur_layers; effects only */
 };
 
 /*
@@ -111,6 +112,8 @@ struct aro_view {
 	bool scratch;           /* in the scratchpad: floating, shown on demand */
 	bool stashed;           /* a scratchpad window while hidden */
 	bool no_border, no_header, no_radius;   /* from rules */
+	double rule_opacity[2]; /* focused, unfocused; 0: the config's */
+	struct wlr_scene_blur *blur;    /* behind it when see-through; effects only */
 	double scroll_w;        /* layout = scroll: this column's width share; 0 = the default */
 	double scroll_w_prev;   /* what maximize goes back to */
 	bool fullscreen;
@@ -523,6 +526,7 @@ void ui_frame_title(struct aro_view *v, int frame_w, float scale);
 void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf);
 void ui_frame_clip_content(struct aro_view *v);
 void ui_frame_fullscreen(struct aro_view *v, bool fullscreen);
+void ui_frame_hold_opacity(struct aro_view *v);
 void ui_frame_retheme(struct aro_view *v);
 void ui_color(uint32_t rgba, float out[4]);
 
