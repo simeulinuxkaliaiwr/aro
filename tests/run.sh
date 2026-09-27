@@ -160,6 +160,7 @@ if wait_for "$T/win.out" "3 windows open"; then
 	ok "layouts, focus and workspace switches with windows open"
 
 	# screen sharing: the captured frame shows the windows' colour, 203040
+	sleep 0.5                       # let the last layout change settle
 	c=$(client capture output 2>&1)
 	case $c in *"pixel 203040"*) ok "screen capture shows the windows" ;;
 		*) bad "screen capture shows the windows: $c" ;; esac

@@ -129,8 +129,12 @@ int main(int argc, char **argv)
 	/* a window that is resizing changes its size under us: take the new one and retry */
 	uint32_t *px = NULL;
 	for (int attempt = 0; attempt < 5; attempt++) {
-		for (int i = 0; i < 20 && !constraints_done; i++)
+		/* up to two seconds: a resizing window sends its size when it next draws */
+		for (int i = 0; i < 100 && !constraints_done; i++) {
 			roundtrip(&g);
+			if (!constraints_done)
+				usleep(20000);
+		}
 		if (!constraints_done || !width || !height || shm_format == UINT32_MAX)
 			fail("no buffer constraints from aro");
 
