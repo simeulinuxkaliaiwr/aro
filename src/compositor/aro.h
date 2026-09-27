@@ -316,6 +316,7 @@ struct aro_server {
 	struct aro_gestures gestures;   /* gestures.c */
 	struct aro_tablets tablets;     /* tablet.c */
 	uint32_t mouse_binds_held;      /* buttons whose release is ours: bit n is BTN_MOUSE + n */
+	bool warping;                   /* aro is moving the pointer, focus-follows-mouse holds off */
 	struct wl_listener new_kb_inhibitor;
 	struct wl_list kb_inhibitors;
 	struct wl_listener extws_commit;

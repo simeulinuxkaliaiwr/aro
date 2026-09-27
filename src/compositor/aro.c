@@ -3366,7 +3366,10 @@ static void cursor_warp_to_view(struct aro_server *s, struct aro_view *v)
 
 	wlr_cursor_warp_closest(s->cursor, NULL,
 	                        b.x + b.w / 2.0, b.y + b.h / 2.0);
+	/* our own move, not the user's: what is drawn there may still be sliding away */
+	s->warping = true;
 	pointer_motion_common(s, aro_now_ms());
+	s->warping = false;
 }
 
 /* run binding action */
@@ -4090,7 +4093,7 @@ static void pointer_motion_common(struct aro_server *s, uint32_t time)
 	                                &surface, &sx, &sy);
 
 	/* focus follows mouse */
-	if (s->cfg.focus_follows_mouse && !s->focused_layer) {
+	if (s->cfg.focus_follows_mouse && !s->focused_layer && !s->warping) {
 		struct aro_output *po = output_at(s, s->cursor->x, s->cursor->y);
 		if (po)
 			s->focused_output = po;
