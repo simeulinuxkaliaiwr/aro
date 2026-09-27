@@ -111,11 +111,12 @@ monitor * {
 # aro won't let you turn off your only active monitor via config.
 
 # === wallpaper and bar ===
-# auto draws aro's own wallpaper. a path draws that instead (png, jpeg, svg;
-# ~ works). none draws nothing: use it to run swaybg or similar yourself.
-# aro runs aropaper for you and restarts it when this line changes.
-# `aroctl wallpaper FILE` changes it on the fly, e.g. from a shuffle script.
-wallpaper = auto
+# no need to set one here: `aropaper FILE` or `aroctl wallpaper FILE` changes
+# it, and aro remembers it across sessions (~/.local/state/aro/wallpaper).
+# this line is for pinning one in your dotfiles; changing it replaces the
+# remembered one. auto is aro's own wallpaper, a path shows that image (png,
+# jpeg, svg; ~ works), and none draws nothing, to run swaybg or similar yourself.
+# wallpaper = auto
 # wallpaper = ~/pictures/wallpaper.jpg
 
 # false removes the bar and gives its space to windows (running waybar, say).

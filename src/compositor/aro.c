@@ -1897,6 +1897,7 @@ bool aro_wallpaper_set(struct aro_server *s, enum q_wallpaper mode, const char *
 	s->wallpaper_file = copy;
 	s->wallpaper_mode = mode;
 	s->wallpaper_set = true;
+	wallpaper_save(&s->wallpaper, mode, copy, s->cfg.wallpaper, s->cfg.wallpaper_file);
 	wallpaper_sync(s);
 	return true;
 }
@@ -1912,8 +1913,10 @@ static void config_reload(struct aro_server *s)
 		(nc.wallpaper == Q_WALLPAPER_FILE &&
 		 strcmp(nc.wallpaper_file ? nc.wallpaper_file : "",
 		        s->cfg.wallpaper_file ? s->cfg.wallpaper_file : ""));
-	if (wp_changed)
+	if (wp_changed) {
 		s->wallpaper_set = false;
+		wallpaper_forget(&s->wallpaper);
+	}
 
 	/* old layouts, for changed-only reset */
 	enum q_layout was[ARO_MAX_WS];
@@ -2520,7 +2523,9 @@ int main(int argc, char *argv[])
 	monitors_reapply(&s);
 
 	/* before exec lines: the wallpaper is the first thing to come up */
-	wallpaper_init(&s.wallpaper, s.loop, wallpaper_report, &s);
+	wallpaper_init(&s.wallpaper, s.loop, nested, wallpaper_report, &s);
+	s.wallpaper_set = wallpaper_saved(&s.wallpaper, s.cfg.wallpaper, s.cfg.wallpaper_file,
+	                                  &s.wallpaper_mode, &s.wallpaper_file);
 	wallpaper_sync(&s);
 
 	for (int i = 0; i < s.cfg.nexec; i++)

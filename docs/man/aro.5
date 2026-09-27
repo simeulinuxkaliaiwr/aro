@@ -296,8 +296,12 @@ is expanded.
 aro runs
 .BR aropaper (1)
 for it.
+.BR "aropaper " \fIfile\fP
+or
 .B aroctl wallpaper
-changes it while aro runs, until this line changes.
+changes it without this line, and aro remembers that in
+.I $XDG_STATE_HOME/aro/wallpaper
+across sessions, until this line changes.
 Default: auto.
 .SH LOOK
 .TS

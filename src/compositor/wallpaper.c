@@ -15,6 +15,7 @@
 #define _GNU_SOURCE /* asprintf */
 
 #include "wallpaper.h"
+#include "logfile.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -257,11 +258,12 @@ static void stop(struct aro_wallpaper *w)
 	w->current = NULL;
 }
 
-void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop,
+void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop, bool nested,
                     void (*report_fn)(void *data, const char *msg), void *data)
 {
 	memset(w, 0, sizeof *w);
 	w->loop = loop;
+	w->saved = state_path(nested ? "wallpaper-nested" : "wallpaper");
 	w->report = report_fn;
 	w->data = data;
 	w->mode = Q_WALLPAPER_NONE;     /* nothing running is "none" */
@@ -309,4 +311,86 @@ void wallpaper_finish(struct aro_wallpaper *w)
 	free(w->file);
 	w->file = NULL;
 	w->current = NULL;
+	free(w->saved);
+	w->saved = NULL;
+}
+
+/* ── kept across sessions ──────────────────────────────────────────────── */
+
+/* how the config spells it: auto, none or the path */
+static const char *spell(enum q_wallpaper mode, const char *file)
+{
+	return mode == Q_WALLPAPER_AUTO ? "auto" : mode == Q_WALLPAPER_NONE ? "none"
+	     : file ? file : "";
+}
+
+void wallpaper_save(struct aro_wallpaper *w, enum q_wallpaper mode, const char *file,
+                    enum q_wallpaper cfg_mode, const char *cfg_file)
+{
+	if (!w->saved)
+		return;
+	char tmp[PATH_MAX];
+	if (snprintf(tmp, sizeof tmp, "%s.new", w->saved) >= (int)sizeof tmp)
+		return;
+	FILE *f = fopen(tmp, "w");
+	if (!f) {
+		wlr_log(WLR_ERROR, "wallpaper: cannot save to %s: %s", tmp, strerror(errno));
+		return;
+	}
+	fprintf(f, "# set with aroctl wallpaper or aropaper; editing the config's\n"
+	           "# wallpaper line replaces it\n"
+	           "wallpaper = %s\nconfig = %s\n",
+	        spell(mode, file), spell(cfg_mode, cfg_file));
+	if (fclose(f) != 0 || rename(tmp, w->saved) != 0) {
+		wlr_log(WLR_ERROR, "wallpaper: cannot save to %s: %s", w->saved, strerror(errno));
+		unlink(tmp);
+	}
+}
+
+void wallpaper_forget(struct aro_wallpaper *w)
+{
+	if (w->saved && unlink(w->saved) == 0)
+		wlr_log(WLR_INFO, "wallpaper: the config's line changed; forgot the saved one");
+}
+
+/* the value after "key = " on a line, newline cut; NULL if another key */
+static char *value_of(char *line, const char *key)
+{
+	size_t n = strlen(key);
+	if (strncmp(line, key, n) || strncmp(line + n, " = ", 3))
+		return NULL;
+	line[strcspn(line, "\n")] = '\0';
+	return line + n + 3;
+}
+
+bool wallpaper_saved(struct aro_wallpaper *w, enum q_wallpaper cfg_mode,
+                     const char *cfg_file, enum q_wallpaper *mode, char **file)
+{
+	*file = NULL;
+	FILE *f = w->saved ? fopen(w->saved, "r") : NULL;
+	if (!f)
+		return false;
+	char line[PATH_MAX + 32], wp[PATH_MAX] = "", cfg[PATH_MAX] = "";
+	bool has_wp = false, has_cfg = false;
+	while (fgets(line, sizeof line, f)) {
+		char *v;
+		if ((v = value_of(line, "wallpaper")) && strlen(v) < sizeof wp)
+			has_wp = snprintf(wp, sizeof wp, "%s", v) >= 0;
+		else if ((v = value_of(line, "config")) && strlen(v) < sizeof cfg)
+			has_cfg = snprintf(cfg, sizeof cfg, "%s", v) >= 0;
+	}
+	fclose(f);
+
+	/* the config's line changed since, or the file is gone: the config wins */
+	*mode = !strcmp(wp, "auto") ? Q_WALLPAPER_AUTO
+	      : !strcmp(wp, "none") ? Q_WALLPAPER_NONE : Q_WALLPAPER_FILE;
+	if (!has_wp || !has_cfg || strcmp(cfg, spell(cfg_mode, cfg_file)) ||
+	    (*mode == Q_WALLPAPER_FILE && (wp[0] != '/' || access(wp, R_OK) != 0))) {
+		wlr_log(WLR_INFO, "wallpaper: not using the saved one in %s", w->saved);
+		unlink(w->saved);
+		return false;
+	}
+	if (*mode == Q_WALLPAPER_FILE && !(*file = strdup(wp)))
+		return false;
+	return true;
 }

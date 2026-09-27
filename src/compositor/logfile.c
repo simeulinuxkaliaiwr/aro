@@ -87,11 +87,10 @@ static bool mkdir_p(char *path)
 }
 
 /* $XDG_STATE_HOME/aro, else ~/.local/state/aro; NULL if neither */
-static char *default_path(bool nested)
+char *state_path(const char *file)
 {
 	const char *state = getenv("XDG_STATE_HOME");
 	const char *home = getenv("HOME");
-	const char *file = nested ? "aro-nested.log" : "aro.log";
 	char dir[4096];
 	int n;
 
@@ -109,6 +108,11 @@ static char *default_path(bool nested)
 	if (path)
 		sprintf(path, "%s/%s", dir, file);
 	return path;
+}
+
+static char *default_path(bool nested)
+{
+	return state_path(nested ? "aro-nested.log" : "aro.log");
 }
 
 /* keep the previous log as .old */

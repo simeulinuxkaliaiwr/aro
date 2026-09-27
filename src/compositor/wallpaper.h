@@ -26,13 +26,23 @@ struct aro_wallpaper {
 	enum q_wallpaper mode;
 	char *file;                     /* owned; Q_WALLPAPER_FILE only */
 
+	char *saved;                    /* the state file; NULL: nowhere to keep it */
+
 	/* problems worth a toast; the log gets them either way */
 	void (*report)(void *data, const char *msg);
 	void *data;
 };
 
-void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop,
+void wallpaper_init(struct aro_wallpaper *w, struct wl_event_loop *loop, bool nested,
                     void (*report)(void *data, const char *msg), void *data);
+
+/* aroctl's or aropaper's wallpaper, kept across sessions until the config's line changes */
+void wallpaper_save(struct aro_wallpaper *w, enum q_wallpaper mode, const char *file,
+                    enum q_wallpaper cfg_mode, const char *cfg_file);
+/* true and *file owned when one applies; a stale one is removed */
+bool wallpaper_saved(struct aro_wallpaper *w, enum q_wallpaper cfg_mode,
+                     const char *cfg_file, enum q_wallpaper *mode, char **file);
+void wallpaper_forget(struct aro_wallpaper *w);
 
 /*
  * Start, restart or stop aropaper to match the config. Changes only: the
