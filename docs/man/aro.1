@@ -81,6 +81,15 @@ A nested aro writes
 .I aro-nested.log
 instead.
 .TP
+.I $XDG_STATE_HOME/aro/wallpaper
+The wallpaper last set with
+.B aropaper
+or
+.BR "aroctl wallpaper" ,
+kept across sessions until the config's
+.B wallpaper
+line changes.
+.TP
 .I /usr/share/backgrounds/aro/
 aro's wallpapers, as SVG and PNG.
 .SH ENVIRONMENT
@@ -156,6 +165,10 @@ On a scroll workspace, widen the column to the whole screen, or back.
 .TP
 .B mod+r
 On a scroll workspace, step the column through the preset widths.
+.TP
+.BR mod+shift+minus ", " mod+minus
+Hide the window in the scratchpad; show the latest scratchpad window, or
+hide it again.
 .TP
 .B mod+space
 Toggle floating.
