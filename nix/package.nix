@@ -27,7 +27,7 @@
 
 stdenv.mkDerivation {
   pname = "aro";
-  version = "0.3.0-unstable";
+  version = "0.4.0-unstable";
 
   src = lib.fileset.toSource {
     root = ../.;

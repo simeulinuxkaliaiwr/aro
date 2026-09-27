@@ -1,6 +1,6 @@
 # COPR builds main via .copr/Makefile, which rewrites Version; plain rpmbuild builds the release
 Name:           aro
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Minimal tiling Wayland compositor with spring animations
 
@@ -68,6 +68,9 @@ aroctl for scripts.
 %{_mandir}/man5/aro.5*
 
 %changelog
+* Sun Sep 27 2026 Guilherme <aerofrutiger3000@gmail.com> - 0.4.0-1
+- Scratchpad, opacity and blur, richer window rules, touchscreens, HDR, remembered wallpaper
+
 * Sat Sep 26 2026 Guilherme <aerofrutiger3000@gmail.com> - 0.3.0-1
 - Scrolling layout, screen and window capture, tablets, gestures, VR leasing
 
