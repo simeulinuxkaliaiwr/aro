@@ -176,6 +176,7 @@ if get_option('compositor')
     'src/ui/ghost.c',
     'src/ui/notify.c',
     'src/ui/overview.c',
+    'src/ui/picker.c',
     'src/ui/prompt.c',
     'src/ui/switcher.c',
     'src/ui/text.c',
@@ -185,6 +186,9 @@ if get_option('compositor')
     aro_sources + proto_headers,
     dependencies: deps,
     include_directories: inc,
+    # the picker lists aro's own wallpapers too
+    c_args: ['-DARO_WALLPAPER_DIR="@0@"'.format(
+      get_option('prefix') / get_option('datadir') / 'backgrounds' / 'aro')],
     install: true,
   )
 

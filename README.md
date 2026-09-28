@@ -56,7 +56,7 @@ says "this is the window you are in".
   any action, and `aroctl subscribe` prints a line for each change, for
   bar modules and scripts.
 - **Its own wallpaper**, drawn by `aropaper` at each screen's exact
-  resolution, and a status bar (workspaces, title, battery, clock) that
+  resolution, with a picker on `mod+w`, and a status bar (workspaces, title, battery, clock) that
   steps aside on its own when waybar or quickshell starts.
 - **Window rules**, monitor configuration, an exit prompt, rounded
   corners and blur behind see-through windows through [SceneFX](https://github.com/wlrfx/scenefx),
@@ -236,6 +236,13 @@ To change it, run `aropaper ~/pictures/wallpaper.jpg` (or `aroctl wallpaper`
 with the same path): aro switches to it and remembers it across sessions.
 Any PNG, JPEG or SVG works, covering the screen and cropping the overflow.
 
+Or press `mod+w` for the picker: a strip of your wallpapers, each cut to
+the screen's shape, with search as you type. It lists `~/Pictures/Wallpapers`
+(or `~/Pictures`) and
+aro's own wallpapers; `wallpaper_dir = ~/pictures/walls` lines choose the
+folders instead. `aropaper` makes the thumbnails in the background, and
+they are cached, so the second time is instant.
+
 The config's `wallpaper` line is only for pinning one in your dotfiles, and
 editing it replaces the remembered one. `wallpaper = none` leaves the
 background to you — `exec = swaybg -i …`, for instance.
@@ -293,6 +300,7 @@ replaces this table entirely.
 | `mod+ctrl+hjkl` | resize |
 | `mod+tab` / `mod+shift+tab` | window switcher, recently used order |
 | `mod+o` | overview: every workspace, zoomed out |
+| `mod+w` | wallpaper picker: arrows browse, type to search, enter applies |
 | `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll |
 | `mod+m` | scroll layout: column fills the screen, or goes back |
 | `mod+r` | scroll layout: next preset column width |

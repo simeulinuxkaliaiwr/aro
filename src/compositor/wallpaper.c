@@ -109,7 +109,7 @@ static int child_exited(int fd, uint32_t mask, void *data)
  * development build work: ./build/aro runs ./build/aropaper without
  * anything installed. Installed, the two are the same place anyway.
  */
-static char *find_aropaper(void)
+char *wallpaper_find_aropaper(void)
 {
 	char self[PATH_MAX];
 	ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
@@ -149,7 +149,7 @@ static char *find_aropaper(void)
 }
 
 /* `~/…` means home; no shell runs, so nothing else would expand it */
-static char *expand_home(const char *p)
+char *wallpaper_expand_home(const char *p)
 {
 	const char *home = getenv("HOME");
 	if (p[0] == '~' && (p[1] == '/' || p[1] == '\0') && home && *home) {
@@ -163,7 +163,7 @@ static char *expand_home(const char *p)
 
 static void start(struct aro_wallpaper *w)
 {
-	char *bin = find_aropaper();
+	char *bin = wallpaper_find_aropaper();
 	if (!bin) {
 		report(w, "wallpaper: aropaper is not installed; install it, "
 		       "or set wallpaper = none");
@@ -176,7 +176,7 @@ static void start(struct aro_wallpaper *w)
 	 */
 	char *file = NULL;
 	if (w->mode == Q_WALLPAPER_FILE) {
-		file = expand_home(w->file);
+		file = wallpaper_expand_home(w->file);
 		if (!file || access(file, R_OK) != 0) {
 			report(w, "wallpaper: cannot read %s: %s",
 			       file ? file : w->file, strerror(errno));

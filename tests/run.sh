@@ -614,6 +614,35 @@ fi
 
 if [ "$MODE" = main ]; then
 
+# 4z. the wallpaper picker: aropaper makes its thumbnails, a reload rebuilds it
+if [ -x "$(dirname "$ARO")/aropaper" ]; then
+	art="$(dirname "$0")/../data/wallpaper"
+	mkdir -p "$T/walls/more"
+	cp "$art/aro-wallpaper-1920x1080.png" "$T/walls/one.png"
+	cp "$art/aro-wallpaper-dwindle-1920x1080.png" "$T/walls/more/two.png"
+	config "wallpaper_dir = $T/walls"
+	sleep 0.3
+	ctl dispatch wallpapers > /dev/null
+	thumbs() { ls "$T/.cache/aro/thumbnails" 2>/dev/null | grep -c '\.png$'; }
+	for _ in $(seq 100); do [ "$(thumbs)" -ge 2 ] && break; sleep 0.1; done
+	[ "$(thumbs)" -eq 2 ] && ok "the wallpaper picker makes thumbnails" \
+		|| bad "the wallpaper picker makes thumbnails: $(thumbs) of 2"
+	config "wallpaper_dir = $T/walls" "font = Sans 11"
+	sleep 0.3
+	alive
+	ok "the wallpaper picker survives a reload while open"
+	ctl dispatch wallpapers > /dev/null
+	ctl dispatch wallpapers > /dev/null
+	ctl dispatch wallpapers > /dev/null
+	sleep 0.5
+	alive
+	ok "the wallpaper picker opens again while it fades out"
+	config
+	sleep 0.3
+else
+	echo "skip  wallpaper picker (no aropaper)"
+fi
+
 # 5. saving the config while running: the reload freed strings still in use
 before=$(grep -c "config reloaded" "$T/aro.log")
 for c in "bar = false" "bar = true" "font = Monospace 11" "bar = auto" \

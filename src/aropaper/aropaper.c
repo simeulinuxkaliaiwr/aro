@@ -7,6 +7,7 @@
  * (sway, Hyprland, labwc…), not only on aro.
  *
  *   aropaper [FILE]
+ *   aropaper --thumbnails     (for aro's wallpaper picker; see thumbnails())
  *
  * FILE is anything gdk-pixbuf can load: PNG, JPEG, WebP, and SVG through
  * librsvg's loader. With no FILE, aro's own wallpaper: the SVG if an SVG
@@ -27,6 +28,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -488,7 +490,78 @@ static void usage(FILE *f)
 		"\n"
 		"Draws FILE (PNG, JPEG, SVG, …) as the wallpaper on every screen,\n"
 		"covering it and cropping the overflow. With no FILE, aro's own\n"
-		"wallpaper from %s.\n", ARO_WALLPAPER_DIR);
+		"wallpaper from %s.\n"
+		"\n"
+		"  --thumbnails  read SOURCE<tab>THUMB lines on stdin and write a\n"
+		"                small PNG of each; aro's wallpaper picker uses it\n",
+		ARO_WALLPAPER_DIR);
+}
+
+/* covers this much, like the wallpaper covers a screen; the picker crops */
+#define THUMB_W 960
+#define THUMB_H 540
+
+static bool thumbnail(const char *src, const char *dst)
+{
+	int w = 0, h = 0;
+	if (!gdk_pixbuf_get_file_info(src, &w, &h) || w <= 0 || h <= 0) {
+		LOG("%s: not an image gdk-pixbuf can read\n", src);
+		return false;
+	}
+	double k = fmax((double)THUMB_W / w, (double)THUMB_H / h);
+	if (k > 1)
+		k = 1;          /* never scaled up: the picker does that for free */
+	int tw = (int)lround(w * k), th = (int)lround(h * k);
+
+	GError *err = NULL;
+	GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(src, tw > 0 ? tw : 1,
+	                                                  th > 0 ? th : 1, FALSE, &err);
+	if (!pb) {
+		LOG("%s: %s\n", src, err ? err->message : "cannot read");
+		g_clear_error(&err);
+		return false;
+	}
+	/* written aside and renamed, so aro never loads half a file */
+	char tmp[PATH_MAX];
+	bool ok = snprintf(tmp, sizeof tmp, "%s.new", dst) < (int)sizeof tmp &&
+	          gdk_pixbuf_save(pb, tmp, "png", &err, "compression", "1", NULL);
+	g_object_unref(pb);
+	if (!ok) {
+		LOG("%s: %s\n", dst, err ? err->message : "path too long");
+		g_clear_error(&err);
+		unlink(tmp);
+		return false;
+	}
+	if (rename(tmp, dst) != 0) {
+		LOG("%s: %s\n", dst, strerror(errno));
+		unlink(tmp);
+		return false;
+	}
+	return true;
+}
+
+/*
+ * aro's picker: "SOURCE\tTHUMB" lines in, each THUMB echoed back once it
+ * is on disk, "!" first when it could not be made. One at a time, in the
+ * order asked, which is nearest the picker's selection first.
+ */
+static int thumbnails(void)
+{
+	char *line = NULL;
+	size_t cap = 0;
+	while (getline(&line, &cap, stdin) > 0) {
+		line[strcspn(line, "\n")] = '\0';
+		char *tab = strchr(line, '\t');
+		if (!tab)
+			continue;
+		*tab = '\0';
+		bool ok = thumbnail(line, tab + 1);
+		printf("%s%s\n", ok ? "" : "!", tab + 1);
+		if (fflush(stdout) != 0)
+			break;  /* aro stopped listening */
+	}
+	free(line);
+	return 0;
 }
 
 /* under aro, hand the file to the aropaper aro runs, so there is only one */
@@ -546,14 +619,18 @@ int main(int argc, char **argv)
 		{"help", no_argument, NULL, 'h'},
 		{"version", no_argument, NULL, 'v'},
 		{"by-aro", no_argument, NULL, 'A'},     /* aro's own child: draw */
+		{"thumbnails", no_argument, NULL, 'T'},
 		{0},
 	};
-	bool by_aro = false;
+	bool by_aro = false, thumbs = false;
 	int c;
 	while ((c = getopt_long(argc, argv, "hv", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'A':
 			by_aro = true;
+			break;
+		case 'T':
+			thumbs = true;
 			break;
 		case 'h':
 			usage(stdout);
@@ -565,6 +642,13 @@ int main(int argc, char **argv)
 			usage(stderr);
 			return 1;
 		}
+	}
+	if (thumbs) {
+		if (argc > optind) {
+			usage(stderr);
+			return 1;
+		}
+		return thumbnails();
 	}
 	if (argc - optind > 1) {
 		usage(stderr);

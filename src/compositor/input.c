@@ -101,6 +101,15 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		return;
 	}
 
+	/* so does the wallpaper picker; typing searches, so it wants the
+	 * translated symbol too */
+	if (!handled && !aro_locked(s) && picker_active(s) &&
+	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		for (int i = 0; i < nraw && picker_active(s); i++)
+			picker_key(s, mods, raw[i], ntrans == nraw ? trans[i] : raw[i]);
+		return;
+	}
+
 	/* overview owns key presses; releases still reach the client */
 	if (!handled && !aro_locked(s) && overview_active(s) &&
 	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
@@ -632,6 +641,10 @@ void cursor_motion(struct wl_listener *l, void *data)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && picker_active(s)) {
+		picker_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -662,6 +675,10 @@ void cursor_motion_abs(struct wl_listener *l, void *data)
 	wlr_cursor_move(s->cursor, &ev->pointer->base, dx, dy);
 	if (!aro_locked(s) && prompt_active(s)) {
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (!aro_locked(s) && picker_active(s)) {
+		picker_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
 	if (!aro_locked(s) && overview_active(s)) {
@@ -712,6 +729,15 @@ void cursor_button(struct wl_listener *l, void *data)
 		prompt_pointer_button(s, s->cursor->x, s->cursor->y,
 		                      ev->state == WL_POINTER_BUTTON_STATE_PRESSED);
 		prompt_after(s, true);
+		return;
+	}
+
+	if (!aro_locked(s) && picker_active(s)) {
+		bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
+		if (!down && s->seat->pointer_state.button_count > 0)
+			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
+			                               ev->button, ev->state);
+		picker_pointer_button(s, s->cursor->x, s->cursor->y, down);
 		return;
 	}
 
@@ -808,6 +834,10 @@ void aro_pointer_moved(struct aro_server *s, uint32_t time)
 		prompt_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && picker_active(s)) {
+		picker_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -853,6 +883,10 @@ void cursor_axis(struct wl_listener *l, void *data)
 	struct wlr_pointer_axis_event *ev = data;
 	if (!aro_locked(s) && prompt_active(s))
 		return;                 /* no scrolling the window under the card */
+	if (!aro_locked(s) && picker_active(s)) {
+		picker_pointer_axis(s, ev->delta, ev->delta_discrete);
+		return;
+	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_axis(s, ev->delta, ev->delta_discrete);
 		return;

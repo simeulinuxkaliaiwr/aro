@@ -119,6 +119,14 @@ monitor * {
 # wallpaper = auto
 # wallpaper = ~/pictures/wallpaper.jpg
 
+# mod+w picks one from a strip of thumbnails: arrows browse, typing searches,
+# enter applies. it lists these folders (three levels deep) and aro's own
+# wallpapers; with no wallpaper_dir line, ~/Pictures/Wallpapers (or ~/Pictures
+# when there is none) and ~/.local/share/backgrounds.
+# thumbnails are cached in ~/.cache/aro/thumbnails.
+# wallpaper_dir = ~/pictures/wallpapers
+# wallpaper_dir = ~/pictures/walls-extra
+
 # false removes the bar and gives its space to windows (running waybar, say).
 bar = true
 bar_battery = true         # charge left of the clock, on machines with a battery
@@ -284,6 +292,7 @@ resize_step = 0.04          # resize amount per keypress
 #          group left|right|up|down   (into that tile as a tab; a tile of tabs shows one window)
 #          ungroup   (out of its tabs, into a tile of its own)
 #          tab next|prev   (the next or previous tab; clicking a tab or the wheel works too)
+#          wallpapers   (the wallpaper picker; see wallpaper_dir)
 #          scratchpad_show [app_id]   (bring the latest scratchpad window, or the
 #                   latest matching the glob, to this workspace; again hides it)
 #          maximize (layout = scroll: the column fills the screen, or goes back)
@@ -312,6 +321,7 @@ bind = mod+alt+l, group, right
 bind = mod+shift+g, ungroup
 bind = mod+bracketright, tab, next
 bind = mod+bracketleft, tab, prev
+bind = mod+w, wallpapers
 bind = mod+v, split, right
 bind = mod+s, split, down
 bind = mod+h, focus, left

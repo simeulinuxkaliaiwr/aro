@@ -342,6 +342,10 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 	case Q_SCRATCH_SHOW:
 		scratch_show(s, b->arg);
 		return;
+	case Q_WALLPAPERS:
+		if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
+			picker_toggle(s);
+		return;
 	case Q_STICKY:
 		if (f && !f->fullscreen) {
 			if (!f->sticky)

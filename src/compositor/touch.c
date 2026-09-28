@@ -6,6 +6,7 @@
 #include "core.h"
 #include "idle.h"
 #include "overview.h"
+#include "picker.h"
 #include "prompt.h"
 
 #include <stdlib.h>
@@ -59,7 +60,8 @@ static void on_down(struct wl_listener *l, void *data)
 	struct wlr_surface *surface = NULL;
 	struct aro_view *v = NULL;
 	/* aro's own screens take a mouse, never touch */
-	bool aro_ui = !aro_locked(s) && (overview_active(s) || prompt_active(s));
+	bool aro_ui = !aro_locked(s) && (overview_active(s) || prompt_active(s) ||
+	                                   picker_active(s));
 	if (!aro_ui)
 		v = view_at(s, lx, ly, &surface, &sx, &sy);
 

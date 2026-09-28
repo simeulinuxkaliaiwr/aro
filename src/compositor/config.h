@@ -70,6 +70,7 @@ enum q_action {
 	Q_GROUP,        /* num: ly_edge; into the neighbour's tile as a tab */
 	Q_UNGROUP,      /* out of its group, into a tile of its own */
 	Q_TAB,          /* num: +1 next tab, -1 previous */
+	Q_WALLPAPERS,   /* the wallpaper picker */
 };
 
 struct q_bind {
@@ -197,6 +198,8 @@ struct aro_config {
 
 	enum q_wallpaper wallpaper;
 	char *wallpaper_file;   /* Q_WALLPAPER_FILE only; owned, `~` unexpanded */
+	char **wallpaper_dirs;  /* the picker's folders, `~` unexpanded; owned */
+	int nwallpaper_dirs;
 
 	/* touchpad (libinput) */
 	bool tp_tap, tp_natural_scroll, tp_dwt;

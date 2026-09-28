@@ -408,7 +408,7 @@ static bool collect(struct aro_server *s)
 void switcher_step(struct aro_server *s, int dir)
 {
 	struct aro_switcher *w = &s->switcher;
-	if (aro_locked(s) || prompt_active(s) || overview_shown(s))
+	if (aro_locked(s) || prompt_active(s) || overview_shown(s) || picker_active(s))
 		return;
 
 	if (!w->active) {

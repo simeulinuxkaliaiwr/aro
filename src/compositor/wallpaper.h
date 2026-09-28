@@ -51,6 +51,11 @@ void wallpaper_forget(struct aro_wallpaper *w);
  */
 void wallpaper_apply(struct aro_wallpaper *w, enum q_wallpaper mode, const char *file);
 
+/* aropaper next to aro, else on PATH; owned, NULL if neither */
+char *wallpaper_find_aropaper(void);
+/* `~/…` as home; owned */
+char *wallpaper_expand_home(const char *p);
+
 /* stop it and free everything; before the event loop goes */
 void wallpaper_finish(struct aro_wallpaper *w);
 

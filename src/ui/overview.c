@@ -787,7 +787,7 @@ void overview_toggle(struct aro_server *s)
 {
 	if (s->overview.open)
 		ov_commit(s);
-	else
+	else if (!picker_active(s))
 		ov_open(s);
 }
 

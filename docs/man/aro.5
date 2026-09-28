@@ -302,7 +302,31 @@ or
 changes it without this line, and aro remembers that in
 .I $XDG_STATE_HOME/aro/wallpaper
 across sessions, until this line changes.
+So does the picker the
+.B wallpapers
+action opens.
 Default: auto.
+.TP
+.BI "wallpaper_dir = " path
+A folder for the wallpaper picker to list, with the folders inside it,
+three levels deep.
+Repeat the line for more; each adds one.
+aro's own wallpapers are always listed, one entry per wallpaper whatever
+the sizes it comes in.
+With no
+.B wallpaper_dir
+line,
+.I ~/Pictures/Wallpapers
+(or
+.I ~/Pictures
+when there is none) and
+.IR ~/.local/share/backgrounds .
+.B ~
+is expanded.
+Thumbnails are made by
+.BR aropaper (1)
+and kept in
+.IR $XDG_CACHE_HOME/aro/thumbnails .
 .SH LOOK
 .TS
 tab(|);
@@ -565,6 +589,19 @@ Take the focused window out of its tabs, into a tile of its own beside them.
 .BR tab " [" next | prev ]
 Show the next or previous tab.
 Clicking a tab, or turning the wheel over the tabs, does too.
+.TP
+.B wallpapers
+Open the wallpaper picker on the focused monitor, or close it.
+Each wallpaper is a card cut to the screen's shape, the way it will cover
+it.
+Left and right, Tab, Page Up and Down, Home and End, the wheel, or the
+.BR focus " left and right binds move through them;"
+typing searches by name, Backspace takes a character back and Escape
+clears the search, then closes.
+Enter, or clicking the middle card, shows it as the wallpaper and closes;
+clicking another card moves to it; Ctrl+R jumps to a random one.
+The choice is remembered like
+.BR "aroctl wallpaper" 's.
 .TP
 .BR move_workspace " " left | right | up | down
 Move the current workspace, with its windows and layout, to the monitor in

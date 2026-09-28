@@ -25,6 +25,7 @@
 #include "lock.h"
 #include "notify.h"
 #include "overview.h"
+#include "picker.h"
 #include "prompt.h"
 #include "switcher.h"
 #include "layout.h"
@@ -367,6 +368,7 @@ struct aro_server {
 	struct aro_prompt prompt;            /* the modal yes/no card */
 	struct aro_switcher switcher;        /* mod+tab */
 	struct aro_overview overview;
+	struct aro_picker picker;            /* wallpapers to choose from */
 	struct wl_list ghosts;               /* closed windows fading out */
 	struct wl_list inhibitors;
 

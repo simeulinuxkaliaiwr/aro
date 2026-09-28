@@ -17,4 +17,7 @@ void logfile_finish(void);
 /* a file in $XDG_STATE_HOME/aro (or ~/.local/state/aro), made if missing; owned */
 char *state_path(const char *file);
 
+/* a directory in $XDG_CACHE_HOME/aro (or ~/.cache/aro), made if missing; owned */
+char *cache_dir(const char *name);
+
 #endif

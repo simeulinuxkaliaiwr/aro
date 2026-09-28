@@ -211,6 +211,7 @@ bool config_parse_action(const char *name, const char *arg,
 	if (!strcasecmp(name, "maximize"))   { *action = Q_MAXIMIZE;   return true; }
 	if (!strcasecmp(name, "scratchpad")) { *action = Q_SCRATCH;    return true; }
 	if (!strcasecmp(name, "ungroup"))    { *action = Q_UNGROUP;    return true; }
+	if (!strcasecmp(name, "wallpapers")) { *action = Q_WALLPAPERS; return true; }
 	if (!strcasecmp(name, "group")) {
 		if (!arg || !parse_edge(arg, num))
 			return false;
@@ -396,6 +397,7 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M | S, XKB_KEY_g, Q_UNGROUP, 0, NULL);
 	bind_add(c, M, XKB_KEY_bracketright, Q_TAB, 1, NULL);
 	bind_add(c, M, XKB_KEY_bracketleft, Q_TAB, -1, NULL);
+	bind_add(c, M, XKB_KEY_w, Q_WALLPAPERS, 0, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
@@ -1523,6 +1525,8 @@ bool config_load(struct aro_config *c, const char *path)
 				if (ok)
 					c->wallpaper = Q_WALLPAPER_FILE;
 			}
+		} else if (!strcasecmp(key, "wallpaper_dir")) {
+			ok = *value && list_add(&c->wallpaper_dirs, &c->nwallpaper_dirs, value);
 		} else if (!strcasecmp(key, "exec")) {
 			ok = list_add(&c->exec, &c->nexec, value);
 		} else if (!strcasecmp(key, "exec_always")) {
@@ -1571,6 +1575,9 @@ void config_finish(struct aro_config *c)
 	free(c->cursor_theme);
 	free(c->blur_layers);
 	free(c->wallpaper_file);
+	for (int i = 0; i < c->nwallpaper_dirs; i++)
+		free(c->wallpaper_dirs[i]);
+	free(c->wallpaper_dirs);
 	clear_binds(c);
 	free(c->binds);
 	for (int i = 0; i < c->nrules; i++)

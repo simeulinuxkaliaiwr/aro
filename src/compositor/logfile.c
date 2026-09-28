@@ -110,6 +110,24 @@ char *state_path(const char *file)
 	return path;
 }
 
+char *cache_dir(const char *name)
+{
+	const char *cache = getenv("XDG_CACHE_HOME");
+	const char *home = getenv("HOME");
+	char dir[4096];
+	int n;
+
+	if (cache && cache[0] == '/')
+		n = snprintf(dir, sizeof dir, "%s/aro/%s", cache, name);
+	else if (home && home[0] == '/')
+		n = snprintf(dir, sizeof dir, "%s/.cache/aro/%s", home, name);
+	else
+		return NULL;
+	if (n < 0 || (size_t)n >= sizeof dir || !mkdir_p(dir))
+		return NULL;
+	return strdup(dir);
+}
+
 static char *default_path(bool nested)
 {
 	return state_path(nested ? "aro-nested.log" : "aro.log");

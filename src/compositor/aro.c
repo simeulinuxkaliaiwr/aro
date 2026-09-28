@@ -2108,6 +2108,7 @@ static void config_reload(struct aro_server *s)
 	notify_retheme(s);
 	prompt_retheme(s);
 	switcher_retheme(s);
+	picker_retheme(s);
 	ghost_drop(s, NULL);    /* drawn with the old theme */
 	overview_rebuild(s);
 	notify_config_errors(s);
@@ -2484,6 +2485,7 @@ int main(int argc, char *argv[])
 	/* bars are per-output */
 
 	switcher_init(&s);
+	picker_init(&s);
 	ghost_init(&s);
 
 	if (!ui_preview_create(&s.preview, &s)) {
@@ -2680,6 +2682,7 @@ teardown:
 	notify_finish(&s);
 	prompt_finish(&s);
 	overview_finish(&s);
+	picker_finish(&s);
 	switcher_finish(&s);
 	ghost_drop(&s, NULL);
 	config_watch_stop(&s);

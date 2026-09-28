@@ -35,6 +35,24 @@ Print a short usage message.
 .TP
 .BR \-v ", " \-\-version
 Print the version.
+.TP
+.B \-\-thumbnails
+For aro's wallpaper picker: read lines of
+.IR source ,
+a tab and
+.I thumb
+on standard input, write a small PNG of each
+.I source
+to
+.IR thumb ,
+covering 960x540 like the wallpaper covers a screen, and print each
+.I thumb
+once it is written, with a
+.B !
+before it when
+.I source
+could not be read.
+aro runs it; there is no need to by hand.
 .SH FILES
 .TP
 .I /usr/share/backgrounds/aro/
