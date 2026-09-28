@@ -7,11 +7,14 @@
 #include "config.h"
 #include "aro.h"
 #include "core.h"
+#include "lock.h"
 #include "text.h"
 
 #include <stdlib.h>
 
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_seat.h>
 #include <wlr/xwayland.h>
 #include <wlr/util/log.h>
 
@@ -33,8 +36,12 @@ static void xwl_close(struct aro_view *v)
 
 static void xwl_activate(struct aro_view *v, bool activated)
 {
-	if (v->xsurface)
-		wlr_xwayland_surface_activate(v->xsurface, activated);
+	if (!v->xsurface)
+		return;
+	wlr_xwayland_surface_activate(v->xsurface, activated);
+	/* X11 clients read their own stacking; a buried game drops keys */
+	if (activated)
+		wlr_xwayland_surface_restack(v->xsurface, NULL, XCB_STACK_MODE_ABOVE);
 }
 
 static void xwl_set_fullscreen(struct aro_view *v, bool fullscreen)
@@ -168,25 +175,51 @@ struct aro_unmanaged {
 	struct wl_listener destroy;
 };
 
+/* the keyboard goes to a surface without moving aro's own focus */
+static void unmanaged_keyboard(struct aro_server *s, struct wlr_surface *surface)
+{
+	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
+	if (surface && kb)
+		wlr_seat_keyboard_notify_enter(s->seat, surface, kb->keycodes,
+		                               kb->num_keycodes, &kb->modifiers);
+	else if (surface)
+		wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
+	else
+		wlr_seat_keyboard_notify_clear_focus(s->seat);
+	keyboard_focus_changed(s);
+}
+
 static void unmanaged_map(struct wl_listener *l, void *data)
 {
 	struct aro_unmanaged *u = wl_container_of(l, u, map);
+	struct aro_server *s = u->server;
 	(void)data;
 
-	u->tree = wlr_scene_subsurface_tree_create(u->server->l_unmanaged,
+	u->tree = wlr_scene_subsurface_tree_create(s->l_unmanaged,
 	                                           u->xsurface->surface);
 	if (u->tree)
 		wlr_scene_node_set_position(&u->tree->node,
 		                            u->xsurface->x, u->xsurface->y);
+
+	/* wine's fullscreen games are often override-redirect */
+	if (wlr_xwayland_surface_override_redirect_wants_focus(u->xsurface) &&
+	    !aro_locked(s) && !s->focused_layer)
+		unmanaged_keyboard(s, u->xsurface->surface);
 }
 
 static void unmanaged_unmap(struct wl_listener *l, void *data)
 {
 	struct aro_unmanaged *u = wl_container_of(l, u, unmap);
+	struct aro_server *s = u->server;
 	(void)data;
 	if (u->tree)
 		wlr_scene_node_destroy(&u->tree->node);
 	u->tree = NULL;
+
+	/* hand the keyboard back to the focused window */
+	if (s->seat->keyboard_state.focused_surface == u->xsurface->surface &&
+	    !aro_locked(s) && !s->focused_layer)
+		unmanaged_keyboard(s, s->focused ? view_surface(s->focused) : NULL);
 }
 
 static void unmanaged_request_configure(struct wl_listener *l, void *data)
