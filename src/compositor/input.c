@@ -403,6 +403,7 @@ void new_virtual_pointer(struct wl_listener *l, void *data)
 	wlr_cursor_attach_input_device(s->cursor, dev);
 	if (ev->suggested_output)
 		wlr_cursor_map_input_to_output(s->cursor, dev, ev->suggested_output);
+	seat_update_caps(s);
 }
 
 /* pointer hit testing */
