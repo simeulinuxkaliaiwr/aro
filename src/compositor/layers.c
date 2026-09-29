@@ -188,7 +188,8 @@ void new_layer_surface(struct wl_listener *listener, void *data)
 			wlr_layer_surface_v1_destroy(ls);
 			return;
 		}
-		o = wl_container_of(s->outputs.next, o, link);
+		/* the focused output, like the windows */
+		o = aro_focused_output(s);
 		ls->output = o->wlr_output;
 	}
 

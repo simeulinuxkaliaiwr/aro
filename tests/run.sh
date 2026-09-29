@@ -585,6 +585,26 @@ fi
 wait "$CV"
 alive
 
+# 4d2. a window dragged onto an empty monitor stays there
+config "rule = app_id:aro-test monitor HEADLESS-1" "focus_follows_mouse = false"
+sleep 0.3
+client window 2 4 > "$T/drag.out" 2>&1 &
+CD=$!
+if wait_for "$T/drag.out" "2 windows open"; then
+	# the pointer spans both monitors, 2560 wide, in click's 1280 units
+	read -r x y w < <(ctl windows | awk 'NR == 2 { i = ($1 == "*") ? 2 : 1; split($(i + 4), a, "[x+]"); print a[3], a[4], a[1] }')
+	ox=$(ctl -j monitors | tr '}' '\n' | grep '"name":"HEADLESS-1"' | grep -oE '"x":-?[0-9]+' | cut -d: -f2)
+	other=$(( ox == 0 ? 1280 : 0 ))
+	client click left $(( (x + w / 2) / 2 )) $((y + 12)) $(( (other + 640) / 2 )) 360
+	sleep 0.5
+	[ "$(ctl -j windows | grep -o '"output":"[^"]*"' | sort -u | wc -l)" -eq 2 ] \
+		&& ok "drag: a window dropped on an empty monitor stays there" \
+		|| bad "drag: a window dropped on an empty monitor stays there: $(ctl windows)"
+fi
+wait "$CD"
+config
+alive
+
 # 5b. a scroll strip on one monitor draws nothing on the monitor next to it
 config "layout = scroll"
 sleep 0.3

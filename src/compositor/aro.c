@@ -1178,12 +1178,16 @@ static struct aro_view *nearest_tiled_view(struct aro_server *s,
 {
 	struct aro_view *best = NULL;
 	double best_d = 0;
+	struct aro_output *at = output_at(s, x, y);
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
 		if (!view_visible(v) || v == except)
 			continue;
 		if (v->floating || v->fullscreen || !v->node)
+			continue;
+		/* only views on cursor output */
+		if (v->output != at)
 			continue;
 
 		double cx = v->node->box.x + v->node->box.w / 2.0;
@@ -1231,7 +1235,11 @@ static void view_retile(struct aro_server *s, struct aro_view *v)
 		return;
 	}
 
-	/* become root if workspace empty */
+	/* become root if workspace empty, on the output under the cursor */
+	struct aro_output *o = output_at(s, s->cursor->x, s->cursor->y);
+	v->output = o;
+	v->workspace = o->cur_ws;
+	s->focused_output = o;
 	ly_node **root = &v->output->ws[v->workspace];
 	if (*root)
 		return;                 /* a tree with no visible leaves; leave it */
