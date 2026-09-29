@@ -19,6 +19,7 @@ struct win {
 	struct xdg_toplevel *top;
 	int w, h;
 	int drawn;
+	int tiled;
 };
 
 static struct globals g;
@@ -73,9 +74,14 @@ static void top_configure(void *data, struct xdg_toplevel *t, int32_t w, int32_t
                           struct wl_array *states)
 {
 	struct win *win = data;
-	(void)t; (void)states;
+	(void)t;
 	win->w = w;
 	win->h = h;
+	win->tiled = 0;
+	uint32_t *s;
+	wl_array_for_each(s, states)
+		if (*s >= XDG_TOPLEVEL_STATE_TILED_LEFT && *s <= XDG_TOPLEVEL_STATE_TILED_BOTTOM)
+			win->tiled = 1;
 }
 
 static void top_close(void *data, struct xdg_toplevel *t) { (void)data; (void)t; }
@@ -145,7 +151,18 @@ int main(int argc, char **argv)
 			break;
 		roundtrip(&g);
 	}
-	printf("%d windows open\n", n);
+	/* tiled states come with the configure after mapping */
+	int tiled = 0;
+	for (int tries = 0; tries < 20; tries++) {
+		tiled = 0;
+		for (int i = 0; i < n; i++)
+			tiled += wins[i].tiled;
+		if (tiled == n)
+			break;
+		usleep(10000);
+		roundtrip(&g);
+	}
+	printf("%d windows open, %d tiled\n", n, tiled);
 	fflush(stdout);
 
 	for (int i = 0; i < hold * 10; i++) {

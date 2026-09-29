@@ -38,7 +38,7 @@ static void reg_global(void *data, struct wl_registry *r, uint32_t name,
 	else if (!strcmp(iface, wl_shm_interface.name))
 		g->shm = wl_registry_bind(r, name, &wl_shm_interface, 1);
 	else if (!strcmp(iface, xdg_wm_base_interface.name)) {
-		g->wm = wl_registry_bind(r, name, &xdg_wm_base_interface, 1);
+		g->wm = wl_registry_bind(r, name, &xdg_wm_base_interface, 2);       /* 2: tiled states */
 		xdg_wm_base_add_listener(g->wm, &wm_listener, NULL);
 	} else if (!strcmp(iface, zwlr_layer_shell_v1_interface.name))
 		g->layer_shell = wl_registry_bind(r, name, &zwlr_layer_shell_v1_interface, 1);

@@ -196,8 +196,13 @@ void view_swap(struct aro_view *a, struct aro_view *b)
 static void xdg_configure(struct aro_view *v, int x, int y, int w, int h)
 {
 	(void)x; (void)y;       /* a Wayland client does not know where it is */
-	if (v->toplevel)
-		wlr_xdg_toplevel_set_size(v->toplevel, w, h);
+	if (!v->toplevel)
+		return;
+	/* tiled: fill the size given, mpv stops keeping its aspect */
+	if (wl_resource_get_version(v->toplevel->resource) >= XDG_TOPLEVEL_STATE_TILED_LEFT_SINCE_VERSION)
+		wlr_xdg_toplevel_set_tiled(v->toplevel, v->floating || v->fullscreen ? WLR_EDGE_NONE
+		        : WLR_EDGE_LEFT | WLR_EDGE_RIGHT | WLR_EDGE_TOP | WLR_EDGE_BOTTOM);
+	wlr_xdg_toplevel_set_size(v->toplevel, w, h);
 }
 
 static void xdg_close(struct aro_view *v)

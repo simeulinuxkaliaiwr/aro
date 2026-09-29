@@ -151,6 +151,8 @@ CW=$!
 if wait_for "$T/win.out" "3 windows open"; then
 	n=$(ctl -j windows | grep -o '"id":' | wc -l)
 	[ "$n" -eq 3 ] && ok "three windows mapped" || bad "three windows mapped: aroctl sees $n"
+	grep -q "3 tiled" "$T/win.out" && ok "tiled windows are told they are tiled" \
+		|| bad "tiled windows are told they are tiled: $(cat "$T/win.out")"
 	for step in "layout monocle" "focus right" "focus left" "layout dwindle" \
 		"layout manual" "layout monocle" "workspace 2" "workspace 1" "layout manual"; do
 		ctl dispatch $step > /dev/null || bad "dispatch $step"
