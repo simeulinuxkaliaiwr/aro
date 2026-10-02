@@ -149,7 +149,7 @@ text_padding = 10
 # otherwise tiny dialogs could shrink to 80x80.
 float_min_width = 240
 float_min_height = 120
-float_scale = 0.5           # default size for floating windows (fraction of screen)
+float_scale = 0.5           # size for floating windows, opened or floated by key (fraction of screen)
 
 # === see-through windows ===
 # 1.0 is solid. a rule can set its own: rule = app_id:foot opacity 0.9

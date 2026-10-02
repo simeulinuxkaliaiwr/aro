@@ -424,14 +424,18 @@ static void frame_chrome(struct aro_view *v, int *cw, int *ch)
 	*ch = big.h - c.h;
 }
 
-static ly_box float_box_for(struct aro_view *v)
+/*
+ * Centred on the screen. app_size asks the app first, with float_scale as
+ * the fallback; without it, float_scale it is. An app on screen reports the
+ * size it has, so a tiled window floated by key would keep its tile's (#2).
+ */
+static ly_box float_box_for(struct aro_view *v, bool app_size)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
 	ly_box u = usable_area(v->output);
 
-	/* preferred size first, float_scale fallback */
 	int w = 0, h = 0;
-	if (v->impl->preferred_size)
+	if (app_size && v->impl->preferred_size)
 		v->impl->preferred_size(v, &w, &h);
 	if (w <= 0 || h <= 0) {
 		w = (int)(u.w * th->float_scale);
@@ -534,12 +538,16 @@ void view_set_floating(struct aro_server *s, struct aro_view *v,
 		v->sticky = v->scratch = false; /* both are floating only */
 
 	if (floating) {
+		/* a window dragged out of the layout keeps its size; the float key gives float_scale */
+		const bool dragged = s->grabbed == v;
 		view_detach(v);
 		v->floating = true;
-		v->fbox = float_box_for(v);
+		v->fbox = float_box_for(v, dragged);
 		if (!v->fullscreen)
 			wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		view_float_configure_once(v);
+		if (!dragged)
+			v->float_follow = false;        /* or its next commit, still tile-sized, undoes it */
 	} else {
 		v->floating = false;
 		v->float_follow = false;        /* the tree decides again */
@@ -1022,7 +1030,7 @@ void aro_view_drop(struct aro_server *s, struct aro_view *v,
 			/* out of memory: floating beats being nowhere */
 			wlr_log(WLR_ERROR, "out of memory dropping a window");
 			v->floating = true;
-			v->fbox = float_box_for(v);
+			v->fbox = float_box_for(v, true);
 			if (!v->fullscreen)
 				wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		}
@@ -1484,7 +1492,7 @@ void view_map(struct wl_listener *l, void *data)
 	if (floating) {
 		/* floating windows skip the tree */
 		v->floating = true;
-		v->fbox = float_box_for(v);
+		v->fbox = float_box_for(v, true);
 		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		view_float_configure_once(v);
 		rule_place(v, &r);

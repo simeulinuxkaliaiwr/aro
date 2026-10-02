@@ -237,6 +237,25 @@ fi
 wait "$CS"
 alive
 
+# 4e2. the float key frees a tiled window at float_scale, centred, and the app's
+# next commit at its old tile size doesn't undo that (#2)
+client window 1 4 > "$T/floatkey.out" 2>&1 &
+CF=$!
+if wait_for "$T/floatkey.out" "1 windows open"; then
+	ctl dispatch float > /dev/null; sleep 0.6
+	read -r fw fx < <(ctl -j windows | grep -o '"x":-\?[0-9]*,"y":-\?[0-9]*,"width":[0-9]*' | head -n 1 \
+		| sed -E 's/"x":(-?[0-9]*),"y":-?[0-9]*,"width":([0-9]*)/\2 \1/')
+	ow=$(ctl -j outputs | grep -o '"width":[0-9]*' | head -n 1 | cut -d: -f2)
+	if [ -n "$fw" ] && [ "$fw" -lt $((ow * 6 / 10)) ] && [ "$fw" -gt $((ow * 4 / 10)) ] &&
+	   [ $((2 * fx + fw - ow)) -le 2 ] && [ $((2 * fx + fw - ow)) -ge -2 ]; then
+		ok "the float key gives float_scale, centred"
+	else
+		bad "the float key gives float_scale, centred: width $fw at x $fx on $ow"
+	fi
+fi
+wait "$CF"
+alive
+
 # 4f. the scratchpad hides a window and brings it to whatever workspace is showing
 client window 2 5 > "$T/scratch.out" 2>&1 &
 CX=$!
