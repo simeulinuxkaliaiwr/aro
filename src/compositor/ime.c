@@ -57,6 +57,8 @@ struct aro_ime {
 	struct wlr_text_input_manager_v3 *ti_mgr;
 	struct wlr_input_method_manager_v2 *im_mgr;
 	struct wlr_input_method_v2 *im;         /* at most one */
+	/* its keyboard grab; the grab's destroy signal carries no data */
+	struct wlr_input_method_keyboard_grab_v2 *grab;
 
 	struct wl_list text_inputs;
 	struct wl_list popups;
@@ -344,9 +346,10 @@ static void new_text_input(struct wl_listener *l, void *data)
 static void im_commit(struct wl_listener *l, void *data)
 {
 	struct aro_ime *ime = wl_container_of(l, ime, im_commit);
-	struct wlr_input_method_v2 *im = data;
+	struct wlr_input_method_v2 *im = ime->im;
+	(void)data; /* wlroots emits commit with NULL */
 	struct aro_text_input *ti = focused_text_input(ime);
-	if (!ti)
+	if (!im || !ti)
 		return;
 
 	if (im->current.preedit.text)
@@ -364,12 +367,14 @@ static void im_commit(struct wl_listener *l, void *data)
 static void im_grab_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_ime *ime = wl_container_of(l, ime, im_grab_destroy);
-	struct wlr_input_method_keyboard_grab_v2 *grab = data;
+	struct wlr_input_method_keyboard_grab_v2 *grab = ime->grab;
+	(void)data; /* wlroots emits destroy with NULL */
 	wl_list_remove(&ime->im_grab_destroy.link);
 	wl_list_init(&ime->im_grab_destroy.link);
+	ime->grab = NULL;
 
 	/* the application missed every modifier change during the grab */
-	if (grab->keyboard) {
+	if (grab && grab->keyboard) {
 		wlr_seat_set_keyboard(ime->server->seat, grab->keyboard);
 		wlr_seat_keyboard_notify_modifiers(ime->server->seat,
 		                                   &grab->keyboard->modifiers);
@@ -385,6 +390,7 @@ static void im_grab_keyboard(struct wl_listener *l, void *data)
 		wlr_seat_get_keyboard(ime->server->seat));
 
 	wl_list_remove(&ime->im_grab_destroy.link);
+	ime->grab = grab;
 	ime->im_grab_destroy.notify = im_grab_destroy;
 	wl_signal_add(&grab->events.destroy, &ime->im_grab_destroy);
 }

@@ -109,6 +109,27 @@ done
 ok "sandboxed clients see only safe protocols"
 alive
 
+# an input method lets go of the keyboard, then types into a field: both
+# crashed aro, whose handlers read the data wlroots sends as NULL (#1).
+# a field only gets the input method with keyboard focus, so a virtual
+# keyboard stays around; this runs early, before other tests move focus
+if command -v wtype > /dev/null; then
+	env -i PATH="$PATH" XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 wtype -s 4000 -k Shift_L &
+	KB=$!
+	sleep 0.5
+	if client ime > "$T/ime.out" 2>&1 && grep -q "^committed xin chào" "$T/ime.out" \
+		&& grep -q "^grab released" "$T/ime.out"; then
+		ok "input method text reaches the field"
+	else
+		bad "input method text reaches the field: $(tail -n 1 "$T/ime.out")"
+	fi
+	kill "$KB" 2> /dev/null
+	wait "$KB" 2> /dev/null
+	alive
+else
+	echo "skip  input methods (no wtype)"
+fi
+
 # 1. popups with no parent: this crashed aro on every waybar tooltip
 client popup-orphan > /dev/null && ok "parentless popups" || bad "parentless popups"
 alive
