@@ -24,6 +24,10 @@
 
 /* from niri's documentation of its Overview; none of its code */
 
+/* with glass headers, the selected window glows in the accent colour, as Windows 7 lit
+ * what the pointer was on */
+#define OV_GLOW_BLUR 14
+
 static const anim_ease OV_EASE = {
 	TH_EASE_FLAT_X1, TH_EASE_FLAT_Y1, TH_EASE_FLAT_X2, TH_EASE_FLAT_Y2,
 };
@@ -227,16 +231,17 @@ static void rect_color(struct wlr_scene_rect *r, uint32_t rgba)
 }
 
 /* clipped to the output, so a strip never draws on the screen next door */
-static void rect_place(struct wlr_scene_rect *r, ly_box b, ly_box clip)
+static ly_box rect_place(struct wlr_scene_rect *r, ly_box b, ly_box clip)
 {
 	ly_box v;
 	if (!clip_box(b, clip, &v)) {
 		wlr_scene_node_set_enabled(&r->node, false);
-		return;
+		return (ly_box){ 0 };
 	}
 	wlr_scene_node_set_enabled(&r->node, true);
 	wlr_scene_node_set_position(&r->node, v.x, v.y);
 	wlr_scene_rect_set_size(r, v.w, v.h);
+	return v;
 }
 
 static void buf_place(struct wlr_scene_buffer *sb, struct wlr_fbox src,
@@ -332,8 +337,30 @@ static struct aro_view *pick_on_ws(struct aro_server *s, struct aro_output *o,
 	return NULL;
 }
 
+/* overview_layers: sharp over the blur and the tint, under the workspaces */
+static void keep_layers(struct aro_server *s, struct ov_output *oo)
+{
+	struct wlr_scene_node *above = &oo->backdrop->node;
+	struct aro_layer *l;
+	wl_list_for_each_reverse(l, &s->layers, link) {
+		struct wlr_layer_surface_v1 *ls = l->layer_surface;
+		if (!ls->surface->mapped || ls->output != oo->output->wlr_output ||
+		    !layer_listed(l, s->cfg.overview_layers))
+			continue;
+		wlr_scene_node_reparent(&l->scene->tree->node, oo->tree);
+		wlr_scene_node_place_above(&l->scene->tree->node, above);
+		above = &l->scene->tree->node;
+	}
+}
+
 static void out_free(struct ov_output *oo)
 {
+	if (oo->tree && oo->output) {
+		struct aro_layer *l;
+		wl_list_for_each(l, &oo->output->server->layers, link)
+			if (l->scene->tree->node.parent == oo->tree)
+				wlr_scene_node_reparent(&l->scene->tree->node, layer_home(l));
+	}
 	for (int i = 0; i < oo->ncards; i++)
 		qtext_finish(&oo->cards[i].label);
 	oo->ncards = 0;
@@ -378,10 +405,25 @@ static bool item_add(struct aro_server *s, struct ov_output *oo,
 	struct ov_item *it = &oo->items[oo->nitems];
 	*it = (struct ov_item){ .view = v, .chrome = chrome };
 	if (chrome) {
+#ifdef ARO_EFFECTS
+		float none[4] = { 0 };
+		it->glow = wlr_scene_shadow_create(oo->tree, 1, 1, r, OV_GLOW_BLUR, none);
+		if (!it->glow)
+			return false;
+		wlr_scene_node_set_enabled(&it->glow->node, false);
+#endif
 		it->edge = rect(oo->tree, th->line, r);
 		it->bg = rect(oo->tree, th->frame, ri);
-		if (!it->edge || !it->bg)
+		it->head = rect(oo->tree, th->frame, 0);
+		it->gloss = wlr_scene_buffer_create(oo->tree, ui_gloss_buffer(s));
+		if (!it->edge || !it->bg || !it->head || !it->gloss)
 			return false;
+		wlr_scene_node_set_enabled(&it->gloss->node, false);
+#ifdef ARO_EFFECTS
+		wlr_scene_rect_set_corner_radii(it->head, corner_radii_new(ri, ri, 0, 0));
+		wlr_scene_buffer_set_corner_radii(it->gloss, corner_radii_new(ri, ri, 0, 0));
+		wlr_scene_rect_set_corner_radii(it->bg, corner_radii_new(0, 0, ri, ri));
+#endif
 	}
 	it->snap = ui_snap_create(oo->tree, v, chrome ? ri : 0);
 	if (chrome) {
@@ -409,6 +451,7 @@ static bool out_build(struct aro_server *s, struct ov_output *oo,
 	oo->backdrop = rect(oo->tree, fade(th->overview_tint, 0), 0);
 	if (!oo->backdrop)
 		return false;
+	keep_layers(s, oo);
 
 	int count[ARO_MAX_WS] = { 0 };
 	int nviews = 0;
@@ -897,10 +940,10 @@ static bool on_other_output(struct aro_server *s, struct aro_output *o,
 	return false;
 }
 
-static void shadow_place(struct aro_server *s, struct wlr_scene_shadow *sh,
-                         struct aro_output *o, ly_box card, double p)
+static void halo_place(struct aro_server *s, struct wlr_scene_shadow *sh,
+                       struct aro_output *o, ly_box card, uint32_t rgba,
+                       int sig, int dy, double p)
 {
-	const int sig = TH_SHADOW_BLUR, dy = TH_SHADOW_Y;
 	ly_box b = { card.x - sig, card.y - sig + dy,
 	             card.w + 2 * sig, card.h + 2 * sig };
 	if (card.w < 1 || card.h < 1 || on_other_output(s, o, b)) {
@@ -908,7 +951,7 @@ static void shadow_place(struct aro_server *s, struct wlr_scene_shadow *sh,
 		return;
 	}
 	float c[4];
-	ui_color(fade(TH_SHADOW_COLOR, p), c);
+	ui_color(fade(rgba, p), c);
 	wlr_scene_node_set_enabled(&sh->node, true);
 	wlr_scene_node_set_position(&sh->node, b.x, b.y);
 	wlr_scene_shadow_set_size(sh, b.w, b.h);
@@ -918,6 +961,12 @@ static void shadow_place(struct aro_server *s, struct wlr_scene_shadow *sh,
 		.area = { sig, sig - dy, card.w, card.h },
 		.corners = corner_radii_all(s->cfg.theme.radius),
 	});
+}
+
+static void shadow_place(struct aro_server *s, struct wlr_scene_shadow *sh,
+                         struct aro_output *o, ly_box card, double p)
+{
+	halo_place(s, sh, o, card, TH_SHADOW_COLOR, TH_SHADOW_BLUR, TH_SHADOW_Y, p);
 }
 #endif
 
@@ -990,7 +1039,12 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 			if (it->edge) {
 				wlr_scene_node_set_enabled(&it->edge->node, false);
 				wlr_scene_node_set_enabled(&it->bg->node, false);
+				wlr_scene_node_set_enabled(&it->head->node, false);
+				wlr_scene_node_set_enabled(&it->gloss->node, false);
 				wlr_scene_node_set_enabled(&it->ring->node, false);
+#ifdef ARO_EFFECTS
+				wlr_scene_node_set_enabled(&it->glow->node, false);
+#endif
 			}
 			if (it->snap)
 				wlr_scene_node_set_enabled(ui_snap_node(it->snap), false);
@@ -1021,18 +1075,47 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		}
 
 		bool sel = ov->sel_view == v;
-		rect_color(it->edge, sel ? th->accent : th->line);
-		rect_color(it->bg, sel ? th->frame_on : th->frame);
-		rect_place(it->edge, b, cl);
-		rect_place(it->bg, inset(b, bw), cl);
-
 		ly_box cb;
 		ui_frame_content_box(v, real, &cb);
-		if (it->snap)
-			ui_snap_place(it->snap, dragged ? carry(real, cb, b)
-			           : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p), cl);
-
+		const ly_box sb = dragged ? carry(real, cb, b)
+		                : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p);
 		ly_box in = inset(b, bw);
+		/* the header runs from the frame's inside down to the content, glass as on screen */
+		int hh = sb.y - in.y;
+		hh = hh < 0 ? 0 : (hh > in.h ? in.h : hh);
+		const ly_box hb = { in.x, in.y, in.w, hh };
+		float col[4];
+		ui_color(sel ? th->frame_on : th->frame, col);
+		for (int k = 0; k < 4; k++)
+			col[k] *= ui_header_alpha(s);
+		wlr_scene_rect_set_color(it->head, col);
+		rect_color(it->edge, sel ? th->accent : th->line);
+		rect_color(it->bg, sel ? th->frame_on : th->frame);
+#ifdef ARO_EFFECTS
+		if (sel && s->cfg.header_gloss > 0 && !dragged &&
+		    b.x >= cl.x && b.y >= cl.y && b.x + b.w <= cl.x + cl.w && b.y + b.h <= cl.y + cl.h)
+			halo_place(s, it->glow, o, b, (th->accent & 0xffffff00u) | 0xb0u, OV_GLOW_BLUR, 0, p);
+		else
+			wlr_scene_node_set_enabled(&it->glow->node, false);
+#endif
+		const ly_box ev = rect_place(it->edge, b, cl);
+#ifdef ARO_EFFECTS
+		/* hollow, so the border never shows through the header */
+		wlr_scene_rect_set_clipped_region(it->edge, (struct clipped_region){
+			.area = { in.x - ev.x, in.y - ev.y, in.w, in.h },
+			.corners = corner_radii_all(th->radius - bw > 0 ? th->radius - bw : 0),
+		});
+#else
+		(void)ev;
+#endif
+		rect_place(it->bg, (ly_box){ in.x, in.y + hh, in.w, in.h - hh }, cl);
+		ly_box hgot = rect_place(it->head, hb, cl);
+		if (hh <= 0)
+			wlr_scene_node_set_enabled(&it->head->node, false);
+		ui_gloss_place(s, it->gloss, hb, hgot, hh > 0);
+		if (it->snap)
+			ui_snap_place(it->snap, sb, cl);
+
 		wlr_scene_node_set_enabled(&it->ring->node, sel);
 		if (sel)
 			rect_place(it->ring, (ly_box){ in.x, in.y, in.w, 1 }, cl);
@@ -1163,10 +1246,18 @@ static bool drag_begin(struct aro_server *s)
 	wlr_scene_node_set_enabled(&ov->drop_tree->node, false);
 
 	/* over every card and every screen; same order as before */
+#ifdef ARO_EFFECTS
+	if (it->glow)
+		wlr_scene_node_set_enabled(&it->glow->node, false);
+#endif
 	if (it->edge)
 		wlr_scene_node_reparent(&it->edge->node, ov->drag_tree);
 	if (it->bg)
 		wlr_scene_node_reparent(&it->bg->node, ov->drag_tree);
+	if (it->head)
+		wlr_scene_node_reparent(&it->head->node, ov->drag_tree);
+	if (it->gloss)
+		wlr_scene_node_reparent(&it->gloss->node, ov->drag_tree);
 	if (it->snap)
 		wlr_scene_node_reparent(ui_snap_node(it->snap), ov->drag_tree);
 	if (it->ring)

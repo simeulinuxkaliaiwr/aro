@@ -167,7 +167,7 @@ blur_radius = 5                 # 1 to 100
 # blur_layers = waybar rofi fuzzel
 # glass headers, like Windows 7's Aero: a glossy highlight (0 to 1, 0 is flat),
 # and headers that let what is behind show through, blurred with blur on
-# (0.05 to 1; below 1 needs a SceneFX build)
+# (0.05 to 1; below 1 needs a SceneFX build); the overview's windows wear them too
 header_gloss = 0
 header_opacity = 1.0
 
@@ -222,6 +222,8 @@ switcher_preview_height = 260   # capped at half the screen; with many
 overview_zoom = 0.5
 overview_ms = 250
 overview_tint = 0x0c0f1366      # over the wallpaper, which is blurred with effects
+# layer surfaces kept sharp over that, under the workspaces, by namespace (globs)
+# overview_layers = desktop-snow
 
 # === pointer ===
 drag_threshold = 12         # pixels to drag before a tiled window detaches

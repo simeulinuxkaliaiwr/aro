@@ -1457,6 +1457,8 @@ bool config_load(struct aro_config *c, const char *path)
 				c->blur_radius = n;
 		} else if (!strcasecmp(key, "blur_layers")) {
 			ok = set_str(&c->blur_layers, value);
+		} else if (!strcasecmp(key, "overview_layers")) {
+			ok = set_str(&c->overview_layers, value);
 		} else if (!strcasecmp(key, "touchpad_tap")) {
 			ok = parse_bool(value, &c->tp_tap);
 		} else if (!strcasecmp(key, "touchpad_natural_scroll")) {
@@ -1585,6 +1587,7 @@ void config_finish(struct aro_config *c)
 	free(c->xkb_rules);
 	free(c->cursor_theme);
 	free(c->blur_layers);
+	free(c->overview_layers);
 	free(c->wallpaper_file);
 	for (int i = 0; i < c->nwallpaper_dirs; i++)
 		free(c->wallpaper_dirs[i]);

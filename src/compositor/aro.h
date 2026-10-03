@@ -546,6 +546,14 @@ void ui_color(uint32_t rgba, float out[4]);
 
 /* a window's buffer as a scene node; shared by switcher and overview */
 struct ui_snap;
+/* glass headers: how solid they are, the shared highlight (NULL: none), and that highlight
+ * laid over want, cut to got */
+float ui_header_alpha(struct aro_server *s);
+struct wlr_buffer *ui_gloss_buffer(struct aro_server *s);
+void ui_gloss_place(struct aro_server *s, struct wlr_scene_buffer *g, ly_box want, ly_box got, bool shown);
+/* layers.c: whether a list of namespace globs names a layer, and the tree it belongs in */
+bool layer_listed(struct aro_layer *l, const char *globs);
+struct wlr_scene_tree *layer_home(struct aro_layer *l);
 struct ui_snap *ui_snap_create(struct wlr_scene_tree *parent, struct aro_view *v, int radius);
 void ui_snap_sync(struct ui_snap *s, struct aro_view *v);
 void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip);

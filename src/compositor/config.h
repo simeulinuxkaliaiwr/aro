@@ -231,6 +231,7 @@ struct aro_config {
 	bool blur;              /* behind see-through windows; effects builds only */
 	int blur_passes, blur_radius;
 	char *blur_layers;      /* namespace globs, space-separated; owned */
+	char *overview_layers;  /* the same, kept sharp over the overview; owned */
 
 	/* xkb: NULL means the system default, i.e. whatever XKB_DEFAULT_* say */
 	char *xkb_layout, *xkb_variant, *xkb_options, *xkb_model, *xkb_rules;

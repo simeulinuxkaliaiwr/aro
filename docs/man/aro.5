@@ -396,6 +396,8 @@ Default: auto.
 A glossy highlight across window headers, as on Windows 7's Aero glass:
 brighter above the middle, with a hard edge there.
 0 to 1; 0 is a flat header.
+The overview's windows get it too, and with SceneFX the selected one there
+glows in the accent colour.
 Default: 0.
 .TP
 .BI "header_opacity = " n
@@ -423,6 +425,12 @@ Layer surfaces to blur behind, by namespace, as globs: bars, launchers,
 notifications.
 .B aroctl
 does not list namespaces; the log does, as each surface maps.
+.TP
+.BI "overview_layers = " "namespace ..."
+Layer surfaces the overview keeps sharp, by namespace, as globs: drawn over
+its blur and tint and under the workspaces, as a snowfall or a clock on the
+desktop would want.
+They are only shown there; clicks go to the overview.
 .SH MOTION
 .TS
 tab(|);

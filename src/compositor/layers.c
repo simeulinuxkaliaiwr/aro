@@ -55,26 +55,38 @@ static void layer_focus(struct aro_server *s, struct aro_layer *l)
 	keyboard_focus_changed(s);
 }
 
+bool layer_listed(struct aro_layer *l, const char *globs)
+{
+	const char *ns = l->layer_surface->namespace;
+	if (!globs || !ns)
+		return false;
+	for (const char *p = globs + strspn(globs, " ,"); *p;) {
+		const size_t n = strcspn(p, " ,");
+		char g[256];
+		if (n < sizeof g) {
+			memcpy(g, p, n);
+			g[n] = '\0';
+			if (glob_match(g, ns))
+				return true;
+		}
+		p += n;
+		p += strspn(p, " ,");
+	}
+	return false;
+}
+
+struct wlr_scene_tree *layer_home(struct aro_layer *l)
+{
+	return layer_tree_for(l->server, l->layer_surface->current.layer);
+}
+
 /* blur behind a layer surface whose namespace blur_layers names */
 static void layer_blur_update(struct aro_layer *l)
 {
 #ifdef ARO_EFFECTS
 	struct wlr_layer_surface_v1 *ls = l->layer_surface;
 	const struct aro_config *c = &l->server->cfg;
-	bool on = false;
-	if (c->blur && c->blur_layers && ls->namespace && ls->surface->mapped) {
-		for (const char *p = c->blur_layers + strspn(c->blur_layers, " ,"); *p && !on;) {
-			const size_t n = strcspn(p, " ,");
-			char g[256];
-			if (n < sizeof g) {
-				memcpy(g, p, n);
-				g[n] = '\0';
-				on = glob_match(g, ls->namespace);
-			}
-			p += n;
-			p += strspn(p, " ,");
-		}
-	}
+	bool on = c->blur && ls->surface->mapped && layer_listed(l, c->blur_layers);
 	if (on && !l->blur) {
 		l->blur = wlr_scene_blur_create(l->scene->tree, 1, 1);
 		if (l->blur)

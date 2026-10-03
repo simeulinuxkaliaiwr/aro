@@ -385,6 +385,40 @@ wait "$CH"
 alive
 config
 
+# 4f3c. overview_layers keeps a gadget sharp over the overview's tint, and gives it back after
+if command -v grim > /dev/null; then
+	opx() {
+		env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$1 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n'
+	}
+	config "overview_tint = 0x000000ff" "overview_ms = 0"
+	client layer-zone 5 > "$T/keep.out" 2>&1 &
+	CK=$!
+	if wait_for "$T/keep.out" "both drawn"; then
+		sleep 0.3
+		ctl dispatch overview > /dev/null; sleep 0.4
+		px=$(opx 20,660)
+		[ "$px" = "000000" ] && ok "overview: the tint covers the layers under it" \
+			|| bad "overview: the tint covers the layers under it: pixel is '$px'"
+		ctl dispatch overview > /dev/null; sleep 0.3
+		config "overview_tint = 0x000000ff" "overview_ms = 0" "overview_layers = test-*"
+		sleep 0.3
+		ctl dispatch overview > /dev/null; sleep 0.4
+		px=$(opx 20,660)
+		[ "$px" = "ff0000" ] && ok "overview_layers: a listed layer stays over the tint" \
+			|| bad "overview_layers: a listed layer stays over the tint: pixel is '$px'"
+		ctl dispatch overview > /dev/null; sleep 0.4
+		px=$(opx 20,660)
+		[ "$px" = "ff0000" ] && ok "overview_layers: the layer is back in place after" \
+			|| bad "overview_layers: the layer is back in place after: pixel is '$px'"
+	else
+		bad "overview_layers: the gadget never drew"
+	fi
+	wait "$CK" || bad "layer-zone client exited with an error"
+	alive
+	config
+fi
+
 # 4f4. the overview shows a window's subsurfaces too, not just its main surface (Firefox)
 client window 2 4 sub > "$T/sub.out" 2>&1 &
 CU=$!

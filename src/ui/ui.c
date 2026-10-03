@@ -80,14 +80,19 @@ static uint32_t frame_bg(struct aro_view *v, bool focused)
 }
 
 /* how see-through headers are; only SceneFX can hollow the border out from under them */
-static float header_alpha(struct aro_view *v)
+float ui_header_alpha(struct aro_server *s)
 {
 #ifdef ARO_EFFECTS
-	return (float)v->server->cfg.header_opacity;
+	return (float)s->cfg.header_opacity;
 #else
-	(void)v;
+	(void)s;
 	return 1.0f;
 #endif
+}
+
+static float header_alpha(struct aro_view *v)
+{
+	return ui_header_alpha(v->server);
 }
 
 /* ui_color, faded by a */
@@ -173,7 +178,7 @@ void ui_frame_clip_content(struct aro_view *v)
 }
 
 /* one highlight for every header, redrawn when header_gloss changes */
-static struct wlr_buffer *gloss_buffer(struct aro_server *s)
+struct wlr_buffer *ui_gloss_buffer(struct aro_server *s)
 {
 	if (s->gloss_amount == s->cfg.header_gloss)
 		return s->gloss_buf;
@@ -186,7 +191,7 @@ static struct wlr_buffer *gloss_buffer(struct aro_server *s)
 
 static void gloss_sync(struct aro_view *v)
 {
-	struct wlr_buffer *buf = gloss_buffer(v->server);
+	struct wlr_buffer *buf = ui_gloss_buffer(v->server);
 	wlr_scene_buffer_set_buffer(v->gloss, buf);
 	if (!buf)
 		wlr_scene_node_set_enabled(&v->gloss->node, false);
@@ -194,17 +199,23 @@ static void gloss_sync(struct aro_view *v)
 
 /* the highlight over the header; a header cut at the screen's edge shows its part of it.
  * The scene drops its buffer once uploaded, so the server's copy says whether there is one */
-static void place_gloss(struct aro_view *v, ly_box want, ly_box got, bool shown)
+void ui_gloss_place(struct aro_server *s, struct wlr_scene_buffer *g,
+                    ly_box want, ly_box got, bool shown)
 {
-	shown = shown && v->server->gloss_buf && got.w > 0 && got.h > 0 && want.h > 0;
-	wlr_scene_node_set_enabled(&v->gloss->node, shown);
+	shown = shown && s->gloss_buf && got.w > 0 && got.h > 0 && want.h > 0;
+	wlr_scene_node_set_enabled(&g->node, shown);
 	if (!shown)
 		return;
 	const double bh = UI_GLOSS_H;
-	wlr_scene_node_set_position(&v->gloss->node, got.x, got.y);
-	wlr_scene_buffer_set_dest_size(v->gloss, got.w, got.h);
-	wlr_scene_buffer_set_source_box(v->gloss, &(struct wlr_fbox){
+	wlr_scene_node_set_position(&g->node, got.x, got.y);
+	wlr_scene_buffer_set_dest_size(g, got.w, got.h);
+	wlr_scene_buffer_set_source_box(g, &(struct wlr_fbox){
 		0, bh * (got.y - want.y) / want.h, 1, bh * got.h / want.h });
+}
+
+static void place_gloss(struct aro_view *v, ly_box want, ly_box got, bool shown)
+{
+	ui_gloss_place(v->server, v->gloss, want, got, shown);
 }
 
 /* a see-through header: the window background starts under it, and it takes the top corners */

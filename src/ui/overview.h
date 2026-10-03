@@ -28,7 +28,9 @@ struct aro_layer;
 struct ov_item {
 	struct aro_view *view;
 	int slot;                       /* index into the output's cards */
-	struct wlr_scene_rect *edge, *bg, *ring;
+	struct wlr_scene_rect *edge, *bg, *head, *ring;
+	struct wlr_scene_buffer *gloss;         /* header_gloss over the header */
+	struct wlr_scene_shadow *glow;          /* the selected one's, with header_gloss; effects only */
 	struct ui_snap *snap;
 	bool chrome;                    /* false for fullscreen */
 	ly_box drawn;
