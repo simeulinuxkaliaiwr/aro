@@ -325,6 +325,14 @@ static void xwl_request_configure(struct wl_listener *l, void *data)
 	}
 }
 
+/* tiling cannot minimize; answer anyway, Wine hides a window left waiting */
+static void xwl_request_minimize(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, request_minimize);
+	(void)data;
+	wlr_xwayland_surface_set_minimized(v->xsurface, false);
+}
+
 static void xwl_associate(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, associate);
@@ -375,6 +383,7 @@ static void xwl_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&v->associate.link);
 	wl_list_remove(&v->dissociate.link);
 	wl_list_remove(&v->request_configure.link);
+	wl_list_remove(&v->request_minimize.link);
 	wl_list_remove(&v->set_title.link);
 	wl_list_remove(&v->set_app_id.link);
 	wl_list_remove(&v->request_fullscreen.link);
@@ -433,6 +442,8 @@ void new_xwayland_surface(struct wl_listener *l, void *data)
 	wl_signal_add(&xsurface->events.request_resize, &v->request_resize);
 	v->request_configure.notify = xwl_request_configure;
 	wl_signal_add(&xsurface->events.request_configure, &v->request_configure);
+	v->request_minimize.notify = xwl_request_minimize;
+	wl_signal_add(&xsurface->events.request_minimize, &v->request_minimize);
 	v->destroy.notify = xwl_destroy;
 	wl_signal_add(&xsurface->events.destroy, &v->destroy);
 

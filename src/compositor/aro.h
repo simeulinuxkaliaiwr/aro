@@ -103,6 +103,7 @@ struct aro_view {
 	struct wl_listener associate;
 	struct wl_listener dissociate;
 	struct wl_listener request_configure;
+	struct wl_listener request_minimize;
 #endif
 	ly_node *node;                  /* our leaf; NULL while floating */
 	struct aro_output *output;   /* which screen it lives on */
