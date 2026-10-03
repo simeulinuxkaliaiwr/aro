@@ -299,16 +299,21 @@ void arrange_layers_output(struct aro_output *o)
 
 	struct wlr_box usable = full;
 
+	/* exclusive zones first, so the rest keep clear of every bar however new they are */
 	struct aro_layer *l;
-	wl_list_for_each(l, &s->layers, link) {
-		/* configure initialized layer surfaces, not just mapped ones */
-		if (!l->layer_surface->initialized || !l->scene)
-			continue;
-		/* skip surfaces bound to another output */
-		if (l->layer_surface->output &&
-		    l->layer_surface->output != o->wlr_output)
-			continue;
-		wlr_scene_layer_surface_v1_configure(l->scene, &full, &usable);
+	for (int pass = 0; pass < 2; pass++) {
+		wl_list_for_each(l, &s->layers, link) {
+			/* configure initialized layer surfaces, not just mapped ones */
+			if (!l->layer_surface->initialized || !l->scene)
+				continue;
+			/* skip surfaces bound to another output */
+			if (l->layer_surface->output &&
+			    l->layer_surface->output != o->wlr_output)
+				continue;
+			if ((l->layer_surface->current.exclusive_zone > 0) != (pass == 0))
+				continue;
+			wlr_scene_layer_surface_v1_configure(l->scene, &full, &usable);
+		}
 	}
 
 	o->usable = (ly_box){ usable.x, usable.y, usable.width, usable.height };

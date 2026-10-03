@@ -155,6 +155,21 @@ else
 	cat "$T/popup.out"
 fi
 wait "$CP" || bad "layer-popup client exited with an error"
+
+# a gadget made after a bar still keeps clear of the bar's exclusive zone
+client layer-zone 3 > "$T/zone.out" 2>&1 &
+CZ=$!
+if wait_for "$T/zone.out" "both drawn" && command -v grim > /dev/null; then
+	sleep 0.4
+	zpx() {
+		env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$1 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n'
+	}
+	px=$(zpx 20,660)
+	[ "$px" = "ff0000" ] && ok "layer-shell: a gadget sits above a bar's exclusive zone" \
+		|| bad "layer-shell: a gadget sits above a bar's exclusive zone: pixel is '$px', expected ff0000"
+fi
+wait "$CZ" || bad "layer-zone client exited with an error"
 alive
 
 # 3. workspaces for bars, with the same rule as aro's own bar
