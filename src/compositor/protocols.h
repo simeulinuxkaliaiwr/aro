@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 struct aro_server;
+struct aro_view;
 
 /* after the renderer is bound to the display, before clients connect */
 void protocols_init(struct aro_server *s);
@@ -19,5 +20,8 @@ void shortcuts_inhibit_sync(struct aro_server *s);
 
 /* the focused app has taken aro's shortcuts, e.g. a VM or remote desktop */
 bool shortcuts_inhibited(struct aro_server *s);
+
+/* a window unmaps or goes: its capture, if anyone made one, ends */
+void capture_view_gone(struct aro_view *v);
 
 #endif

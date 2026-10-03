@@ -131,7 +131,8 @@ own will not load.
 
 Screen sharing and screenshots go through `xdg-desktop-portal-wlr`, and
 file pickers through `xdg-desktop-portal-gtk`. aro hands its display to
-the portals itself, so installing them is all it takes.
+the portals itself, so installing them is all it takes. Single windows can
+be captured too, through `ext-image-capture`, on every build, effects included.
 
 ```sh
 # installing it system-wide

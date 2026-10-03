@@ -208,7 +208,7 @@ if wait_for "$T/win.out" "3 windows open"; then
 		case $c in *"pixel 203040"*) ok "single-window capture" ;;
 			*) bad "single-window capture: $c" ;; esac
 	else
-		echo "skip  single-window capture (not offered with SceneFX)"
+		bad "single-window capture: not offered"
 	fi
 else
 	bad "three windows mapped"

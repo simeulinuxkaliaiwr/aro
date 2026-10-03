@@ -5,6 +5,11 @@
 #include "aro.h"
 
 #include <wlr/backend.h>
+#include <wlr/types/wlr_compositor.h>
+#include <wlr/render/swapchain.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/drm_format_set.h>
+#include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_color_management_v1.h>
 #include <wlr/types/wlr_drm_lease_v1.h>
@@ -24,6 +29,9 @@
 #include <wlr/xwayland/xwayland.h>
 #endif
 
+#include <drm_fourcc.h>
+#include <math.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -156,7 +164,20 @@ static void security_init(struct aro_server *s)
 		wl_display_set_global_filter(s->display, global_filter, s);
 }
 
-/* screen capture through ext-image-copy-capture; whole outputs on every build */
+/* screen capture through ext-image-copy-capture: whole outputs, and single windows.
+ * A window is drawn from its own surfaces rather than a scene node, as wlroots'
+ * scene-node capture cannot read SceneFX's scene; the same code serves every build */
+struct view_capture {
+	struct wlr_ext_image_capture_source_v1 base;
+	struct aro_view *view;
+	struct wlr_swapchain *swapchain;
+	int w, h;
+	bool want;                      /* a client waits for a frame */
+	bool sent;                      /* one went out since the start */
+	struct wl_event_source *idle;
+	struct wl_listener commit;
+};
+
 static void capture_src_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_view *v = wl_container_of(l, v, capture_src_destroy);
@@ -165,8 +186,202 @@ static void capture_src_destroy(struct wl_listener *l, void *data)
 	v->capture_src = NULL;
 }
 
-#ifndef ARO_EFFECTS
-/* one window, captured from its scene node; SceneFX's scene is not wlroots' */
+/* the window's size in buffer pixels, at its screen's scale */
+static void capture_size(struct aro_view *v, int *w, int *h, float *scale)
+{
+	struct wlr_box g;
+	view_geometry(v, &g);
+	*scale = v->output && v->output->wlr_output ? v->output->wlr_output->scale : 1.0f;
+	*w = (int)ceilf((float)g.width * *scale);
+	*h = (int)ceilf((float)g.height * *scale);
+	if (*w < 1)
+		*w = 1;
+	if (*h < 1)
+		*h = 1;
+}
+
+/* a swapchain the window's size; clients hear of new constraints */
+static bool capture_resize(struct view_capture *vc)
+{
+	struct aro_server *s = vc->view->server;
+	int w, h;
+	float scale;
+	capture_size(vc->view, &w, &h, &scale);
+	if (vc->swapchain && w == vc->w && h == vc->h)
+		return false;
+	/* the screen's own format, which the renderer draws into anyway; else plain linear ARGB */
+	struct wlr_output *out = vc->view->output ? vc->view->output->wlr_output : NULL;
+	struct wlr_swapchain *sc = NULL;
+	if (out && out->swapchain)
+		sc = wlr_swapchain_create(s->allocator, w, h, &out->swapchain->format);
+	if (!sc) {
+		struct wlr_drm_format_set set = { 0 };
+		if (wlr_drm_format_set_add(&set, DRM_FORMAT_ARGB8888, DRM_FORMAT_MOD_LINEAR))
+			sc = wlr_swapchain_create(s->allocator, w, h, wlr_drm_format_set_get(&set, DRM_FORMAT_ARGB8888));
+		wlr_drm_format_set_finish(&set);
+	}
+	if (!sc)
+		return false;
+	if (vc->swapchain)
+		wlr_swapchain_destroy(vc->swapchain);
+	vc->swapchain = sc;
+	vc->w = w;
+	vc->h = h;
+	wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&vc->base, sc, s->renderer);
+	return true;
+}
+
+/* the frame goes out from the event loop, never inside a request */
+static void capture_idle(void *data)
+{
+	struct view_capture *vc = data;
+	vc->idle = NULL;
+	if (!vc->want)
+		return;
+	if (capture_resize(vc))
+		return;                 /* new constraints: the client asks again */
+	vc->want = false;
+	vc->sent = true;
+	pixman_region32_t damage;
+	pixman_region32_init_rect(&damage, 0, 0, (unsigned)vc->w, (unsigned)vc->h);
+	struct wlr_ext_image_capture_source_v1_frame_event ev = { .damage = &damage };
+	wl_signal_emit_mutable(&vc->base.events.frame, &ev);
+	pixman_region32_fini(&damage);
+}
+
+static void capture_schedule(struct view_capture *vc)
+{
+	if (!vc->idle)
+		vc->idle = wl_event_loop_add_idle(vc->view->server->loop, capture_idle, vc);
+}
+
+/* new content: a waiting client gets it */
+static void capture_commit(struct wl_listener *l, void *data)
+{
+	struct view_capture *vc = wl_container_of(l, vc, commit);
+	(void)data;
+	if (vc->want)
+		capture_schedule(vc);
+}
+
+static void capture_start(struct wlr_ext_image_capture_source_v1 *src, bool with_cursors)
+{
+	struct view_capture *vc = wl_container_of(src, vc, base);
+	(void)with_cursors;
+	vc->sent = false;
+	capture_resize(vc);
+}
+
+static void capture_stop(struct wlr_ext_image_capture_source_v1 *src)
+{
+	struct view_capture *vc = wl_container_of(src, vc, base);
+	vc->want = false;
+}
+
+/* the first frame at once; after that, when the window draws something new */
+static void capture_request(struct wlr_ext_image_capture_source_v1 *src, bool schedule_frame)
+{
+	struct view_capture *vc = wl_container_of(src, vc, base);
+	(void)schedule_frame;
+	vc->want = true;
+	if (!vc->sent)
+		capture_schedule(vc);
+}
+
+struct capture_draw {
+	struct wlr_render_pass *pass;
+	int gx, gy;
+	float scale;
+};
+
+static void capture_surface(struct wlr_surface *surface, int sx, int sy, void *data)
+{
+	struct capture_draw *d = data;
+	struct wlr_texture *tex = wlr_surface_get_texture(surface);
+	if (!tex)
+		return;
+	struct wlr_fbox src;
+	wlr_surface_get_buffer_source_box(surface, &src);
+	wlr_render_pass_add_texture(d->pass, &(struct wlr_render_texture_options){
+		.texture = tex,
+		.src_box = src,
+		.dst_box = {
+			(int)lroundf((float)(sx - d->gx) * d->scale),
+			(int)lroundf((float)(sy - d->gy) * d->scale),
+			(int)lroundf((float)surface->current.width * d->scale),
+			(int)lroundf((float)surface->current.height * d->scale),
+		},
+		.transform = surface->current.transform,
+		.filter_mode = WLR_SCALE_FILTER_BILINEAR,
+	});
+}
+
+static void capture_copy(struct wlr_ext_image_capture_source_v1 *src,
+                         struct wlr_ext_image_copy_capture_frame_v1 *frame,
+                         struct wlr_ext_image_capture_source_v1_frame_event *ev)
+{
+	struct view_capture *vc = wl_container_of(src, vc, base);
+	struct aro_server *s = vc->view->server;
+	(void)ev;
+	struct wlr_surface *surface = view_surface(vc->view);
+	struct wlr_buffer *buf = surface && vc->swapchain ? wlr_swapchain_acquire(vc->swapchain) : NULL;
+	if (!buf) {
+		wlr_ext_image_copy_capture_frame_v1_fail(frame,
+			EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_UNKNOWN);
+		return;
+	}
+	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(s->renderer, buf, NULL);
+	bool ok = pass != NULL;
+	if (ok) {
+		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+			.box = { 0, 0, vc->w, vc->h },
+			.color = { 0, 0, 0, 0 },
+			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+		});
+		struct wlr_box g;
+		view_geometry(vc->view, &g);
+		int w, h;
+		struct capture_draw d = { .pass = pass, .gx = g.x, .gy = g.y };
+		capture_size(vc->view, &w, &h, &d.scale);
+		wlr_surface_for_each_surface(surface, capture_surface, &d);
+		ok = wlr_render_pass_submit(pass);
+	}
+	if (!ok) {
+		wlr_buffer_unlock(buf);
+		wlr_ext_image_copy_capture_frame_v1_fail(frame,
+			EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_UNKNOWN);
+		return;
+	}
+	/* as wlroots' own output source does: a failed copy has already failed the frame */
+	if (wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, buf, s->renderer)) {
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &now);
+	}
+	wlr_buffer_unlock(buf);
+}
+
+static const struct wlr_ext_image_capture_source_v1_interface capture_impl = {
+	.start = capture_start,
+	.stop = capture_stop,
+	.request_frame = capture_request,
+	.copy_frame = capture_copy,
+};
+
+void capture_view_gone(struct aro_view *v)
+{
+	if (!v->capture_src)
+		return;
+	struct view_capture *vc = wl_container_of(v->capture_src, vc, base);
+	if (vc->idle)
+		wl_event_source_remove(vc->idle);
+	wl_list_remove(&vc->commit.link);
+	wlr_ext_image_capture_source_v1_finish(&vc->base);      /* clears v->capture_src */
+	if (vc->swapchain)
+		wlr_swapchain_destroy(vc->swapchain);
+	free(vc);
+}
+
 static void new_capture_request(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, new_capture_request);
@@ -178,26 +393,30 @@ static void new_capture_request(struct wl_listener *l, void *data)
 			found = v;
 			break;
 		}
-	if (!found || !found->surface_tree)
+	struct wlr_surface *surface = found ? view_surface(found) : NULL;
+	if (!surface)
 		return;
 	if (!found->capture_src) {
-		found->capture_src = wlr_ext_image_capture_source_v1_create_with_scene_node(
-			&found->surface_tree->node, s->loop, s->allocator, s->renderer);
-		if (!found->capture_src)
+		struct view_capture *vc = calloc(1, sizeof *vc);
+		if (!vc)
 			return;
+		vc->view = found;
+		wlr_ext_image_capture_source_v1_init(&vc->base, &capture_impl);
+		vc->commit.notify = capture_commit;
+		wl_signal_add(&surface->events.commit, &vc->commit);
+		found->capture_src = &vc->base;
 		found->capture_src_destroy.notify = capture_src_destroy;
-		wl_signal_add(&found->capture_src->events.destroy, &found->capture_src_destroy);
+		wl_signal_add(&vc->base.events.destroy, &found->capture_src_destroy);
+		capture_resize(vc);
 	}
 	wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(req,
 		found->capture_src);
 }
-#endif
 
 static void capture_init(struct aro_server *s)
 {
 	wlr_ext_image_copy_capture_manager_v1_create(s->display, 1);
 	wlr_ext_output_image_capture_source_manager_v1_create(s->display, 1);
-#ifndef ARO_EFFECTS
 	struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1 *m =
 		wlr_ext_foreign_toplevel_image_capture_source_manager_v1_create(s->display, 1);
 	if (m) {
@@ -205,10 +424,6 @@ static void capture_init(struct aro_server *s)
 		wl_signal_add(&m->events.new_request, &s->new_capture_request);
 		s->capture_toplevels = true;
 	}
-#else
-	(void)capture_src_destroy;
-	wlr_log(WLR_INFO, "window capture: not with SceneFX yet; whole screens only");
-#endif
 }
 
 /* VR headsets: aro lends non-desktop outputs to runtimes like Monado or SteamVR */

@@ -5,6 +5,7 @@
 
 #include "bar.h"
 #include "aro.h"
+#include "protocols.h"
 #include "core.h"
 #include "text.h"
 
@@ -103,6 +104,7 @@ void ftl_create(struct aro_view *v)
 void ftl_destroy(struct aro_view *v)
 {
 	struct aro_server *s = v->server;
+	capture_view_gone(v);           /* while the surface is still there */
 	if (s->ftl_activated == v)
 		s->ftl_activated = NULL;
 
