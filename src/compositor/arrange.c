@@ -533,9 +533,11 @@ void aro_arrange(struct aro_server *s)
 	extws_sync(s);
 }
 
+/* an unmapped window keeps its workspace but must not show an empty frame */
 void view_set_visible(struct aro_view *v, bool visible)
 {
-	wlr_scene_node_set_enabled(&v->frame_tree->node, visible && !v->stashed && !view_tab_hidden(v));
+	wlr_scene_node_set_enabled(&v->frame_tree->node,
+	                           visible && v->mapped && !v->stashed && !view_tab_hidden(v));
 }
 
 /* show a workspace on the focused output */

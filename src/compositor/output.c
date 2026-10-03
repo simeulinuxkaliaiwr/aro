@@ -376,7 +376,7 @@ struct aro_output *output_evacuate(struct aro_server *s,
 		if (v->floating) {
 			v->fbox.x += dest->box.x - o->box.x;
 			v->fbox.y += dest->box.y - o->box.y;
-		} else {
+		} else if (v->mapped) {
 			v->node = tree_insert(s, dest, dest->cur_ws, v, NULL,
 			                      LY_ROW, false);
 		}
