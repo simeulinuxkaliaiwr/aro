@@ -158,6 +158,7 @@ struct aro_view {
 	/* for sharing just this window; made on first request, gone with the window */
 	struct wlr_ext_image_capture_source_v1 *capture_src;
 	struct wl_listener capture_src_destroy;
+	struct wlr_swapchain *export_sc;   /* export.c: drawn into, then read back for shm */
 	struct wlr_output *ftl_output;  /* the output last reported */
 	bool ftl_fullscreen;            /* the fullscreen state last reported */
 	struct wl_listener ftl_activate;
@@ -334,7 +335,8 @@ struct aro_server {
 	struct wlr_keyboard_shortcuts_inhibit_manager_v1 *inhibit_mgr;
 	struct wlr_security_context_manager_v1 *security_ctx;  /* sandboxed apps */
 	struct wlr_tearing_control_manager_v1 *tearing_mgr;    /* games that skip vsync */
-	struct wl_listener new_capture_request;  /* sharing one window; not with SceneFX */
+	struct wl_listener new_capture_request;  /* sharing one window */
+	struct wl_list exports;         /* export.c: window frames being copied */
 	struct wlr_drm_lease_v1_manager *drm_lease;  /* VR headsets; NULL without DRM */
 	struct wl_listener lease_request;
 	bool capture_toplevels;

@@ -6,6 +6,8 @@
 
 struct aro_server;
 struct aro_view;
+struct wlr_buffer;
+struct wlr_swapchain;
 
 /* after the renderer is bound to the display, before clients connect */
 void protocols_init(struct aro_server *s);
@@ -23,5 +25,14 @@ bool shortcuts_inhibited(struct aro_server *s);
 
 /* a window unmaps or goes: its capture, if anyone made one, ends */
 void capture_view_gone(struct aro_view *v);
+
+/* a window's size in buffer pixels, buffers that size, and the window drawn into one */
+void capture_size(struct aro_view *v, int *w, int *h, float *scale);
+struct wlr_swapchain *capture_swapchain(struct aro_view *v, int w, int h);
+bool capture_draw(struct aro_view *v, struct wlr_buffer *buf);
+
+/* export.c: Hyprland's window export, which Quickshell's window previews use */
+void export_init(struct aro_server *s);
+void export_view_gone(struct aro_view *v);
 
 #endif

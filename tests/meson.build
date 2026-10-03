@@ -18,6 +18,8 @@ foreach xml : [
   wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
   wl_protocol_dir / 'unstable/text-input/text-input-unstable-v3.xml',
   '../protocols/wlr-layer-shell-unstable-v1.xml',
+  '../protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
+  '../protocols/hyprland-toplevel-export-v1.xml',
   'protocols/wlr-virtual-pointer-unstable-v1.xml',
   'protocols/input-method-unstable-v2.xml',
 ]
@@ -39,7 +41,7 @@ test_common = static_library('aro-test-common',
 )
 
 test_clients = []
-foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox', 'capture', 'click', 'ime', 'layer-zone']
+foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox', 'capture', 'click', 'ime', 'layer-zone', 'export']
   test_clients += executable(name, 'clients' / name + '.c', test_proto,
     link_with: test_common,
     dependencies: test_client_dep,

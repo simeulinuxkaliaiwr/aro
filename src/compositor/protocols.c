@@ -119,6 +119,7 @@ static const char *const privileged[] = {
 	"ext_image_copy_capture_manager_v1",
 	"ext_output_image_capture_source_manager_v1",
 	"ext_foreign_toplevel_image_capture_source_manager_v1",
+	"hyprland_toplevel_export_manager_v1",
 	"zwlr_data_control_manager_v1",
 	"ext_data_control_manager_v1",
 	"zwp_virtual_keyboard_manager_v1",
@@ -187,7 +188,7 @@ static void capture_src_destroy(struct wl_listener *l, void *data)
 }
 
 /* the window's size in buffer pixels, at its screen's scale */
-static void capture_size(struct aro_view *v, int *w, int *h, float *scale)
+void capture_size(struct aro_view *v, int *w, int *h, float *scale)
 {
 	struct wlr_box g;
 	view_geometry(v, &g);
@@ -200,17 +201,12 @@ static void capture_size(struct aro_view *v, int *w, int *h, float *scale)
 		*h = 1;
 }
 
-/* a swapchain the window's size; clients hear of new constraints */
-static bool capture_resize(struct view_capture *vc)
+/* buffers the window's size: the screen's own format, which the renderer draws into
+ * anyway; else plain linear ARGB */
+struct wlr_swapchain *capture_swapchain(struct aro_view *v, int w, int h)
 {
-	struct aro_server *s = vc->view->server;
-	int w, h;
-	float scale;
-	capture_size(vc->view, &w, &h, &scale);
-	if (vc->swapchain && w == vc->w && h == vc->h)
-		return false;
-	/* the screen's own format, which the renderer draws into anyway; else plain linear ARGB */
-	struct wlr_output *out = vc->view->output ? vc->view->output->wlr_output : NULL;
+	struct aro_server *s = v->server;
+	struct wlr_output *out = v->output ? v->output->wlr_output : NULL;
 	struct wlr_swapchain *sc = NULL;
 	if (out && out->swapchain)
 		sc = wlr_swapchain_create(s->allocator, w, h, &out->swapchain->format);
@@ -220,6 +216,19 @@ static bool capture_resize(struct view_capture *vc)
 			sc = wlr_swapchain_create(s->allocator, w, h, wlr_drm_format_set_get(&set, DRM_FORMAT_ARGB8888));
 		wlr_drm_format_set_finish(&set);
 	}
+	return sc;
+}
+
+/* a swapchain the window's size; clients hear of new constraints */
+static bool capture_resize(struct view_capture *vc)
+{
+	struct aro_server *s = vc->view->server;
+	int w, h;
+	float scale;
+	capture_size(vc->view, &w, &h, &scale);
+	if (vc->swapchain && w == vc->w && h == vc->h)
+		return false;
+	struct wlr_swapchain *sc = capture_swapchain(vc->view, w, h);
 	if (!sc)
 		return false;
 	if (vc->swapchain)
@@ -288,7 +297,7 @@ static void capture_request(struct wlr_ext_image_capture_source_v1 *src, bool sc
 		capture_schedule(vc);
 }
 
-struct capture_draw {
+struct capture_pass {
 	struct wlr_render_pass *pass;
 	int gx, gy;
 	float scale;
@@ -296,7 +305,7 @@ struct capture_draw {
 
 static void capture_surface(struct wlr_surface *surface, int sx, int sy, void *data)
 {
-	struct capture_draw *d = data;
+	struct capture_pass *d = data;
 	struct wlr_texture *tex = wlr_surface_get_texture(surface);
 	if (!tex)
 		return;
@@ -316,6 +325,28 @@ static void capture_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	});
 }
 
+bool capture_draw(struct aro_view *v, struct wlr_buffer *buf)
+{
+	struct wlr_surface *surface = view_surface(v);
+	if (!surface)
+		return false;
+	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(v->server->renderer, buf, NULL);
+	if (!pass)
+		return false;
+	wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+		.box = { 0, 0, buf->width, buf->height },
+		.color = { 0, 0, 0, 0 },
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	});
+	struct wlr_box g;
+	view_geometry(v, &g);
+	int w, h;
+	struct capture_pass d = { .pass = pass, .gx = g.x, .gy = g.y };
+	capture_size(v, &w, &h, &d.scale);
+	wlr_surface_for_each_surface(surface, capture_surface, &d);
+	return wlr_render_pass_submit(pass);
+}
+
 static void capture_copy(struct wlr_ext_image_capture_source_v1 *src,
                          struct wlr_ext_image_copy_capture_frame_v1 *frame,
                          struct wlr_ext_image_capture_source_v1_frame_event *ev)
@@ -323,31 +354,10 @@ static void capture_copy(struct wlr_ext_image_capture_source_v1 *src,
 	struct view_capture *vc = wl_container_of(src, vc, base);
 	struct aro_server *s = vc->view->server;
 	(void)ev;
-	struct wlr_surface *surface = view_surface(vc->view);
-	struct wlr_buffer *buf = surface && vc->swapchain ? wlr_swapchain_acquire(vc->swapchain) : NULL;
-	if (!buf) {
-		wlr_ext_image_copy_capture_frame_v1_fail(frame,
-			EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_UNKNOWN);
-		return;
-	}
-	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(s->renderer, buf, NULL);
-	bool ok = pass != NULL;
-	if (ok) {
-		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-			.box = { 0, 0, vc->w, vc->h },
-			.color = { 0, 0, 0, 0 },
-			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
-		});
-		struct wlr_box g;
-		view_geometry(vc->view, &g);
-		int w, h;
-		struct capture_draw d = { .pass = pass, .gx = g.x, .gy = g.y };
-		capture_size(vc->view, &w, &h, &d.scale);
-		wlr_surface_for_each_surface(surface, capture_surface, &d);
-		ok = wlr_render_pass_submit(pass);
-	}
-	if (!ok) {
-		wlr_buffer_unlock(buf);
+	struct wlr_buffer *buf = vc->swapchain ? wlr_swapchain_acquire(vc->swapchain) : NULL;
+	if (!buf || !capture_draw(vc->view, buf)) {
+		if (buf)
+			wlr_buffer_unlock(buf);
 		wlr_ext_image_copy_capture_frame_v1_fail(frame,
 			EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_UNKNOWN);
 		return;
@@ -492,6 +502,7 @@ void protocols_init(struct aro_server *s)
 	wlr_xdg_wm_dialog_v1_create(s->display, 1);     /* modal dialogs; see xdg_type */
 	s->tearing_mgr = wlr_tearing_control_manager_v1_create(s->display, 1);
 	capture_init(s);
+	export_init(s);
 	lease_init(s);
 }
 

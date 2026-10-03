@@ -92,7 +92,7 @@ if [ "$MODE" = main ]; then
 # protocols apps and tools rely on; explicit sync only exists on GPUs with timelines
 client globals > "$T/globals.out"
 for p in zwp_keyboard_shortcuts_inhibit_manager_v1 ext_workspace_manager_v1 zwp_pointer_gestures_v1 zwp_tablet_manager_v2 wp_tearing_control_manager_v1 ext_image_copy_capture_manager_v1 \
-	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1; do
+	zwlr_layer_shell_v1 zwlr_screencopy_manager_v1 hyprland_toplevel_export_manager_v1; do
 	grep -q "^$p " "$T/globals.out" && ok "offers $p" || bad "offers $p"
 done
 grep -q "^xwayland_shell_v1 " "$T/globals.out" && bad "xwayland_shell hidden from other clients" \
@@ -210,6 +210,17 @@ if wait_for "$T/win.out" "3 windows open"; then
 	else
 		bad "single-window capture: not offered"
 	fi
+	# Quickshell's window previews: Hyprland's export, by wlr handle and by aro's id
+	c=$(client export aro-test 2>&1)
+	case $c in *"pixel 203040"*) ok "window export by handle" ;;
+		*) bad "window export by handle: $c" ;; esac
+	id=$(ctl -j windows | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*$')
+	c=$(client export id "$id" 2>&1)
+	case $c in *"pixel 203040"*) ok "window export by id" ;;
+		*) bad "window export by id ($id): $c" ;; esac
+	c=$(client export id 999999 2>&1)
+	case $c in *"frame failed"*) ok "window export of no window fails" ;;
+		*) bad "window export of no window fails: $c" ;; esac
 else
 	bad "three windows mapped"
 	cat "$T/win.out"

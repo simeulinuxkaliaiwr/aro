@@ -105,6 +105,7 @@ void ftl_destroy(struct aro_view *v)
 {
 	struct aro_server *s = v->server;
 	capture_view_gone(v);           /* while the surface is still there */
+	export_view_gone(v);
 	if (s->ftl_activated == v)
 		s->ftl_activated = NULL;
 

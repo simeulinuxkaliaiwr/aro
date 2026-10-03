@@ -92,13 +92,26 @@ if get_option('compositor')
     'protocols/wlr-layer-shell-unstable-v1.xml',
     'protocols/wlr-output-power-management-unstable-v1.xml',
   ]
+  # aro implements these itself, so it needs their interface tables too;
+  # the window export refers to wlr's toplevel handles
+  proto_own = [
+    'protocols/hyprland-toplevel-export-v1.xml',
+    'protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
+  ]
 
   proto_headers = []
-  foreach xml : proto_xml
+  foreach xml : proto_xml + proto_own
     proto_headers += custom_target(
       input: xml,
       output: '@BASENAME@-protocol.h',
       command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+    )
+  endforeach
+  foreach xml : proto_own
+    proto_headers += custom_target(
+      input: xml,
+      output: '@BASENAME@-protocol.c',
+      command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
     )
   endforeach
 
@@ -154,6 +167,7 @@ if get_option('compositor')
     'src/compositor/arrange.c',
     'src/compositor/aro.c',
     'src/compositor/config.c',
+    'src/compositor/export.c',
     'src/compositor/extws.c',
     'src/compositor/gestures.c',
     'src/compositor/group.c',
