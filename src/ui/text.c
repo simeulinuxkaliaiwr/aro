@@ -55,6 +55,41 @@ static const struct wlr_buffer_impl cb_impl = {
 	.end_data_ptr_access = cb_end_data_ptr_access,
 };
 
+/* wrap a premultiplied ARGB surface, which the buffer then owns; NULL on failure */
+static struct wlr_buffer *surface_buffer(cairo_surface_t *surface)
+{
+	cairo_surface_flush(surface);
+	struct cairo_buffer *cb = calloc(1, sizeof *cb);
+	if (!cb || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		free(cb);
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	cb->surface = surface;
+	wlr_buffer_init(&cb->base, &cb_impl, cairo_image_surface_get_width(surface),
+	                cairo_image_surface_get_height(surface));
+	return &cb->base;
+}
+
+/* Aero's highlight: bright above the middle, a hard edge, a faint glow below */
+struct wlr_buffer *ui_gloss_render(double amount)
+{
+	if (amount <= 0.0)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, UI_GLOSS_H);
+	cairo_t *cr = cairo_create(surface);
+	cairo_pattern_t *g = cairo_pattern_create_linear(0, 0, 0, UI_GLOSS_H);
+	cairo_pattern_add_color_stop_rgba(g, 0.00, 1, 1, 1, 0.62 * amount);
+	cairo_pattern_add_color_stop_rgba(g, 0.48, 1, 1, 1, 0.26 * amount);
+	cairo_pattern_add_color_stop_rgba(g, 0.50, 1, 1, 1, 0.03 * amount);
+	cairo_pattern_add_color_stop_rgba(g, 1.00, 1, 1, 1, 0.18 * amount);
+	cairo_set_source(cr, g);
+	cairo_paint(cr);
+	cairo_pattern_destroy(g);
+	cairo_destroy(cr);
+	return surface_buffer(surface);
+}
+
 /* a PNG file as a buffer; NULL if it cannot be read */
 struct wlr_buffer *ui_png_load(const char *path)
 {
@@ -71,17 +106,7 @@ struct wlr_buffer *ui_png_load(const char *path)
 	cairo_paint(cr);
 	cairo_destroy(cr);
 	cairo_surface_destroy(png);
-	cairo_surface_flush(surface);
-
-	struct cairo_buffer *cb = calloc(1, sizeof *cb);
-	if (!cb || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-		free(cb);
-		cairo_surface_destroy(surface);
-		return NULL;
-	}
-	cb->surface = surface;
-	wlr_buffer_init(&cb->base, &cb_impl, w, h);
-	return &cb->base;
+	return surface_buffer(surface);
 }
 
 /* ── rendering ─────────────────────────────────────────────────────────── */

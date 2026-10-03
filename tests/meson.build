@@ -52,5 +52,6 @@ test('headless-' + mode, find_program('run.sh'),
   depends: [aro_exe, aroctl_exe] + test_clients,
   timeout: 240,
   is_parallel: false,
+  env: {'ARO_TEST_EFFECTS': get_option('effects') ? '1' : ''},   # what SceneFX-only tests expect
 )
 endforeach

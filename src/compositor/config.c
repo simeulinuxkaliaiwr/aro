@@ -459,6 +459,7 @@ void config_defaults(struct aro_config *c)
 	c->bar = TH_BAR;
 	c->bar_battery = true;
 	c->opacity = c->opacity_unfocused = 1.0;
+	c->header_opacity = 1.0;
 	c->blur_passes = 2;
 	c->blur_radius = 5;
 	c->wallpaper = Q_WALLPAPER_AUTO;
@@ -1427,6 +1428,16 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_double(value, &d) && d >= 0.05 && d <= 1.0;
 			if (ok)
 				*(!strcasecmp(key, "opacity") ? &c->opacity : &c->opacity_unfocused) = d;
+		} else if (!strcasecmp(key, "header_gloss")) {
+			double d;
+			ok = parse_double(value, &d) && d >= 0.0 && d <= 1.0;
+			if (ok)
+				c->header_gloss = d;
+		} else if (!strcasecmp(key, "header_opacity")) {
+			double d;
+			ok = parse_double(value, &d) && d >= 0.05 && d <= 1.0;
+			if (ok)
+				c->header_opacity = d;
 		} else if (!strcasecmp(key, "window_background")) {
 			if (!strcasecmp(value, "auto"))
 				c->win_bg_set = false;

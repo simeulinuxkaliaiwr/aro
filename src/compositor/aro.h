@@ -139,6 +139,7 @@ struct aro_view {
 	struct wlr_scene_rect *bg;
 	struct wlr_scene_rect *ring;
 	struct wlr_scene_rect *header;
+	struct wlr_scene_buffer *gloss; /* header_gloss over the header; no buffer: none */
 	struct wlr_scene_tree *content;
 	/* client surface tree; clipping must target this node */
 	struct wlr_scene_tree *surface_tree;
@@ -354,6 +355,8 @@ struct aro_server {
 	struct wlr_xcursor_manager *xcursor_mgr;
 	char *xcursor_theme;            /* what xcursor_mgr loaded; NULL = default */
 	int xcursor_size;
+	struct wlr_buffer *gloss_buf;   /* every header's highlight, for gloss_amount */
+	double gloss_amount;
 	/* the session's XCURSOR_THEME / XCURSOR_SIZE */
 	char *env_cursor_theme;
 	int env_cursor_size;

@@ -165,6 +165,11 @@ blur_passes = 2                 # 1 to 10: more is smoother and slower
 blur_radius = 5                 # 1 to 100
 # layer surfaces to blur behind, by namespace (globs): bars, launchers, ...
 # blur_layers = waybar rofi fuzzel
+# glass headers, like Windows 7's Aero: a glossy highlight (0 to 1, 0 is flat),
+# and headers that let what is behind show through, blurred with blur on
+# (0.05 to 1; below 1 needs a SceneFX build)
+header_gloss = 0
+header_opacity = 1.0
 
 # === colors ===
 # the design uses a single accent color, only applied to the focused window.

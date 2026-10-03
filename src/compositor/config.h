@@ -224,6 +224,8 @@ struct aro_config {
 
 	/* see-through windows */
 	double opacity, opacity_unfocused;      /* 0.05..1 */
+	double header_gloss;    /* 0..1: the glassy highlight across headers */
+	double header_opacity;  /* 0.05..1: below 1, headers show a blur of what is behind */
 	bool win_bg_set;        /* else the frame colour, as the header */
 	uint32_t win_bg;        /* behind a window's content */
 	bool blur;              /* behind see-through windows; effects builds only */

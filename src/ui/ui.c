@@ -79,6 +79,17 @@ static uint32_t frame_bg(struct aro_view *v, bool focused)
 	return c->win_bg_set ? c->win_bg : focused ? c->theme.frame_on : c->theme.frame;
 }
 
+/* how see-through headers are; only SceneFX can hollow the border out from under them */
+static float header_alpha(struct aro_view *v)
+{
+#ifdef ARO_EFFECTS
+	return (float)v->server->cfg.header_opacity;
+#else
+	(void)v;
+	return 1.0f;
+#endif
+}
+
 /* ui_color, faded by a */
 static void color_faded(uint32_t rgba, float a, float out[4])
 {
@@ -161,6 +172,55 @@ void ui_frame_clip_content(struct aro_view *v)
 	paint_content(v, frame_opacity(v, v->server->focused == v));
 }
 
+/* one highlight for every header, redrawn when header_gloss changes */
+static struct wlr_buffer *gloss_buffer(struct aro_server *s)
+{
+	if (s->gloss_amount == s->cfg.header_gloss)
+		return s->gloss_buf;
+	if (s->gloss_buf)
+		wlr_buffer_drop(s->gloss_buf);
+	s->gloss_buf = ui_gloss_render(s->cfg.header_gloss);
+	s->gloss_amount = s->cfg.header_gloss;
+	return s->gloss_buf;
+}
+
+static void gloss_sync(struct aro_view *v)
+{
+	struct wlr_buffer *buf = gloss_buffer(v->server);
+	wlr_scene_buffer_set_buffer(v->gloss, buf);
+	if (!buf)
+		wlr_scene_node_set_enabled(&v->gloss->node, false);
+}
+
+/* the highlight over the header; a header cut at the screen's edge shows its part of it.
+ * The scene drops its buffer once uploaded, so the server's copy says whether there is one */
+static void place_gloss(struct aro_view *v, ly_box want, ly_box got, bool shown)
+{
+	shown = shown && v->server->gloss_buf && got.w > 0 && got.h > 0 && want.h > 0;
+	wlr_scene_node_set_enabled(&v->gloss->node, shown);
+	if (!shown)
+		return;
+	const double bh = UI_GLOSS_H;
+	wlr_scene_node_set_position(&v->gloss->node, got.x, got.y);
+	wlr_scene_buffer_set_dest_size(v->gloss, got.w, got.h);
+	wlr_scene_buffer_set_source_box(v->gloss, &(struct wlr_fbox){
+		0, bh * (got.y - want.y) / want.h, 1, bh * got.h / want.h });
+}
+
+/* a see-through header: the window background starts under it, and it takes the top corners */
+static void round_header(struct aro_view *v, bool glass)
+{
+#ifdef ARO_EFFECTS
+	const int r = inner_radius(v);
+	wlr_scene_rect_set_corner_radii(v->bg, glass ? corner_radii_new(0, 0, r, r) : corner_radii_all(r));
+	wlr_scene_rect_set_corner_radii(v->header, glass ? corner_radii_new(r, r, 0, 0) : corner_radii_none());
+	wlr_scene_buffer_set_corner_radii(v->gloss, glass ? corner_radii_new(r, r, 0, 0) : corner_radii_none());
+#else
+	(void)v;
+	(void)glass;
+#endif
+}
+
 bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 {
 	const struct q_theme *th = &v->server->cfg.theme;
@@ -187,6 +247,9 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 	ui_color(th->frame, col);
 	v->header = wlr_scene_rect_create(v->frame_tree, 1, 1, col);
 
+	/* right above the header: icons and tabs go above it */
+	v->gloss = wlr_scene_buffer_create(v->frame_tree, NULL);
+
 	/* ring must be created before header occlusion */
 	ui_color(th->accent_soft, col);
 	v->ring = wlr_scene_rect_create(v->frame_tree, 1, 1, col);
@@ -200,9 +263,10 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 	/* popups above content */
 	v->popups = wlr_scene_tree_create(v->frame_tree);
 
-	if (!v->frame || !v->bg || !v->ring || !v->header || !v->content ||
+	if (!v->frame || !v->bg || !v->ring || !v->header || !v->gloss || !v->content ||
 	    !v->popups)
 		return false;
+	gloss_sync(v);
 
 	set_radius(v->frame, ui_frame_radius(v));
 	set_radius(v->bg, inner_radius(v));
@@ -215,7 +279,8 @@ bool ui_frame_create(struct aro_view *v, struct wlr_scene_tree *parent)
 /* see-through: faded, or showing what is behind through window_background */
 static bool frame_see_through(struct aro_view *v, bool focused)
 {
-	return frame_opacity(v, focused) < 1.0f || (!v->fullscreen && (frame_bg(v, focused) & 0xff) < 0xff);
+	return frame_opacity(v, focused) < 1.0f || (!v->fullscreen && (frame_bg(v, focused) & 0xff) < 0xff) ||
+	       (!v->fullscreen && frame_header(v) > 0 && header_alpha(v) < 1.0f);
 }
 
 /* the blur covers the frame, or the part of it that may be drawn */
@@ -238,8 +303,9 @@ static void frame_paint(struct aro_view *v, bool focused)
 	wlr_scene_rect_set_color(v->frame, col);
 	color_faded(frame_bg(v, focused), a, col);
 	wlr_scene_rect_set_color(v->bg, col);
-	color_faded(focused ? th->frame_on : th->frame, a, col);
+	color_faded(focused ? th->frame_on : th->frame, a * header_alpha(v), col);
 	wlr_scene_rect_set_color(v->header, col);
+	wlr_scene_buffer_set_opacity(v->gloss, a);
 	color_faded(th->accent_soft, a, col);
 	wlr_scene_rect_set_color(v->ring, col);
 	if (v->title.node)
@@ -259,6 +325,8 @@ void ui_frame_fullscreen(struct aro_view *v, bool fullscreen)
 	wlr_scene_node_set_enabled(&v->frame->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->bg->node, !fullscreen);
 	wlr_scene_node_set_enabled(&v->header->node, !fullscreen);
+	if (fullscreen)
+		wlr_scene_node_set_enabled(&v->gloss->node, false);   /* geometry brings it back */
 	qtext_show(&v->title, !fullscreen && !v->group);
 	if (v->group && v->group->tabs && v->group->tabs->node.parent == v->frame_tree)
 		wlr_scene_node_set_enabled(&v->group->tabs->node, !fullscreen);
@@ -351,7 +419,11 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 #ifdef ARO_EFFECTS
 	place_blur(v, border, ui_frame_radius(v));
 #endif
-	place_rect(v->bg, (ly_box){ bw, bw, inner_w, inner_h }, vis);
+	/* behind a see-through header is the blur, not the window background */
+	const bool glass = hh > 0 && header_alpha(v) < 1.0f;
+	const int under = glass ? (hh < inner_h ? hh : inner_h) : 0;
+	round_header(v, glass);
+	place_rect(v->bg, (ly_box){ bw, bw + under, inner_w, inner_h - under }, vis);
 	place_rect(v->ring, (ly_box){ bw, bw, inner_w, 1 }, vis);
 
 	wlr_scene_node_set_enabled(&v->header->node, hh > 0);
@@ -365,7 +437,8 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 			isz && hh >= isz && !v->fullscreen && !cut && !v->group);
 		wlr_scene_node_set_position(&v->icon->node, bw + th->text_pad, bw + (hh - isz) / 2);
 	}
-	place_rect(v->header, (ly_box){ bw, bw, inner_w, hh < inner_h ? hh : inner_h }, vis);
+	const ly_box hwant = { bw, bw, inner_w, hh < inner_h ? hh : inner_h };
+	place_gloss(v, hwant, place_rect(v->header, hwant, vis), hh > 0);
 
 	ly_box cb;
 	ui_frame_content_box(v, b, &cb);
@@ -427,7 +500,7 @@ void ui_frame_icon(struct aro_view *v, struct wlr_buffer *buf)
 	if (buf && icon_size(th)) {
 		v->icon = wlr_scene_buffer_create(v->frame_tree, buf);
 		if (v->icon) {
-			wlr_scene_node_place_above(&v->icon->node, &v->header->node);
+			wlr_scene_node_place_above(&v->icon->node, &v->gloss->node);
 			wlr_scene_buffer_set_dest_size(v->icon, icon_size(th), icon_size(th));
 			wlr_scene_buffer_set_filter_mode(v->icon, WLR_SCALE_FILTER_BILINEAR);
 			/* shown where and when the title is */
@@ -461,7 +534,7 @@ static void tabs_layout(struct aro_view *v, int frame_w, float scale)
 	} else if (g->tabs->node.parent != v->frame_tree) {
 		wlr_scene_node_reparent(&g->tabs->node, v->frame_tree);
 	}
-	wlr_scene_node_place_above(&g->tabs->node, &v->header->node);
+	wlr_scene_node_place_above(&g->tabs->node, &v->gloss->node);
 	while (g->nlabels < g->n) {
 		struct wlr_scene_rect *sep = tab_rect(g->tabs);
 		if (!sep || !qtext_init(&g->label[g->nlabels], g->tabs, th->font))
@@ -805,6 +878,7 @@ void ui_frame_retheme(struct aro_view *v)
 	ui_frame_clip_content(v);
 
 	qtext_set_font(&v->title, th->font);
+	gloss_sync(v);
 	ui_frame_focus(v, v->server->focused == v);
 }
 

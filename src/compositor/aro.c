@@ -2766,6 +2766,8 @@ teardown:
 		o->enabled = false;
 	}
 	wlr_scene_node_destroy(&s.scene->tree.node);
+	if (s.gloss_buf)
+		wlr_buffer_drop(s.gloss_buf);
 	wlr_xcursor_manager_destroy(s.xcursor_mgr);
 	free(s.xcursor_theme);
 	free(s.env_cursor_theme);

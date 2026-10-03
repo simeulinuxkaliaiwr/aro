@@ -392,6 +392,20 @@ is the frame colour;
 shows what is behind the window.
 Default: auto.
 .TP
+.BI "header_gloss = " n
+A glossy highlight across window headers, as on Windows 7's Aero glass:
+brighter above the middle, with a hard edge there.
+0 to 1; 0 is a flat header.
+Default: 0.
+.TP
+.BI "header_opacity = " n
+How solid window headers are, 0.05 to 1.
+Below 1, what is behind the window shows through its header, and with
+.B blur
+on it is blurred like frosted glass.
+Needs a SceneFX build; elsewhere headers stay solid.
+Default: 1.
+.TP
 .BI "blur = " bool
 Blur what shows through see-through windows.
 Needs a SceneFX build, which the Vulkan renderer (and so

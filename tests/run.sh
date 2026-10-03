@@ -75,6 +75,7 @@ wait_for() {
 
 config
 # pixman needs no GPU; a SceneFX build needs GLES, so it falls back to the default
+FX=${ARO_TEST_EFFECTS:-}         # a SceneFX build, from meson
 if start_aro pixman; then
 	ok "aro starts headless (pixman)"
 elif grep -q SceneFX "$T/aro.err" && start_aro ""; then
@@ -317,6 +318,44 @@ if wait_for "$T/fade.out" "1 windows open" && command -v grim > /dev/null; then
 		|| bad "rule: opacity fades a floating window: pixel is '$px'"
 fi
 wait "$CF"
+alive
+config
+
+# 4f3b. header_gloss lights the header; header_opacity shows what is behind it
+hdr="frame = 0x101010ff
+frame_focus = 0x101010ff
+background = 0xff0000ff
+rule = app_id:aro-test float size 400 300 position 100 100"
+config "$hdr"
+sleep 0.3
+client window 1 5 > "$T/hdr.out" 2>&1 &
+CH=$!
+if wait_for "$T/hdr.out" "1 windows open" && command -v grim > /dev/null; then
+	hpx() {
+		env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$1 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n'
+	}
+	sleep 0.6
+	plain=$(hpx 300,105)
+	[ "$plain" = "101010" ] && ok "header: plain frame colour ($plain)" || bad "header: plain frame colour: pixel is '$plain'"
+	config "$hdr" "header_gloss = 1"
+	sleep 0.6
+	lit=$(hpx 300,105)
+	[ -n "$lit" ] && [ "$((0x${lit%????}))" -gt "$((0x30))" ] && ok "header_gloss lights the header ($lit)" \
+		|| bad "header_gloss lights the header: pixel is '$lit'"
+	config "$hdr" "header_opacity = 0.3"
+	sleep 0.6
+	see=$(hpx 300,120)
+	if [ -n "$FX" ]; then
+		r=$((0x${see%????})); g=$((0x$(echo "$see" | cut -c3-4)))
+		[ -n "$see" ] && [ "$r" -gt $((g + 64)) ] && ok "header_opacity shows what is behind ($see)" \
+			|| bad "header_opacity shows what is behind: pixel is '$see'"
+	else
+		[ "$see" = "101010" ] && ok "header_opacity: headers stay solid without SceneFX" \
+			|| bad "header_opacity: headers stay solid without SceneFX: pixel is '$see'"
+	fi
+fi
+wait "$CH"
 alive
 config
 

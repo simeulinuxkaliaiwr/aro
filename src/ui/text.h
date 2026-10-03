@@ -37,4 +37,8 @@ void qtext_finish(struct qtext *t);
 /* a PNG file as a buffer, to drop when done; NULL if it cannot be read */
 struct wlr_buffer *ui_png_load(const char *path);
 
+/* a header highlight, 1 x UI_GLOSS_H, stretched over each header; amount 0..1, to drop when done */
+#define UI_GLOSS_H 64
+struct wlr_buffer *ui_gloss_render(double amount);
+
 #endif
