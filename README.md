@@ -21,9 +21,7 @@
   <a href="#installing"><img alt="NixOS: flake" src="https://img.shields.io/badge/NixOS-flake-222a35?logo=nixos&labelColor=12161d&logoColor=e6a54b"></a>
 </p>
 
-*aro* is Portuguese for the rim of a pair of glasses. It names the 1px
-accent ring just inside every focused border — the one thing on screen that
-says "this is the window you are in".
+*aro* is Portuguese for the rim of a pair of glasses.
 
 ## What it does
 
