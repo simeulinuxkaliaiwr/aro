@@ -2432,7 +2432,7 @@ int main(int argc, char *argv[])
 	wlr_log(WLR_INFO, "renderer: wlroots autocreate, effects off");
 #endif
 
-	s.compositor = wlr_compositor_create(s.display, 5, s.renderer);
+	s.compositor = wlr_compositor_create(s.display, 6, s.renderer);
 	wlr_subcompositor_create(s.display);
 	wlr_data_device_manager_create(s.display);
 
