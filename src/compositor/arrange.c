@@ -599,8 +599,9 @@ void workspace_show(struct aro_server *s, int ws)
 	}
 
 	struct aro_view *next = NULL;
-	/* a scroll strip comes back to the column you left, not its first */
-	if (root && ws_layout(s, o, ws) == Q_LAYOUT_SCROLL) {
+	/* scroll and monocle come back to the window you left, not the first */
+	const enum q_layout lay = root ? ws_layout(s, o, ws) : Q_LAYOUT_MANUAL;
+	if (lay == Q_LAYOUT_SCROLL || lay == Q_LAYOUT_MONOCLE) {
 		struct aro_view *m;
 		wl_list_for_each(m, &s->switcher.mru, mru_link)
 			if (m->mapped && m->node && m->output == o && m->workspace == ws) {
