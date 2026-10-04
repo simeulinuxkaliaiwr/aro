@@ -367,7 +367,7 @@ void slide_finish(struct aro_output *o)
 	struct aro_view *v;
 	wl_list_for_each(v, &o->server->views, link) {
 		if (v->output == o && v->workspace != o->cur_ws)
-			wlr_scene_node_set_enabled(&v->frame_tree->node, false);
+			view_set_visible(v, false);
 	}
 	wlr_output_schedule_frame(o->wlr_output);
 }
@@ -536,8 +536,13 @@ void aro_arrange(struct aro_server *s)
 /* an unmapped window keeps its workspace but must not show an empty frame */
 void view_set_visible(struct aro_view *v, bool visible)
 {
-	wlr_scene_node_set_enabled(&v->frame_tree->node,
-	                           visible && v->mapped && !v->stashed && !view_tab_hidden(v));
+	const bool show = visible && v->mapped && !v->stashed && !view_tab_hidden(v);
+	/* previews of a hidden window use its last look */
+	if (!show && v->mapped && v->frame_tree->node.enabled)
+		ui_snap_keep(v);
+	else if (show || !v->mapped)
+		ui_snap_forget(v);
+	wlr_scene_node_set_enabled(&v->frame_tree->node, show);
 }
 
 /* show a workspace on the focused output */

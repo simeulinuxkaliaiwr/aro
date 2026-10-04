@@ -147,6 +147,7 @@ struct aro_view {
 	struct wlr_scene_tree *popups;
 	struct qtext title;
 	struct wlr_scene_buffer *icon;  /* the app's icon, left of the title; NULL: none */
+	struct ui_snap *snap_last;      /* how it looked when hidden; NULL while shown */
 
 	anim_box geo;                   /* current vs target geometry */
 	bool mapped;
@@ -559,6 +560,8 @@ void ui_snap_sync(struct ui_snap *s, struct aro_view *v);
 void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip);
 void ui_snap_opacity(struct ui_snap *s, float a);
 struct wlr_scene_node *ui_snap_node(struct ui_snap *s);
+void ui_snap_keep(struct aro_view *v);
+void ui_snap_forget(struct aro_view *v);
 
 /* drop preview */
 bool ui_preview_create(struct aro_preview *p, struct aro_server *s);

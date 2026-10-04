@@ -669,6 +669,7 @@ struct ui_snap {
 	struct wl_listener destroy;
 	int radius, n;
 	double gw, gh;                  /* the window's size when copied */
+	struct ui_snap **owner;         /* cleared when this copy goes */
 	struct snap_part part[SNAP_PARTS];
 };
 
@@ -676,54 +677,93 @@ static void snap_destroyed(struct wl_listener *l, void *data)
 {
 	(void)data;
 	struct ui_snap *s = wl_container_of(l, s, destroy);
+	if (s->owner)
+		*s->owner = NULL;
 	wl_list_remove(&s->destroy.link);
 	free(s);
 }
 
 struct snap_walk {
 	struct ui_snap *s;
-	int i;
+	int i, gx, gy;
 };
 
-static void snap_collect(struct wlr_scene_buffer *b, int sx, int sy, void *data)
+/* show buf in part i; false: no node for it */
+static bool snap_part_set(struct ui_snap *s, int i, struct wlr_buffer *buf)
+{
+	struct snap_part *p = &s->part[i];
+	if (!p->buf)
+		p->buf = wlr_scene_buffer_create(s->tree, buf);
+	else if (p->buf->buffer != buf)
+		wlr_scene_buffer_set_buffer(p->buf, buf);
+	return p->buf != NULL;
+}
+
+/* drop the parts past n, and any a walk made but did not count */
+static void snap_trim(struct ui_snap *s, int n)
+{
+	for (int i = n; i < SNAP_PARTS && s->part[i].buf; i++) {
+		wlr_scene_node_destroy(&s->part[i].buf->node);
+		s->part[i].buf = NULL;
+	}
+	s->n = n;
+}
+
+/* make s the same picture as from */
+static void snap_copy(struct ui_snap *s, const struct ui_snap *from)
+{
+	int n = 0;
+	for (int i = 0; i < from->n; i++) {
+		const struct snap_part *f = &from->part[i];
+		if (!snap_part_set(s, n, f->buf->buffer))
+			break;
+		struct wlr_scene_buffer *b = s->part[n].buf;
+		s->part[n] = *f;
+		s->part[n++].buf = b;
+	}
+	snap_trim(s, n);
+	s->gw = from->gw;
+	s->gh = from->gh;
+}
+
+/* from the surfaces, not the scene: a clipped or hidden window's nodes are cut or off */
+static void snap_collect(struct wlr_surface *surface, int sx, int sy, void *data)
 {
 	struct snap_walk *w = data;
 	struct ui_snap *s = w->s;
-	if (!b->buffer || w->i == SNAP_PARTS)
+	if (!surface->buffer || w->i == SNAP_PARTS ||
+	    surface->current.width <= 0 || surface->current.height <= 0)
+		return;
+	if (!snap_part_set(s, w->i, &surface->buffer->base))
 		return;
 	struct snap_part *p = &s->part[w->i];
-	if (!p->buf) {
-		p->buf = wlr_scene_buffer_create(s->tree, b->buffer);
-		if (!p->buf)
-			return;
-	} else if (p->buf->buffer != b->buffer) {
-		wlr_scene_buffer_set_buffer(p->buf, b->buffer);
-	}
-	const bool whole = wlr_fbox_empty(&b->src_box);
-	p->src = whole ? (struct wlr_fbox){ 0, 0, b->buffer->width, b->buffer->height } : b->src_box;
-	p->x = sx;
-	p->y = sy;
-	p->w = b->dst_width > 0 ? b->dst_width : b->buffer->width;
-	p->h = b->dst_height > 0 ? b->dst_height : b->buffer->height;
+	wlr_surface_get_buffer_source_box(surface, &p->src);
+	p->x = sx - w->gx;
+	p->y = sy - w->gy;
+	p->w = surface->current.width;
+	p->h = surface->current.height;
 	w->i++;
 }
 
 /* copy the window's surfaces as they are now */
 void ui_snap_sync(struct ui_snap *s, struct aro_view *v)
 {
-	if (!s || !v->surface_tree)
+	struct wlr_surface *surface = view_surface(v);
+	if (!s || !surface)
 		return;
 	struct wlr_box g = { 0 };
 	view_geometry(v, &g);
-	struct snap_walk w = { s, 0 };
-	wlr_scene_node_for_each_buffer(&v->surface_tree->node, snap_collect, &w);
+	struct snap_walk w = { s, 0, g.x, g.y };
+	wlr_surface_for_each_surface(surface, snap_collect, &w);
+	/* a hidden window may have let go of some buffers: show it as it was */
+	const struct ui_snap *last = v->snap_last;
+	if (last && last != s && w.i < last->n) {
+		snap_copy(s, last);
+		return;
+	}
 	if (w.i == 0)
 		return;         /* nothing drawn yet: keep the last copy */
-	for (int i = w.i; i < s->n; i++) {
-		wlr_scene_node_destroy(&s->part[i].buf->node);
-		s->part[i].buf = NULL;
-	}
-	s->n = w.i;
+	snap_trim(s, w.i);
 	/* no geometry: the main surface's size */
 	s->gw = g.width > 0 ? g.width : s->part[0].w;
 	s->gh = g.height > 0 ? g.height : s->part[0].h;
@@ -749,6 +789,25 @@ struct ui_snap *ui_snap_create(struct wlr_scene_tree *parent, struct aro_view *v
 		return NULL;
 	}
 	return s;
+}
+
+/* remember how v looks before it is hidden */
+void ui_snap_keep(struct aro_view *v)
+{
+	if (v->snap_last || !v->frame_tree)
+		return;
+	struct ui_snap *s = ui_snap_create(v->frame_tree, v, 0);
+	if (!s)
+		return;
+	wlr_scene_node_set_enabled(&s->tree->node, false);
+	s->owner = &v->snap_last;
+	v->snap_last = s;
+}
+
+void ui_snap_forget(struct aro_view *v)
+{
+	if (v->snap_last)
+		wlr_scene_node_destroy(&v->snap_last->tree->node);     /* clears snap_last */
 }
 
 struct wlr_scene_node *ui_snap_node(struct ui_snap *s)
