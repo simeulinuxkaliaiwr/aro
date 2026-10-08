@@ -338,6 +338,8 @@ struct aro_server {
 	struct wlr_tearing_control_manager_v1 *tearing_mgr;    /* games that skip vsync */
 	struct wl_listener new_capture_request;  /* sharing one window */
 	struct wl_list exports;         /* export.c: window frames being copied */
+	struct wl_list bg_managers;     /* bgeffect.c: told when blur turns on or off */
+	uint32_t bg_caps;               /* bgeffect.c: what they were last told */
 	struct wlr_drm_lease_v1_manager *drm_lease;  /* VR headsets; NULL without DRM */
 	struct wl_listener lease_request;
 	bool capture_toplevels;

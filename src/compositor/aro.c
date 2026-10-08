@@ -2108,6 +2108,7 @@ static void config_reload(struct aro_server *s)
 	/* retheme views */
 	blur_strength_apply(s);
 	layers_blur_update(s);
+	bgeffect_sync(s);
 	struct aro_view *v, *vtmp;
 	wl_list_for_each(v, &s->views, link)
 		ui_frame_retheme(v);

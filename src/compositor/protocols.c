@@ -503,6 +503,7 @@ void protocols_init(struct aro_server *s)
 	s->tearing_mgr = wlr_tearing_control_manager_v1_create(s->display, 1);
 	capture_init(s);
 	export_init(s);
+	bgeffect_init(s);
 	lease_init(s);
 }
 

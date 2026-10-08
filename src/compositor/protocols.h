@@ -35,4 +35,10 @@ bool capture_draw(struct aro_view *v, struct wlr_buffer *buf);
 void export_init(struct aro_server *s);
 void export_view_gone(struct aro_view *v);
 
+/* bgeffect.c: ext-background-effect-v1, blur behind windows that ask for it */
+void bgeffect_init(struct aro_server *s);
+
+/* after a config reload: tell apps if blur turned on or off */
+void bgeffect_sync(struct aro_server *s);
+
 #endif

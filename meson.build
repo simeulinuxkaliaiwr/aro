@@ -97,6 +97,7 @@ if get_option('compositor')
   proto_own = [
     'protocols/hyprland-toplevel-export-v1.xml',
     'protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
+    wl_protocol_dir / 'staging/ext-background-effect/ext-background-effect-v1.xml',
   ]
 
   proto_headers = []
@@ -167,6 +168,7 @@ if get_option('compositor')
     'src/compositor/arrange.c',
     'src/compositor/aro.c',
     'src/compositor/config.c',
+    'src/compositor/bgeffect.c',
     'src/compositor/export.c',
     'src/compositor/extws.c',
     'src/compositor/gestures.c',
