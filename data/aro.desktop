@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=aro
-Comment=Tiling window manager for Wayland
+Comment=A simple tiling window manager for Wayland
 Exec=aro
 TryExec=aro
 Icon=aro
