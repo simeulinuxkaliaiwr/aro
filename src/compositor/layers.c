@@ -156,6 +156,19 @@ static void layer_commit(struct wl_listener *listener, void *data)
 		arrange_layers(l->server);
 		aro_arrange(l->server);
 	}
+
+	/* a mapped surface can ask for the keyboard later: a shell's bar that
+	 * opens into a launcher. layer_map only sees the state it maps with.
+	 * On-demand is a request to be focusable, not to be focused now */
+	if (ls->surface->mapped &&
+	    (ls->current.committed & WLR_LAYER_SURFACE_V1_STATE_KEYBOARD_INTERACTIVITY)) {
+		if (ls->current.keyboard_interactive ==
+		    ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE)
+			layer_focus(l->server, l);
+		else if (!ls->current.keyboard_interactive &&
+		         l->server->focused_layer == l)
+			layer_focus(l->server, NULL);
+	}
 	layer_blur_update(l);
 	overview_layer_commit(l->server, ls->surface);
 }
