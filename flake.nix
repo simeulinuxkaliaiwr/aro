@@ -1,5 +1,5 @@
 {
-  description = "aro, a tiling Wayland compositor";
+  description = "aro, a simple tiling Wayland compositor";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
