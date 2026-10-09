@@ -1,7 +1,7 @@
 GIMP Palette
 Name: aro
 Columns: 3
-# colours from src/ui/theme.h
+# colours from aro/src/ui/theme.h
  12  15  19	TH_BG background #0c0f13
  10  13  17	TH_BAR_BG #0a0d11
  18  22  29	TH_FRAME #12161d
