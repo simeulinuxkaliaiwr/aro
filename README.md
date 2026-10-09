@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A tiling window manager for Wayland, built on wlroots.<br>
+  A simple tiling window manager for Wayland, built on wlroots.<br>
   Minimal, flat, one accent colour, spring-animated.
 </p>
 
@@ -36,10 +36,6 @@
 - **Drag to rearrange.** Pull a tiled window loose and a preview shows the
   slot it would drop into. Drag a border to move the boundary two windows
   share — both sides follow the cursor at once.
-- **Floating when it matters.** Dialogs and fixed-size windows float on
-  their own, at the size they asked for; `mod+space` for anything else.
-  A scratchpad keeps a window hidden until `mod+minus` brings it to
-  whichever workspace you are on.
 - **Tabs.** Several windows can share one tile, one showing at a time,
   their titles as tabs in its header: `mod+alt+hjkl`, or drag a window by
   its title onto another's.
