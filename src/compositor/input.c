@@ -817,6 +817,21 @@ void cursor_button(struct wl_listener *l, void *data)
 		}
 	}
 
+	/* a release goes where the press went (the implicit grab), even if the
+	 * pointer has wandered onto another surface; then focus moves on to that */
+	struct wlr_surface *held = s->seat->pointer_state.focused_surface;
+	if (ev->state == WL_POINTER_BUTTON_STATE_RELEASED &&
+	    s->seat->pointer_state.button_count > 0 && held) {
+		wlr_seat_pointer_notify_button(s->seat, ev->time_msec, ev->button, ev->state);
+		if (s->seat->pointer_state.button_count == 0 && surface && surface != held) {
+			s->ptr_lx = s->cursor->x - sx;
+			s->ptr_ly = s->cursor->y - sy;
+			wlr_seat_pointer_notify_enter(s->seat, surface, sx, sy);
+			wlr_seat_pointer_notify_motion(s->seat, ev->time_msec, sx, sy);
+		}
+		return;
+	}
+
 	/* refresh pointer focus before button */
 	if (surface) {
 		s->ptr_lx = s->cursor->x - sx;
