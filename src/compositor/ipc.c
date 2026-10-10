@@ -522,6 +522,8 @@ static void cmd_reload(struct req *r)
 	}
 	for (int i = 0; i < s->cfg.nerrors; i++)
 		sb_printf(r->body, "%s\n", s->cfg.errors[i]);
+  if (s->cfg.nerrors == 0)
+    sb_puts(r->body, "ok\n");
 }
 
 /* "wallpaper": what is shown; "wallpaper auto|none|/abs/file": show that */

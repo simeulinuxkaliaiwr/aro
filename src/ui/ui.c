@@ -405,7 +405,9 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 		if (v->surface_tree)
 			wlr_scene_subsurface_tree_set_clip(&v->surface_tree->node,
 				&(struct wlr_box){ g.x, g.y, b.w, b.h });
-		view_configure(v, b.x, b.y, b.w, b.h);
+		/* the client gets the screen at once; wine drops fullscreen on an animating size */
+		ly_box t = v->geo.to;
+		view_configure(v, t.x + b.x - v->geo.cur.x, t.y + b.y - v->geo.cur.y, t.w, t.h);
 		return;
 	}
 
