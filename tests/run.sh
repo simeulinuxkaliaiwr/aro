@@ -746,6 +746,51 @@ wait "$CD"
 config
 alive
 
+# 4d3. the pointer crossing to the other monitor is announced, for bars that follow it
+config "focus_follows_mouse = true"
+sleep 0.3
+ctl subscribe > "$T/mfocus.out" 2>&1 &
+CS=$!
+sleep 0.3
+client click up 320 360 > /dev/null 2>&1
+sleep 0.3
+client click up 960 360 > /dev/null 2>&1
+sleep 0.3
+kill "$CS" 2>/dev/null; wait "$CS" 2>/dev/null
+[ "$(grep -c '^monitor focus HEADLESS' "$T/mfocus.out")" -ge 1 ] \
+	&& ok "subscribe: monitor focus follows the pointer" \
+	|| bad "subscribe: monitor focus follows the pointer: $(tr '\n' '|' < "$T/mfocus.out")"
+config
+alive
+
+# 4d4. a focused fullscreen game keeps the pointer on its monitor (games under Wine don't confine it)
+for confine in true false; do
+	config "focus_follows_mouse = true" "fullscreen_confine = $confine" "rule = app_id:aro-test monitor HEADLESS-1"
+	sleep 0.3
+	client window 1 3 tear > "$T/fsc.out" 2>&1 &
+	CF=$!
+	if wait_for "$T/fsc.out" "1 windows open"; then
+		sleep 0.3
+		ox=$(ctl -j monitors | tr '}' '\n' | grep '"name":"HEADLESS-1"' | grep -oE '"x":-?[0-9]+' | cut -d: -f2)
+		here=$(( ox == 0 ? 320 : 960 )) there=$(( ox == 0 ? 960 : 320 ))
+		client click up $here 360 > /dev/null 2>&1
+		sleep 0.2
+		client click up $there 360 > /dev/null 2>&1
+		sleep 0.3
+		f=$(ctl -j monitors | tr '}' '\n' | grep '"focused":true' | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+		if [ $confine = true ]; then
+			[ "$f" = HEADLESS-1 ] && ok "fullscreen_confine: the pointer stays with the game" \
+				|| bad "fullscreen_confine: the pointer stays with the game (focus went to $f)"
+		else
+			[ "$f" != HEADLESS-1 ] && ok "fullscreen_confine = false: the pointer may leave" \
+				|| bad "fullscreen_confine = false: the pointer may leave"
+		fi
+	fi
+	wait "$CF"
+done
+config
+alive
+
 # 5b. a scroll strip on one monitor draws nothing on the monitor next to it
 config "layout = scroll"
 sleep 0.3

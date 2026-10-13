@@ -749,6 +749,7 @@ struct snap {
 	struct snap_output *outputs;
 	int noutputs;
 	uint32_t focus;                 /* 0: nothing focused */
+	char *focus_output;             /* the monitor that has the focus ("" none) */
 };
 
 struct aro_ipc {
@@ -979,6 +980,7 @@ static void snap_free(struct snap *sn)
 		free(sn->outputs[i].name);
 	free(sn->views);
 	free(sn->outputs);
+	free(sn->focus_output);
 	*sn = (struct snap){ 0 };
 }
 
@@ -1016,6 +1018,8 @@ static void snap_take(struct aro_server *s, struct snap *sn)
 		so->layout = aro_ws_layout(o, o->cur_ws);
 	}
 	sn->focus = s->focused && s->focused->mapped ? s->focused->id : 0;
+	struct aro_output *fo = aro_focused_output(s);
+	sn->focus_output = dup_or_empty(fo ? fo->wlr_output->name : NULL);
 }
 
 static struct snap_view *snap_view(struct snap *sn, uint32_t id)
@@ -1159,6 +1163,14 @@ static void report(void *data)
 			ev_str(&e, "layout", config_layout_name(n->layout));
 			ev_send(ipc, &e);
 		}
+	}
+
+	/* the pointer (or a window) took the focus to another monitor */
+	if (now.focus_output && (!was->focus_output || strcmp(now.focus_output, was->focus_output))) {
+		ev_begin(&e, "monitor");
+		ev_str(&e, "change", "focus");
+		ev_str(&e, "name", now.focus_output);
+		ev_send(ipc, &e);
 	}
 
 	if (now.focus != was->focus) {
