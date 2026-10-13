@@ -7,6 +7,7 @@
 #include "aro.h"
 #include "core.h"
 #include "idle.h"
+#include "ipc.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -469,8 +470,10 @@ void pointer_motion_common(struct aro_server *s, uint32_t time)
 	/* focus follows mouse */
 	if (s->cfg.focus_follows_mouse && !s->focused_layer && !s->warping) {
 		struct aro_output *po = output_at(s, s->cursor->x, s->cursor->y);
-		if (po)
+		if (po && po != s->focused_output) {
 			s->focused_output = po;
+			ipc_notify(s);  /* subscribers hear "monitor focus" */
+		}
 		if (v && v != s->focused)
 			aro_focus(s, v);
 	} else {
@@ -590,13 +593,43 @@ void new_constraint(struct wl_listener *l, void *data)
 }
 
 /*
- * Clip a motion delta to the active constraint. Returns false when the
- * pointer is locked and must not move at all. Grabs (our own move and
- * resize) are never constrained.
+ * A focused fullscreen window keeps the pointer on its output. Games under
+ * Wine mostly don't confine the pointer themselves (on Windows the
+ * fullscreen screen does it), so with a second screen it would slip off the
+ * edge mid-game, and with focus_follows_mouse take the focus along. It only
+ * keeps a pointer that is already there, and lets go while a layer surface
+ * (a launcher, say) has the keyboard.
+ */
+static void fullscreen_confine(struct aro_server *s, double *dx, double *dy)
+{
+	struct aro_view *v = s->focused;
+	if (!s->cfg.fullscreen_confine || !v || !v->mapped || !v->fullscreen || !v->output)
+		return;
+	if (s->focused_layer || aro_locked(s) || prompt_active(s) || picker_active(s) || overview_active(s))
+		return;
+	struct wlr_box box;
+	wlr_output_layout_get_box(s->output_layout, v->output->wlr_output, &box);
+	double x = s->cursor->x, y = s->cursor->y;
+	if (wlr_box_empty(&box) || !wlr_box_contains_point(&box, x, y))
+		return;
+	double nx = x + *dx, ny = y + *dy;
+	double right = box.x + box.width - 1, bottom = box.y + box.height - 1;
+	nx = nx < box.x ? box.x : nx > right ? right : nx;
+	ny = ny < box.y ? box.y : ny > bottom ? bottom : ny;
+	*dx = nx - x;
+	*dy = ny - y;
+}
+
+/*
+ * Clip a motion delta to the active constraint, and to a fullscreen
+ * window's output. Returns false when the pointer is locked and must not
+ * move at all. Grabs (our own move and resize) are never constrained.
  */
 static bool constrain_motion(struct aro_server *s, double *dx, double *dy)
 {
 	struct wlr_pointer_constraint_v1 *c = s->active_constraint;
+	if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
+		fullscreen_confine(s, dx, dy);
 	if (!c || s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		return true;
 	if (s->seat->pointer_state.focused_surface != c->surface)
@@ -770,8 +803,10 @@ void cursor_button(struct wl_listener *l, void *data)
 	/* click focuses output */
 	if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		struct aro_output *po = output_at(s, s->cursor->x, s->cursor->y);
-		if (po)
+		if (po && po != s->focused_output) {
 			s->focused_output = po;
+			ipc_notify(s);
+		}
 	}
 
 	if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED && v) {

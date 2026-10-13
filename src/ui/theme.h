@@ -110,6 +110,7 @@
 
 /* confirm quit default */
 #define TH_CONFIRM_QUIT 1
+#define TH_FULLSCREEN_CONFINE 1
 
 /* bar: 0 off, 1 always, 2 auto */
 #define TH_BAR          2

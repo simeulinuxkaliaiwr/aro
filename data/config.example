@@ -11,6 +11,9 @@ focus_follows_mouse = false
 # kills all open windows if you say yes.
 confirm_quit = true
 
+# a focused fullscreen window (a game, usually) keeps the pointer on its screen.
+fullscreen_confine = true
+
 # a fullscreen game that asks for it may skip vsync: lower input lag, visible tearing.
 allow_tearing = false
 

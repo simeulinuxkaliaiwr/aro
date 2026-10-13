@@ -57,6 +57,12 @@ Default: false.
 Ask before the quit binding ends the session.
 Default: true.
 .TP
+.BI "fullscreen_confine = " bool
+While a fullscreen window has the focus, the pointer stays on its screen.
+Games mostly rely on this with more than one screen: under Wine few confine
+the pointer themselves.
+Default: true.
+.TP
 .BI "allow_tearing = " bool
 Let a fullscreen app that asks for it, usually a game, show each frame at
 once instead of waiting for the screen's refresh.

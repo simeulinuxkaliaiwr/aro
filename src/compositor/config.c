@@ -444,6 +444,7 @@ void config_defaults(struct aro_config *c)
 	c->workspaces = TH_WORKSPACES;
 	c->focus_follows_mouse = TH_FOCUS_FOLLOWS_MOUSE;
 	c->confirm_quit = TH_CONFIRM_QUIT;
+	c->fullscreen_confine = TH_FULLSCREEN_CONFINE;
 	c->tp_tap = true;
 	c->tp_dwt = true;
 	c->kb_repeat_rate = 25;
@@ -1514,6 +1515,8 @@ bool config_load(struct aro_config *c, const char *path)
 			ok = parse_bool(value, &c->focus_follows_mouse);
 		} else if (!strcasecmp(key, "confirm_quit")) {
 			ok = parse_bool(value, &c->confirm_quit);
+		} else if (!strcasecmp(key, "fullscreen_confine")) {
+			ok = parse_bool(value, &c->fullscreen_confine);
 		} else if (!strcasecmp(key, "allow_tearing")) {
 			ok = parse_bool(value, &c->allow_tearing);
 		} else if (!strcasecmp(key, "bar")) {
