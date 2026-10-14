@@ -198,8 +198,9 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 	l->lock = lock;
 	wl_list_init(&l->surfaces);
 
-	/* lock layer above everything */
-	l->tree = wlr_scene_tree_create(s->l_overlay);
+	/* above everything: in l_overlay, an overlay surface that maps while
+	 * locked (a notification) would be drawn over the lock screen */
+	l->tree = wlr_scene_tree_create(s->l_lock);
 	if (!l->tree) {
 		free(l);
 		wlr_session_lock_v1_destroy(lock);

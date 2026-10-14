@@ -2517,9 +2517,10 @@ int main(int argc, char *argv[])
 	s.l_fullscreen = wlr_scene_tree_create(&s.scene->tree);
 	s.l_notify     = wlr_scene_tree_create(&s.scene->tree);
 	s.l_overlay    = wlr_scene_tree_create(&s.scene->tree);
+	s.l_lock       = wlr_scene_tree_create(&s.scene->tree);
 	if (!s.root_bg || !s.l_background || !s.l_bottom || !s.l_tiled ||
 	    !s.l_preview || !s.l_float || !s.l_overview || !s.l_unmanaged || !s.l_bar || !s.l_top || !s.l_fullscreen || !s.l_notify ||
-	    !s.l_overlay) {
+	    !s.l_overlay || !s.l_lock) {
 		wlr_log(WLR_ERROR, "could not build the scene layers");
 		return 1;
 	}

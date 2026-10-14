@@ -311,7 +311,9 @@ struct aro_server {
 	struct wlr_scene_tree *l_top;
 	struct wlr_scene_tree *l_fullscreen;    /* covers the bar and panels */
 	struct wlr_scene_tree *l_notify;        /* our own messages, over all of it */
-	struct wlr_scene_tree *l_overlay;       /* lock screens stay above */
+	struct wlr_scene_tree *l_overlay;
+	struct wlr_scene_tree *l_lock;          /* lock screens: above everything, even
+	                                           overlay surfaces mapped after the lock */
 	struct wlr_output_layout *output_layout;
 
 	struct wlr_xdg_shell *xdg_shell;
