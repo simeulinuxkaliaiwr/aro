@@ -480,6 +480,10 @@ struct aro_server {
 /* aro.c */
 void aro_arrange(struct aro_server *s);
 void aro_focus(struct aro_server *s, struct aro_view *v);
+/* give a surface the keyboard, even with no keyboard last used */
+void keyboard_enter(struct aro_server *s, struct wlr_surface *surface);
+/* the keyboard goes to the focused layer surface, else the focused window */
+void keyboard_refocus(struct aro_server *s);
 /* switch to the window's workspace and focus it */
 void view_raise_and_focus(struct aro_server *s, struct aro_view *v);
 struct aro_output *aro_focused_output(struct aro_server *s);

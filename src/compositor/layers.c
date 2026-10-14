@@ -33,26 +33,10 @@ static struct wlr_scene_tree *layer_tree_for(struct aro_server *s,
 
 static void layer_focus(struct aro_server *s, struct aro_layer *l)
 {
-	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
-	if (!kb)
-		return;
-
+	/* behind the lock this is only remembered; unlocking hands it over.
+	 * A launcher taking the keyboard releases a game's pointer lock */
 	s->focused_layer = l;
-	if (l) {
-		wlr_seat_keyboard_notify_enter(s->seat, l->layer_surface->surface,
-		                               kb->keycodes, kb->num_keycodes,
-		                               &kb->modifiers);
-	} else if (s->focused) {
-		wlr_seat_keyboard_notify_enter(s->seat,
-		                               view_surface(s->focused),
-		                               kb->keycodes, kb->num_keycodes,
-		                               &kb->modifiers);
-	} else {
-		wlr_seat_keyboard_notify_clear_focus(s->seat);
-	}
-
-	/* a launcher taking the keyboard releases a game's pointer lock */
-	keyboard_focus_changed(s);
+	keyboard_refocus(s);
 }
 
 bool layer_listed(struct aro_layer *l, const char *globs)

@@ -131,6 +131,15 @@ else
 	echo "skip  input methods (no wtype)"
 fi
 
+# the keyboard around the lock screen: a layer surface must not take it from
+# the lock, unlocking must give it back, and a gone keyboard must not stop it
+if client lock-focus > "$T/lock-focus.out" 2>&1; then
+	ok "the keyboard follows focus around the lock"
+else
+	bad "the keyboard follows focus around the lock: $(grep -m 1 -v '^ok' "$T/lock-focus.out")"
+fi
+alive
+
 # 1. popups with no parent: this crashed aro on every waybar tooltip
 client popup-orphan > /dev/null && ok "parentless popups" || bad "parentless popups"
 alive

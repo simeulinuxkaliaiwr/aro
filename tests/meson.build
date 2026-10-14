@@ -17,11 +17,13 @@ foreach xml : [
   wl_protocol_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
   wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
   wl_protocol_dir / 'unstable/text-input/text-input-unstable-v3.xml',
+  wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
   '../protocols/wlr-layer-shell-unstable-v1.xml',
   '../protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
   '../protocols/hyprland-toplevel-export-v1.xml',
   'protocols/wlr-virtual-pointer-unstable-v1.xml',
   'protocols/input-method-unstable-v2.xml',
+  'protocols/virtual-keyboard-unstable-v1.xml',
 ]
   test_proto += custom_target(
     input: xml,
@@ -47,6 +49,12 @@ foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'in
     dependencies: test_client_dep,
   )
 endforeach
+
+# it types, so it builds its own keymap
+test_clients += executable('lock-focus', 'clients/lock-focus.c', test_proto,
+  link_with: test_common,
+  dependencies: [test_client_dep, dependency('xkbcommon')],
+)
 
 foreach mode : ['main', 'multi']
 test('headless-' + mode, find_program('run.sh'),

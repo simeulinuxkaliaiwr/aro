@@ -55,22 +55,11 @@ void lock_arrange(struct aro_server *s)
 	}
 }
 
-/* lock gets keyboard focus */
-static void lock_focus(struct aro_server *s, struct wlr_surface *surface)
-{
-	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
-	if (kb)
-		wlr_seat_keyboard_notify_enter(s->seat, surface, kb->keycodes,
-		                               kb->num_keycodes, &kb->modifiers);
-	else
-		wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
-}
-
 static void lock_surface_map(struct wl_listener *listener, void *data)
 {
 	struct aro_lock_surface *ls = wl_container_of(listener, ls, map);
 	(void)data;
-	lock_focus(ls->lock->server, ls->surface->surface);
+	keyboard_enter(ls->lock->server, ls->surface->surface);
 }
 
 static void lock_surface_destroy(struct wl_listener *listener, void *data)
@@ -133,9 +122,8 @@ static void lock_release(struct aro_server *s, struct aro_lock *l)
 	s->lock = NULL;
 	free(l);
 
-	/* whatever was focused before is still in s->focused; re-assert it so
-	 * the keyboard comes back from the lock surface */
-	aro_focus(s, s->focused);
+	/* focus kept moving behind the lock; the keyboard follows it now */
+	keyboard_refocus(s);
 
 	/* the windows count for idle inhibition again */
 	idle_update(s);

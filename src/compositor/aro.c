@@ -132,14 +132,36 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
 	ipc_notify(s);
 }
 
+/*
+ * The last keyboard used may be gone (wtype's, or an input method's), and
+ * the seat then has none until a key is pressed; the surface must still get
+ * its enter, or the keys keep going to the old one.
+ */
+void keyboard_enter(struct aro_server *s, struct wlr_surface *surface)
+{
+	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
+	if (kb)
+		wlr_seat_keyboard_notify_enter(s->seat, surface, kb->keycodes,
+		                               kb->num_keycodes, &kb->modifiers);
+	else
+		wlr_seat_keyboard_notify_enter(s->seat, surface, NULL, 0, NULL);
+}
+
+void keyboard_refocus(struct aro_server *s)
+{
+	if (aro_locked(s))
+		return;                 /* the lock surface keeps it */
+	if (s->focused_layer)
+		keyboard_enter(s, s->focused_layer->layer_surface->surface);
+	else if (s->focused)
+		keyboard_enter(s, view_surface(s->focused));
+	else
+		wlr_seat_keyboard_notify_clear_focus(s->seat);
+	keyboard_focus_changed(s);
+}
+
 static void focus_apply(struct aro_server *s, struct aro_view *v)
 {
-	/* while locked, remember focus but don't apply it */
-	if (aro_locked(s)) {
-		s->focused = v;
-		return;
-	}
-
 	if (s->focused == v)
 		return;
 
@@ -150,7 +172,8 @@ static void focus_apply(struct aro_server *s, struct aro_view *v)
 
 	s->focused = v;
 	if (!v) {
-		wlr_seat_keyboard_notify_clear_focus(s->seat);
+		if (!aro_locked(s))
+			wlr_seat_keyboard_notify_clear_focus(s->seat);
 		return;
 	}
 
@@ -165,15 +188,12 @@ static void focus_apply(struct aro_server *s, struct aro_view *v)
 	if (v->output && v->output->bar.tree)
 		bar_update(&v->output->bar, v->output);
 
-	/* layer surface may keep keyboard */
-	if (s->focused_layer)
+	/* layer surface may keep keyboard; while locked, the lock keeps it
+	 * and unlocking hands it over */
+	if (s->focused_layer || aro_locked(s))
 		return;
 
-	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
-	if (kb)
-		wlr_seat_keyboard_notify_enter(s->seat, view_surface(v),
-		                               kb->keycodes, kb->num_keycodes,
-		                               &kb->modifiers);
+	keyboard_enter(s, view_surface(v));
 }
 
 /* keep view/node pointers in sync after swap */
