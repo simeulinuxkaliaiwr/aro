@@ -218,11 +218,17 @@ static void xdg_configure(struct aro_view *v, int x, int y, int w, int h)
 	(void)x; (void)y;       /* a Wayland client does not know where it is */
 	if (!v->toplevel)
 		return;
+	/* called every frame of an animation; only send what changed, since
+	 * each set_* is a new configure and Waydroid replugs its display on every one */
+	const struct wlr_xdg_toplevel_configure *sch = &v->toplevel->scheduled;
 	/* tiled: fill the size given, mpv stops keeping its aspect */
-	if (wl_resource_get_version(v->toplevel->resource) >= XDG_TOPLEVEL_STATE_TILED_LEFT_SINCE_VERSION)
-		wlr_xdg_toplevel_set_tiled(v->toplevel, v->floating || v->fullscreen ? WLR_EDGE_NONE
-		        : WLR_EDGE_LEFT | WLR_EDGE_RIGHT | WLR_EDGE_TOP | WLR_EDGE_BOTTOM);
-	wlr_xdg_toplevel_set_size(v->toplevel, w, h);
+	const uint32_t tiled = v->floating || v->fullscreen ? WLR_EDGE_NONE
+	        : WLR_EDGE_LEFT | WLR_EDGE_RIGHT | WLR_EDGE_TOP | WLR_EDGE_BOTTOM;
+	if (wl_resource_get_version(v->toplevel->resource) >= XDG_TOPLEVEL_STATE_TILED_LEFT_SINCE_VERSION &&
+	    sch->tiled != tiled)
+		wlr_xdg_toplevel_set_tiled(v->toplevel, tiled);
+	if (sch->width != w || sch->height != h)
+		wlr_xdg_toplevel_set_size(v->toplevel, w, h);
 }
 
 static void xdg_close(struct aro_view *v)
