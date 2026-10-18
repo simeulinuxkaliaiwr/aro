@@ -24,8 +24,11 @@
 
 static void xwl_configure(struct aro_view *v, int x, int y, int w, int h)
 {
-	if (v->xsurface)
-		wlr_xwayland_surface_configure(v->xsurface, x, y, w, h);
+	struct wlr_xwayland_surface *xs = v->xsurface;
+	/* called every frame; an unchanged size still sends the client a synthetic
+	 * ConfigureNotify, and wine games slow to a crawl handling one per frame */
+	if (xs && (xs->x != x || xs->y != y || xs->width != w || xs->height != h))
+		wlr_xwayland_surface_configure(xs, x, y, w, h);
 }
 
 static void xwl_close(struct aro_view *v)
