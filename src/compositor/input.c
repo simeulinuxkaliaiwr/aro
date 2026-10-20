@@ -1000,6 +1000,11 @@ void view_raise_and_focus(struct aro_server *s, struct aro_view *v)
 		scratch_bring_view(s, v);       /* a taskbar or the app asked for it */
 		return;
 	}
+	/* already focused and in view: nothing to do. Chromium asks to be activated
+	 * as it takes focus, and the warp below would pull the pointer back to its
+	 * middle, under a floating window there, which then takes focus in turn */
+	if (v == s->focused && v->workspace == v->output->cur_ws)
+		return;
 
 	s->focused_output = v->output;
 	if (v->workspace != v->output->cur_ws)
