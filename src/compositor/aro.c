@@ -554,6 +554,50 @@ static void view_float_follow(struct aro_view *v)
 	wlr_output_schedule_frame(v->output->wlr_output);
 }
 
+/*
+ * A floating client may take less than it was given: foot keeps to whole
+ * cells, so a resize comes back up to a cell short and the frame showed the
+ * gap under it. Once it has answered our last configure, shrink the frame to
+ * what it took, keeping the edge that isn't being dragged where it is.
+ */
+static void view_float_fit(struct aro_view *v)
+{
+	if (!v->toplevel || !v->floating || v->float_follow || v->fullscreen ||
+	    !v->mapped || !v->output)
+		return;
+	struct wlr_xdg_surface *base = v->toplevel->base;
+	if (!wl_list_empty(&base->configure_list))
+		return;         /* still catching up: its size answers an older configure */
+
+	ly_box c;
+	ui_frame_content_box(v, v->fbox, &c);
+	const struct wlr_xdg_toplevel_configure *sch = &v->toplevel->scheduled;
+	if (sch->width != c.w || sch->height != c.h)
+		return;         /* the box moved on since; the next configure will tell */
+
+	const int gw = base->geometry.width, gh = base->geometry.height;
+	if (gw <= 0 || gh <= 0)
+		return;
+	const int dw = c.w > gw ? c.w - gw : 0;
+	const int dh = c.h > gh ? c.h - gh : 0;
+	if (!dw && !dh)
+		return;         /* bigger than asked is clipped, as before */
+
+	struct aro_server *s = v->server;
+	const bool grabbed = s->grabbed == v && s->cursor_mode == ARO_CURSOR_RESIZE;
+	if (grabbed && (s->grab_edges & WLR_EDGE_LEFT))
+		v->fbox.x += dw;
+	if (grabbed && (s->grab_edges & WLR_EDGE_TOP))
+		v->fbox.y += dh;
+	v->fbox.w -= dw;
+	v->fbox.h -= dh;
+	anim_box_set(&v->geo, view_target(v));
+
+	if (dw)
+		ui_frame_title(v, v->fbox.w, v->output->scale);
+	wlr_output_schedule_frame(v->output->wlr_output);
+}
+
 /* toggle floating */
 void view_set_floating(struct aro_server *s, struct aro_view *v,
                               bool floating)
@@ -1630,6 +1674,7 @@ static void view_commit(struct wl_listener *l, void *data)
 
 	/* follow client float commits */
 	view_float_follow(v);
+	view_float_fit(v);
 
 	/* clip rounded corners */
 	ui_frame_clip_content(v);
