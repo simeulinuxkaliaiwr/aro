@@ -2593,7 +2593,7 @@ int main(int argc, char *argv[])
 	s.new_output.notify = new_output;
 	wl_signal_add(&s.backend->events.new_output, &s.new_output);
 
-	s.xdg_shell = wlr_xdg_shell_create(s.display, 3);
+	s.xdg_shell = wlr_xdg_shell_create(s.display, 6);
 	s.new_xdg_toplevel.notify = new_xdg_toplevel;
 	wl_signal_add(&s.xdg_shell->events.new_toplevel, &s.new_xdg_toplevel);
 	toplevel_icons_init(&s);
