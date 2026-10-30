@@ -36,7 +36,11 @@
 #include <unistd.h>
 
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>   /* trap 14: we read wlr_output fields */
+#include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 
 #ifndef ARO_VERSION
@@ -750,6 +754,10 @@ struct snap {
 	int noutputs;
 	uint32_t focus;                 /* 0: nothing focused */
 	char *focus_output;             /* the monitor that has the focus ("" none) */
+	bool drag;                      /* a drag-and-drop is on */
+	bool drag_files;                /* and it offers text/uri-list */
+	uint32_t drag_mods;             /* WLR_MODIFIER_*: shift, ctrl, alt, logo */
+	int drag_x, drag_y;             /* the pointer, in layout coordinates */
 };
 
 struct aro_ipc {
@@ -1020,6 +1028,22 @@ static void snap_take(struct aro_server *s, struct snap *sn)
 	sn->focus = s->focused && s->focused->mapped ? s->focused->id : 0;
 	struct aro_output *fo = aro_focused_output(s);
 	sn->focus_output = dup_or_empty(fo ? fo->wlr_output->name : NULL);
+
+	struct wlr_drag *drag = s->seat->drag;
+	if (drag) {
+		sn->drag = true;
+		if (drag->source) {
+			char **mime;
+			wl_array_for_each(mime, &drag->source->mime_types)
+				sn->drag_files |= !strcmp(*mime, "text/uri-list");
+		}
+		struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
+		sn->drag_mods = kb ? wlr_keyboard_get_modifiers(kb) &
+			(WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
+			 WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO) : 0;
+		sn->drag_x = (int)s->cursor->x;
+		sn->drag_y = (int)s->cursor->y;
+	}
 }
 
 static struct snap_view *snap_view(struct snap *sn, uint32_t id)
@@ -1086,6 +1110,21 @@ static void ev_send(struct aro_ipc *ipc, struct event *e)
 	free(e->text.d);
 	free(e->json.d);
 	*e = (struct event){ 0 };
+}
+
+/* "shift+alt", or "" for none */
+static void mods_name(char *buf, size_t n, uint32_t mods)
+{
+	static const struct { uint32_t bit; const char *name; } names[] = {
+		{ WLR_MODIFIER_LOGO, "super" }, { WLR_MODIFIER_CTRL, "ctrl" },
+		{ WLR_MODIFIER_ALT, "alt" }, { WLR_MODIFIER_SHIFT, "shift" },
+	};
+	size_t len = 0;
+	buf[0] = '\0';
+	for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
+		if (mods & names[i].bit)
+			len += snprintf(buf + len, len < n ? n - len : 0, "%s%s",
+			                len ? "+" : "", names[i].name);
 }
 
 static void ev_view(struct aro_ipc *ipc, const char *name, const struct snap_view *v)
@@ -1183,6 +1222,21 @@ static void report(void *data)
 			sb_puts(&e.json, ",\"id\":null");
 			ev_send(ipc, &e);
 		}
+	}
+
+	/* a drag began or ended, or the keys held during it changed: clients
+	 * hear no keys while a drag is on, so this is how a drop target
+	 * (a converter wheel, say) learns that Shift is down */
+	if (now.drag != was->drag || (now.drag && now.drag_mods != was->drag_mods)) {
+		char mods[64];
+		mods_name(mods, sizeof mods, now.drag_mods);
+		ev_begin(&e, "drag");
+		ev_str(&e, "change", !now.drag ? "end" : !was->drag ? "start" : "mods");
+		ev_int(&e, "files", now.drag_files);
+		ev_int(&e, "x", now.drag_x);
+		ev_int(&e, "y", now.drag_y);
+		ev_str(&e, "mods", mods);
+		ev_send(ipc, &e);
 	}
 
 	snap_free(&old);

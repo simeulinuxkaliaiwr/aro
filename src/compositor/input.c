@@ -161,6 +161,10 @@ static void keyboard_modifiers(struct wl_listener *l, void *data)
 	/* letting go of mod picks the selected window */
 	switcher_modifiers(kb->server, wlr_keyboard_get_modifiers(kb->wlr_keyboard));
 
+	/* clients hear no keys during a drag; subscribers hear "drag mods" */
+	if (kb->server->seat->drag)
+		ipc_notify(kb->server);
+
 	if (ime_modifiers(kb->server, kb))
 		return;
 

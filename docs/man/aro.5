@@ -513,10 +513,14 @@ screen's usable area; each in pixels, or a share of the screen like
 (floating, centred),
 or
 .BR no_border ,
-.B no_header
+.BR no_header ,
+.B no_radius
 and
-.BR no_radius ,
-which take that part of the window's frame away,
+.BR no_bg ,
+which take that part of the window's frame away
+.RB ( no_bg :
+the backdrop behind the window, for apps with round or see-through
+corners),
 or
 .BI opacity " n"
 and

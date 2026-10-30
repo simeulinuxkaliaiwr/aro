@@ -714,6 +714,7 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		.no_border = Q_RULE_UNSET,
 		.no_header = Q_RULE_UNSET,
 		.no_radius = Q_RULE_UNSET,
+		.no_bg = Q_RULE_UNSET,
 	};
 	bool acts = false, bad_quote = false;
 	char *cur = value, *w;
@@ -759,6 +760,9 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 			acts = true;
 		} else if (!strcasecmp(w, "no_radius")) {
 			r.no_radius = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "no_bg")) {
+			r.no_bg = 1;
 			acts = true;
 		} else if (!strcasecmp(w, "size") || !strcasecmp(w, "position")) {
 			const bool size = !strcasecmp(w, "size");
@@ -843,7 +847,7 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 		.fullscreen = Q_RULE_UNSET, .scratch = Q_RULE_UNSET,
 		.sticky = Q_RULE_UNSET, .center = Q_RULE_UNSET,
 		.no_border = Q_RULE_UNSET, .no_header = Q_RULE_UNSET,
-		.no_radius = Q_RULE_UNSET,
+		.no_radius = Q_RULE_UNSET, .no_bg = Q_RULE_UNSET,
 	};
 	const char *a = app_id ? app_id : "";
 	const char *t = title ? title : "";
@@ -875,6 +879,8 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 			out->no_header = r->no_header;
 		if (r->no_radius != Q_RULE_UNSET)
 			out->no_radius = r->no_radius;
+		if (r->no_bg != Q_RULE_UNSET)
+			out->no_bg = r->no_bg;
 		if (r->size[0].set) {
 			out->size[0] = r->size[0];
 			out->size[1] = r->size[1];

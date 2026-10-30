@@ -50,11 +50,13 @@ foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'in
   )
 endforeach
 
-# it types, so it builds its own keymap
-test_clients += executable('lock-focus', 'clients/lock-focus.c', test_proto,
-  link_with: test_common,
-  dependencies: [test_client_dep, dependency('xkbcommon')],
-)
+# they type, so they build their own keymap
+foreach name : ['lock-focus', 'dnd']
+  test_clients += executable(name, 'clients' / name + '.c', test_proto,
+    link_with: test_common,
+    dependencies: [test_client_dep, dependency('xkbcommon')],
+  )
+endforeach
 
 foreach mode : ['main', 'multi']
 test('headless-' + mode, find_program('run.sh'),

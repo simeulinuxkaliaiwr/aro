@@ -312,7 +312,8 @@ static void frame_paint(struct aro_view *v, bool focused)
 
 	color_faded(focused ? th->accent : th->line, a, col);
 	wlr_scene_rect_set_color(v->frame, col);
-	color_faded(frame_bg(v, focused), a, col);
+	/* no_bg: a round or see-through window shows what is behind it */
+	color_faded(frame_bg(v, focused), v->no_bg ? 0 : a, col);
 	wlr_scene_rect_set_color(v->bg, col);
 	color_faded(focused ? th->frame_on : th->frame, a * header_alpha(v), col);
 	wlr_scene_rect_set_color(v->header, col);

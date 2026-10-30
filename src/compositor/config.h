@@ -104,7 +104,7 @@ struct q_rule {
 	struct q_len pos[2];    /* floating top-left, from the usable area's */
 	int center;             /* 1 only */
 	char *monitor;          /* glob on name or "make model serial"; owned */
-	int no_border, no_header, no_radius;    /* 1 only */
+	int no_border, no_header, no_radius, no_bg;     /* 1 only */
 	double opacity[2];      /* focused, unfocused; 0 unset */
 };
 
@@ -114,7 +114,7 @@ struct q_rule_result {
 	struct q_len size[2], pos[2];
 	const char *monitor;    /* the rule's; only good until the next reload */
 	unsigned monitor_hash;  /* what changes are told by; 0 unset */
-	int no_border, no_header, no_radius;
+	int no_border, no_header, no_radius, no_bg;
 	double opacity[2];
 };
 

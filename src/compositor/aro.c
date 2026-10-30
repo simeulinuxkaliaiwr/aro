@@ -744,12 +744,14 @@ static void rule_place(struct aro_view *v, const struct q_rule_result *r)
 static bool rule_chrome(struct aro_view *v, const struct q_rule_result *r)
 {
 	const bool nb = r->no_border == 1, nh = r->no_header == 1, nr = r->no_radius == 1;
-	if (v->no_border == nb && v->no_header == nh && v->no_radius == nr &&
+	const bool ng = r->no_bg == 1;
+	if (v->no_border == nb && v->no_header == nh && v->no_radius == nr && v->no_bg == ng &&
 	    v->rule_opacity[0] == r->opacity[0] && v->rule_opacity[1] == r->opacity[1])
 		return false;
 	v->no_border = nb;
 	v->no_header = nh;
 	v->no_radius = nr;
+	v->no_bg = ng;
 	v->rule_opacity[0] = r->opacity[0];
 	v->rule_opacity[1] = r->opacity[1];
 	ui_frame_retheme(v);
@@ -1996,16 +1998,33 @@ static void drag_icon_destroy(struct wl_listener *l, void *data)
 	wl_list_init(&s->drag_icon_destroy.link);
 }
 
+static void drag_destroy(struct wl_listener *l, void *data)
+{
+	struct aro_server *s = wl_container_of(l, s, drag_destroy);
+	(void)data;
+	/* wlroots asserts the list is empty once the signal is out */
+	wl_list_remove(&s->drag_destroy.link);
+	wl_list_init(&s->drag_destroy.link);
+	ipc_notify(s);
+}
+
 static void start_drag(struct wl_listener *l, void *data)
 {
 	struct aro_server *s = wl_container_of(l, s, start_drag);
 	struct wlr_drag *drag = data;
 
+	/* subscribers hear "drag start"; a drop target such as a converter
+	 * wheel can open under the pointer */
+	wl_list_remove(&s->drag_destroy.link);
+	s->drag_destroy.notify = drag_destroy;
+	wl_signal_add(&drag->events.destroy, &s->drag_destroy);
+	ipc_notify(s);
+
 	if (!drag->icon)
 		return;
 
-	/* drag icon on overlay */
-	s->drag_icon = wlr_scene_drag_icon_create(s->l_overlay, drag->icon);
+	/* drag icon over everything but the lock */
+	s->drag_icon = wlr_scene_drag_icon_create(s->l_dragicon, drag->icon);
 	drag_icon_update(s);
 
 	s->drag_icon_destroy.notify = drag_icon_destroy;
@@ -2568,10 +2587,11 @@ int main(int argc, char *argv[])
 	s.l_fullscreen = wlr_scene_tree_create(&s.scene->tree);
 	s.l_notify     = wlr_scene_tree_create(&s.scene->tree);
 	s.l_overlay    = wlr_scene_tree_create(&s.scene->tree);
+	s.l_dragicon   = wlr_scene_tree_create(&s.scene->tree);
 	s.l_lock       = wlr_scene_tree_create(&s.scene->tree);
 	if (!s.root_bg || !s.l_background || !s.l_bottom || !s.l_tiled ||
 	    !s.l_preview || !s.l_float || !s.l_overview || !s.l_unmanaged || !s.l_bar || !s.l_top || !s.l_fullscreen || !s.l_notify ||
-	    !s.l_overlay || !s.l_lock) {
+	    !s.l_overlay || !s.l_dragicon || !s.l_lock) {
 		wlr_log(WLR_ERROR, "could not build the scene layers");
 		return 1;
 	}
@@ -2662,6 +2682,7 @@ int main(int argc, char *argv[])
 	s.start_drag.notify = start_drag;
 	wl_signal_add(&s.seat->events.start_drag, &s.start_drag);
 	wl_list_init(&s.drag_icon_destroy.link);
+	wl_list_init(&s.drag_destroy.link);
 
 	/* presentation needs backend */
 	wlr_presentation_create(s.display, s.backend, 2);
@@ -2813,6 +2834,7 @@ teardown:
 	wl_list_remove(&s.request_start_drag.link);
 	wl_list_remove(&s.start_drag.link);
 	wl_list_remove(&s.drag_icon_destroy.link);
+	wl_list_remove(&s.drag_destroy.link);
 	wl_list_remove(&s.cursor_motion.link);
 	wl_list_remove(&s.cursor_motion_abs.link);
 	wl_list_remove(&s.cursor_button.link);

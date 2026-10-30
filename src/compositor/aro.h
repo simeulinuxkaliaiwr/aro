@@ -116,6 +116,7 @@ struct aro_view {
 	bool stashed;           /* a scratchpad window while hidden */
 	struct aro_group *group;        /* tabbed with others in one tile; NULL alone */
 	bool no_border, no_header, no_radius;   /* from rules */
+	bool no_bg;                             /* from rules: nothing behind the window */
 	double rule_opacity[2]; /* focused, unfocused; 0: the config's */
 	struct wlr_scene_blur *blur;    /* behind it when see-through; effects only */
 	double scroll_w;        /* layout = scroll: this column's width share; 0 = the default */
@@ -312,6 +313,8 @@ struct aro_server {
 	struct wlr_scene_tree *l_fullscreen;    /* covers the bar and panels */
 	struct wlr_scene_tree *l_notify;        /* our own messages, over all of it */
 	struct wlr_scene_tree *l_overlay;
+	struct wlr_scene_tree *l_dragicon;      /* over overlay surfaces: a drop
+	                                           target there must not hide it */
 	struct wlr_scene_tree *l_lock;          /* lock screens: above everything, even
 	                                           overlay surfaces mapped after the lock */
 	struct wlr_output_layout *output_layout;
@@ -476,6 +479,7 @@ struct aro_server {
 	struct wl_listener request_start_drag;
 	struct wl_listener start_drag;
 	struct wl_listener drag_icon_destroy;
+	struct wl_listener drag_destroy;        /* subscribers hear "drag end" */
 	struct wlr_scene_tree *drag_icon;
 };
 

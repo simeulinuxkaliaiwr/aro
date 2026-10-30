@@ -1,4 +1,4 @@
-/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface */
+/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface, "clear" fully see-through */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
@@ -29,6 +29,7 @@ static struct wp_tearing_control_manager_v1 *tearing;
 static struct xdg_toplevel_icon_manager_v1 *icons;
 static struct wl_subcompositor *subs;
 static int sub;
+static int clear;              /* fully see-through: what is behind shows */
 static struct wl_surface *sub_surf;
 
 static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t v)
@@ -63,7 +64,7 @@ static void xs_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 		wl_surface_attach(sub_surf, solid_buffer(&g, bw - 40, bh - 40, 0xffff0000), 0, 0);
 		wl_surface_commit(sub_surf);
 	}
-	wl_surface_attach(w->surf, solid_buffer(&g, bw, bh, sub && w == &wins[0] ? 0xff808080 : 0xff203040), 0, 0);
+	wl_surface_attach(w->surf, solid_buffer(&g, bw, bh, clear ? 0x00000000 : sub && w == &wins[0] ? 0xff808080 : 0xff203040), 0, 0);
 	wl_surface_commit(w->surf);
 	w->drawn = 1;
 }
@@ -101,6 +102,7 @@ int main(int argc, char **argv)
 	const char *icon_name = argc > 4 && !strcmp(argv[3], "iconname") ? argv[4] : NULL;
 	icon |= icon_name != NULL;
 	sub = argc > 3 && !strcmp(argv[3], "sub");
+	clear = argc > 3 && !strcmp(argv[3], "clear");
 	if (n < 1 || n > MAX_WINDOWS)
 		fail("usage: window N HOLD [modal], N from 1 to %d", MAX_WINDOWS);
 	connect_globals(&g);

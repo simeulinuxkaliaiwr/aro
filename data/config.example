@@ -261,7 +261,8 @@ resize_step = 0.04          # resize amount per keypress
 #          size <w> <h>       floating size, frame included: pixels, or 60% of the screen
 #          position <x> <y>   floating top-left, from the screen's usable corner
 #          center             floating, centred (the default place)
-#          no_border | no_header | no_radius   take that part of the frame away
+#          no_border | no_header | no_radius | no_bg   take that part of the frame
+#                             away (no_bg: the backdrop, for round or see-through apps)
 #          opacity <n> | opacity_unfocused <n>   0.05 to 1, over the config's
 #          scratchpad opens the window hidden, for scratchpad_show to bring out.
 #          use `tile` to force tiling on dialogs, or `float` to force floating;

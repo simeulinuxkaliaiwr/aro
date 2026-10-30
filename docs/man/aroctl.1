@@ -61,6 +61,18 @@ A monitor shows another workspace, or its layout changed.
 .BR "monitor add" | remove | focus " \fIname\fP"
 A monitor came or went, or has the focus now (the pointer moved onto it,
 or a window there was focused).
+.TP
+.BR "drag start" | mods | end " \fIfiles x y mods\fP"
+A drag-and-drop began, the keys held during it changed, or it ended.
+.I files
+is 1 when the dragged data offers text/uri-list;
+.I x y
+is the pointer in layout coordinates;
+.I mods
+is what is held, such as
+.BR shift " or " alt+shift .
+Apps hear no keys while a drag is on, so this is how a drop target that
+opens under the pointer, such as a file converter's wheel, learns of them.
 .RE
 .IP
 Empty fields are

@@ -416,6 +416,32 @@ wait "$CH"
 alive
 config
 
+# 4f3b2. no_bg: a see-through window shows the wallpaper, not aro's backdrop
+nobg="background = 0xff0000ff
+rule = app_id:aro-test float size 400 300 position 100 100 no_header"
+config "$nobg"
+sleep 0.3
+client window 1 4 clear > "$T/nobg.out" 2>&1 &
+CN=$!
+if wait_for "$T/nobg.out" "1 windows open" && command -v grim > /dev/null; then
+	npx() {
+		env -i XDG_RUNTIME_DIR="$T/run" WAYLAND_DISPLAY=wayland-0 \
+			grim -g "$1 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tx1 | tr -d ' \n'
+	}
+	sleep 0.6
+	held=$(npx 300,250)
+	[ -n "$held" ] && [ "$held" != "ff0000" ] && ok "a see-through window has aro's backdrop behind it ($held)" \
+		|| bad "a see-through window has aro's backdrop behind it: pixel is '$held'"
+	config "${nobg/no_header/no_header no_bg}"
+	sleep 0.6
+	gone=$(npx 300,250)
+	[ "$gone" = "ff0000" ] && ok "rule: no_bg shows what is behind" \
+		|| bad "rule: no_bg shows what is behind: pixel is '$gone'"
+fi
+wait "$CN"
+alive
+config
+
 # 4f3c. overview_layers keeps a gadget sharp over the overview's tint, and gives it back after
 if command -v grim > /dev/null; then
 	opx() {
@@ -634,6 +660,30 @@ done
 	&& ok "subscribe: JSON lines" || bad "subscribe: JSON lines"
 kill "$SUB" "$SUBJ" 2> /dev/null
 wait "$SUB" "$SUBJ" 2> /dev/null
+
+# 4i2. a drag is announced with the keys held during it: apps hear no keys mid-drag
+ctl subscribe > "$T/drag-sub.txt" 2>&1 &
+SUB=$!
+ctl -j subscribe > "$T/drag-sub.json" 2>&1 &
+SUBJ=$!
+sleep 0.3
+client dnd > "$T/dnd.out" 2>&1
+client dnd text/plain > "$T/dnd-text.out" 2>&1
+sleep 0.3
+kill "$SUB" "$SUBJ" 2> /dev/null
+wait "$SUB" "$SUBJ" 2> /dev/null
+alive
+grep -q '^dropped' "$T/dnd.out" || bad "drag: the client got to the drop: $(cat "$T/dnd.out")"
+# the lines, in order, for the file drag; then the text drag says files 0
+grep '^drag ' "$T/drag-sub.txt" | head -n 4 | awk '{ print $2, $3, $6 }' | tr '\n' '|' > "$T/drag-seq"
+[ "$(cat "$T/drag-seq")" = "start 1 -|mods 1 shift|mods 1 alt+shift|mods 1 -|" ] \
+	&& ok "subscribe: drag start, the keys held during it" \
+	|| bad "subscribe: drag start, the keys held during it (got: $(cat "$T/drag-seq"))"
+[ "$(grep -c '^drag end' "$T/drag-sub.txt")" -eq 2 ] && grep -q '^drag start 0 ' "$T/drag-sub.txt" \
+	&& ok "subscribe: drag end, and a drag without files says so" \
+	|| bad "subscribe: drag end, and a drag without files says so (got: $(tr '\n' '|' < "$T/drag-sub.txt"))"
+grep -q '^{"event":"drag","change":"mods","files":1,"x":[0-9]*,"y":[0-9]*,"mods":"shift"}$' "$T/drag-sub.json" \
+	&& ok "subscribe: drag as JSON" || bad "subscribe: drag as JSON (got: $(grep drag "$T/drag-sub.json" | tr '\n' '|'))"
 
 # 4h. aroctl wallpaper: a file, relative to aroctl, kept over a reload until the config's line changes
 printf 'x' > "$T/wp.png"
