@@ -340,6 +340,28 @@ wait "$CR"
 alive
 config
 
+# 4f2b. a window that asks to be moved (SDL's hit test) gets the release, so later clicks still reach it
+config "rule = app_id:aro-test float size 400 300 position 100 100"
+sleep 0.3
+client selfmove 5 > "$T/selfmove.out" 2>&1 &
+CM=$!
+if wait_for "$T/selfmove.out" "open"; then
+	client click left 300 250 600 450
+	sleep 0.3
+	# the move starts when aro reads the request, a drag step or so after the press
+	read -r mx my < <(ctl -j windows | grep -o '"x":[0-9-]*,"y":[0-9-]*' | head -n 1 | tr -dc '0-9, ' | tr ',' ' ')
+	[ "${mx:-0}" -ge 350 ] && [ "${my:-0}" -ge 250 ] && ok "selfmove: the window moves where it was dragged" \
+		|| bad "selfmove: the window moves where it was dragged: at ${mx:-?},${my:-?}"
+	grep -q "release 1" "$T/selfmove.out" && ok "selfmove: the release that ends the move reaches it" \
+		|| bad "selfmove: the release that ends the move reaches it"
+	client click left 600 450
+	wait_for "$T/selfmove.out" "release 2" && ok "selfmove: a click after the move reaches it" \
+		|| bad "selfmove: a click after the move reaches it: $(tr '\n' ' ' < "$T/selfmove.out")"
+fi
+wait "$CM"
+alive
+config
+
 # 4f3. opacity holds on a window that starts floating (a commit resets its buffer)
 config "rule = app_id:aro-test float size 400 300 position 100 100 opacity 0.5"
 sleep 0.3

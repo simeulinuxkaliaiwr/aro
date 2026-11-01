@@ -785,9 +785,14 @@ void cursor_button(struct wl_listener *l, void *data)
 		return;
 	}
 
-	/* end grab on release */
+	/* end grab on release; a client that asked for the move or resize saw
+	 * the press, so it gets the release too, or it thinks the button is
+	 * still held and every later click is lost */
 	if (ev->state == WL_POINTER_BUTTON_STATE_RELEASED &&
 	    s->cursor_mode != ARO_CURSOR_PASSTHROUGH) {
+		if (s->seat->pointer_state.button_count > 0)
+			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
+			                               ev->button, ev->state);
 		grab_end(s);
 		return;
 	}

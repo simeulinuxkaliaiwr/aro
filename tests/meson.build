@@ -43,7 +43,7 @@ test_common = static_library('aro-test-common',
 )
 
 test_clients = []
-foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox', 'capture', 'click', 'ime', 'layer-zone', 'export']
+foreach name : ['popup-orphan', 'layer-popup', 'extws', 'window', 'globals', 'inhibit', 'sandbox', 'capture', 'click', 'ime', 'layer-zone', 'export', 'selfmove']
   test_clients += executable(name, 'clients' / name + '.c', test_proto,
     link_with: test_common,
     dependencies: test_client_dep,
