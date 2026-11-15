@@ -104,6 +104,7 @@ struct aro_view {
 	struct wl_listener dissociate;
 	struct wl_listener request_configure;
 	struct wl_listener request_minimize;
+	struct wl_listener set_override_redirect;   /* X11 views only */
 #endif
 	ly_node *node;                  /* our leaf; NULL while floating */
 	struct aro_output *output;   /* which screen it lives on */

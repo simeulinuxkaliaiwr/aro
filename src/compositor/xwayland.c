@@ -175,8 +175,14 @@ struct aro_unmanaged {
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener request_configure;
+	struct wl_listener set_override_redirect;
+	struct wl_listener set_geometry;
 	struct wl_listener destroy;
 };
+
+static struct aro_view *new_managed(struct aro_server *s,
+                                    struct wlr_xwayland_surface *xsurface);
+static void xwl_associate(struct wl_listener *l, void *data);
 
 /* the keyboard goes to a surface without moving aro's own focus */
 static void unmanaged_keyboard(struct aro_server *s, struct wlr_surface *surface)
@@ -237,6 +243,16 @@ static void unmanaged_request_configure(struct wl_listener *l, void *data)
 		wlr_scene_node_set_position(&u->tree->node, ev->x, ev->y);
 }
 
+/* override-redirect windows move themselves (XMoveWindow): no request, just a ConfigureNotify */
+static void unmanaged_set_geometry(struct wl_listener *l, void *data)
+{
+	struct aro_unmanaged *u = wl_container_of(l, u, set_geometry);
+	(void)data;
+	if (u->tree)
+		wlr_scene_node_set_position(&u->tree->node,
+		                            u->xsurface->x, u->xsurface->y);
+}
+
 static void unmanaged_associate(struct wl_listener *l, void *data)
 {
 	struct aro_unmanaged *u = wl_container_of(l, u, associate);
@@ -264,17 +280,49 @@ static void unmanaged_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&u->associate.link);
 	wl_list_remove(&u->dissociate.link);
 	wl_list_remove(&u->request_configure.link);
+	wl_list_remove(&u->set_override_redirect.link);
+	wl_list_remove(&u->set_geometry.link);
 	wl_list_remove(&u->destroy.link);
 	wl_list_remove(&u->link);
 	free(u);
 }
 
-static void new_unmanaged(struct aro_server *s,
-                          struct wlr_xwayland_surface *xsurface)
+/*
+ * A client may clear override-redirect on a window it made with it. From then
+ * on it is an ordinary window: frame it and let the layout place it.
+ */
+static void unmanaged_set_override_redirect(struct wl_listener *l, void *data)
+{
+	struct aro_unmanaged *u = wl_container_of(l, u, set_override_redirect);
+	struct aro_server *s = u->server;
+	struct wlr_xwayland_surface *xsurface = u->xsurface;
+	(void)data;
+	if (xsurface->override_redirect)
+		return;
+
+	bool associated = xsurface->surface != NULL;
+	bool mapped = associated && xsurface->surface->mapped;
+	if (mapped)
+		unmanaged_unmap(&u->unmap, NULL);
+	if (associated)
+		unmanaged_dissociate(&u->dissociate, NULL);
+	unmanaged_destroy(&u->destroy, NULL);
+
+	struct aro_view *v = new_managed(s, xsurface);
+	if (!v)
+		return;
+	if (associated)
+		xwl_associate(&v->associate, NULL);
+	if (mapped)
+		view_map(&v->map, NULL);
+}
+
+static struct aro_unmanaged *new_unmanaged(struct aro_server *s,
+                                           struct wlr_xwayland_surface *xsurface)
 {
 	struct aro_unmanaged *u = calloc(1, sizeof *u);
 	if (!u)
-		return;
+		return NULL;
 	u->server = s;
 	u->xsurface = xsurface;
 	wl_list_init(&u->map.link);
@@ -286,10 +334,16 @@ static void new_unmanaged(struct aro_server *s,
 	wl_signal_add(&xsurface->events.dissociate, &u->dissociate);
 	u->request_configure.notify = unmanaged_request_configure;
 	wl_signal_add(&xsurface->events.request_configure, &u->request_configure);
+	u->set_override_redirect.notify = unmanaged_set_override_redirect;
+	wl_signal_add(&xsurface->events.set_override_redirect,
+	              &u->set_override_redirect);
+	u->set_geometry.notify = unmanaged_set_geometry;
+	wl_signal_add(&xsurface->events.set_geometry, &u->set_geometry);
 	u->destroy.notify = unmanaged_destroy;
 	wl_signal_add(&xsurface->events.destroy, &u->destroy);
 
 	wl_list_insert(&s->unmanaged, &u->link);
+	return u;
 }
 
 /* ── managed X11 windows ───────────────────────────────────────────────── */
@@ -392,9 +446,41 @@ static void xwl_destroy(struct wl_listener *l, void *data)
 	wl_list_remove(&v->request_fullscreen.link);
 	wl_list_remove(&v->request_move.link);
 	wl_list_remove(&v->request_resize.link);
+	wl_list_remove(&v->set_override_redirect.link);
 	wl_list_remove(&v->destroy.link);
 	wl_list_remove(&v->link);
 	free(v);
+}
+
+/*
+ * Some toolkits (Avalonia) create a plain window and set override-redirect on
+ * it just before mapping. The window then places itself and wants no frame,
+ * so it stops being a view: desktop pets and their bubbles work this way.
+ */
+static void xwl_set_override_redirect(struct wl_listener *l, void *data)
+{
+	struct aro_view *v = wl_container_of(l, v, set_override_redirect);
+	struct aro_server *s = v->server;
+	struct wlr_xwayland_surface *xsurface = v->xsurface;
+	(void)data;
+	if (!xsurface->override_redirect)
+		return;
+
+	bool associated = xsurface->surface != NULL;
+	bool mapped = associated && xsurface->surface->mapped;
+	if (v->mapped)
+		view_unmap(&v->unmap, NULL);
+	if (associated)
+		xwl_dissociate(&v->dissociate, NULL);
+	xwl_destroy(&v->destroy, NULL);
+
+	struct aro_unmanaged *u = new_unmanaged(s, xsurface);
+	if (!u)
+		return;
+	if (associated)
+		unmanaged_associate(&u->associate, NULL);
+	if (mapped)
+		unmanaged_map(&u->map, NULL);
 }
 
 void new_xwayland_surface(struct wl_listener *l, void *data)
@@ -402,14 +488,18 @@ void new_xwayland_surface(struct wl_listener *l, void *data)
 	struct aro_server *s = wl_container_of(l, s, new_xwayland_surface);
 	struct wlr_xwayland_surface *xsurface = data;
 
-	if (xsurface->override_redirect) {
+	if (xsurface->override_redirect)
 		new_unmanaged(s, xsurface);
-		return;
-	}
+	else
+		new_managed(s, xsurface);
+}
 
+static struct aro_view *new_managed(struct aro_server *s,
+                                    struct wlr_xwayland_surface *xsurface)
+{
 	struct aro_view *v = calloc(1, sizeof *v);
 	if (!v)
-		return;
+		return NULL;
 	v->server = s;
 	v->impl = &xwl_impl;
 	v->csd = false;     /* X11 clients expect us to decorate them */
@@ -419,7 +509,7 @@ void new_xwayland_surface(struct wl_listener *l, void *data)
 	if (!ui_frame_create(v, s->l_tiled)) {
 		wlr_log(WLR_ERROR, "could not build a frame for an X11 window");
 		free(v);
-		return;
+		return NULL;
 	}
 	v->frame_tree->node.data = v;   /* view_at() walks up looking for this */
 	wlr_scene_node_set_enabled(&v->frame_tree->node, false);
@@ -447,11 +537,15 @@ void new_xwayland_surface(struct wl_listener *l, void *data)
 	wl_signal_add(&xsurface->events.request_configure, &v->request_configure);
 	v->request_minimize.notify = xwl_request_minimize;
 	wl_signal_add(&xsurface->events.request_minimize, &v->request_minimize);
+	v->set_override_redirect.notify = xwl_set_override_redirect;
+	wl_signal_add(&xsurface->events.set_override_redirect,
+	              &v->set_override_redirect);
 	v->destroy.notify = xwl_destroy;
 	wl_signal_add(&xsurface->events.destroy, &v->destroy);
 
 	v->id = ++s->next_view_id;
 	wl_list_insert(&s->views, &v->link);
+	return v;
 }
 
 void xwayland_ready(struct wl_listener *l, void *data)
