@@ -1077,12 +1077,15 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		bool sel = ov->sel_view == v;
 		ly_box cb;
 		ui_frame_content_box(v, real, &cb);
-		const ly_box sb = dragged ? carry(real, cb, b)
-		                : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p);
+		const ly_box mapped = dragged ? carry(real, cb, b)
+		                    : ov_map(&g, strip_map(&fit, shift_x(cb, dx)), slot - oo->c, p);
 		ly_box in = inset(b, bw);
 		/* the header runs from the frame's inside down to the content, glass as on screen */
-		int hh = sb.y - in.y;
+		int hh = mapped.y - in.y;
 		hh = hh < 0 ? 0 : (hh > in.h ? in.h : hh);
+		/* the border keeps its width however small the card, so the content fills what's
+		 * inside it: scaled along with the window, the content would cover half the border */
+		const ly_box sb = { in.x, in.y + hh, in.w, in.h - hh };
 		const ly_box hb = { in.x, in.y, in.w, hh };
 		float col[4];
 		ui_color(sel ? th->frame_on : th->frame, col);
@@ -1100,6 +1103,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 #endif
 		const ly_box ev = rect_place(it->edge, b, cl);
 #ifdef ARO_EFFECTS
+		wlr_scene_rect_set_corner_radii(it->edge, ui_cut_radii(b, ev, th->radius));
 		/* hollow, so the border never shows through the header */
 		wlr_scene_rect_set_clipped_region(it->edge, (struct clipped_region){
 			.area = { in.x - ev.x, in.y - ev.y, in.w, in.h },
@@ -1108,7 +1112,18 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 #else
 		(void)ev;
 #endif
-		rect_place(it->bg, (ly_box){ in.x, in.y + hh, in.w, in.h - hh }, cl);
+		const ly_box bgb = { in.x, in.y + hh, in.w, in.h - hh };
+		const ly_box bgv = rect_place(it->bg, bgb, cl);
+#ifdef ARO_EFFECTS
+		/* its top corners are the header's, if there is one; square without one, they'd
+		 * paint over the curve of the border */
+		struct fx_corner_radii bgr = ui_cut_radii(bgb, bgv, th->radius - bw > 0 ? th->radius - bw : 0);
+		if (hh > 0)
+			bgr.top_left = bgr.top_right = 0;
+		wlr_scene_rect_set_corner_radii(it->bg, bgr);
+#else
+		(void)bgv;
+#endif
 		ly_box hgot = rect_place(it->head, hb, cl);
 		if (hh <= 0)
 			wlr_scene_node_set_enabled(&it->head->node, false);
@@ -1117,8 +1132,15 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 			ui_snap_place(it->snap, sb, cl);
 
 		wlr_scene_node_set_enabled(&it->ring->node, sel);
-		if (sel)
-			rect_place(it->ring, (ly_box){ in.x, in.y, in.w, 1 }, cl);
+		if (sel) {
+			/* between the rounded corners, which a straight line would poke out of */
+#ifdef ARO_EFFECTS
+			const int ringr = th->radius - bw > 0 ? th->radius - bw : 0;
+#else
+			const int ringr = 0;
+#endif
+			rect_place(it->ring, (ly_box){ in.x + ringr, in.y, in.w - 2 * ringr, 1 }, cl);
+		}
 	}
 }
 

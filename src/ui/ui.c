@@ -224,8 +224,8 @@ static void round_header(struct aro_view *v, bool glass)
 #ifdef ARO_EFFECTS
 	const int r = inner_radius(v);
 	wlr_scene_rect_set_corner_radii(v->bg, glass ? corner_radii_new(0, 0, r, r) : corner_radii_all(r));
-	wlr_scene_rect_set_corner_radii(v->header, glass ? corner_radii_new(r, r, 0, 0) : corner_radii_none());
-	wlr_scene_buffer_set_corner_radii(v->gloss, glass ? corner_radii_new(r, r, 0, 0) : corner_radii_none());
+	wlr_scene_rect_set_corner_radii(v->header, corner_radii_new(r, r, 0, 0));
+        wlr_scene_buffer_set_corner_radii(v->gloss, corner_radii_new(r, r, 0, 0));
 #else
 	(void)v;
 	(void)glass;
@@ -819,6 +819,16 @@ struct wlr_scene_node *ui_snap_node(struct ui_snap *s)
 }
 
 /* lay the copy out in box b, cut to clip (in the parent's coordinates) */
+#ifdef ARO_EFFECTS
+struct fx_corner_radii ui_cut_radii(ly_box whole, ly_box vis, int radius)
+{
+	const bool left = vis.x == whole.x, right = vis.x + vis.w == whole.x + whole.w;
+	const bool top = vis.y == whole.y, bottom = vis.y + vis.h == whole.y + whole.h;
+	return corner_radii_new(top && left ? radius : 0, top && right ? radius : 0,
+	                        bottom && right ? radius : 0, bottom && left ? radius : 0);
+}
+#endif
+
 void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip)
 {
 	if (b.w < 1 || b.h < 1 || s->gw <= 0 || s->gh <= 0) {
@@ -854,9 +864,8 @@ void ui_snap_place(struct ui_snap *s, ly_box b, ly_box clip)
 		wlr_scene_buffer_set_dest_size(p->buf, vis.w, vis.h);
 		wlr_scene_node_set_position(&p->buf->node, vis.x, vis.y);
 #ifdef ARO_EFFECTS
-		/* round what reaches the corners; a cut edge stays square */
-		const bool whole = vis.x == b.x && vis.y == b.y && vis.w == b.w && vis.h == b.h;
-		wlr_scene_buffer_set_corner_radius(p->buf, whole ? s->radius : 0);
+		/* round the corners still showing; a cut edge stays square */
+		wlr_scene_buffer_set_corner_radii(p->buf, ui_cut_radii(b, vis, s->radius));
 #endif
 	}
 }

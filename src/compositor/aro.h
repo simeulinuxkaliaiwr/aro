@@ -557,6 +557,10 @@ int ui_frame_tab_at(struct aro_view *v, double lx, double ly);
 bool ui_frame_in_header(struct aro_view *v, double lx, double ly);
 void ui_frame_retheme(struct aro_view *v);
 void ui_color(uint32_t rgba, float out[4]);
+#ifdef ARO_EFFECTS
+/* the corners of whole that vis still shows get radius; the ones cut off, none */
+struct fx_corner_radii ui_cut_radii(ly_box whole, ly_box vis, int radius);
+#endif
 
 /* a window's buffer as a scene node; shared by switcher and overview */
 struct ui_snap;
