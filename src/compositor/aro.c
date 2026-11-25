@@ -139,6 +139,8 @@ void aro_focus(struct aro_server *s, struct aro_view *v)
  */
 void keyboard_enter(struct aro_server *s, struct wlr_surface *surface)
 {
+	if (!wlr_seat_get_keyboard(s->seat))
+		seat_keyboard_fallback(s);
 	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
 	if (kb)
 		wlr_seat_keyboard_notify_enter(s->seat, surface, kb->keycodes,

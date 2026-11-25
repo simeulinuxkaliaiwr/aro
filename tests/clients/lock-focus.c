@@ -81,6 +81,43 @@ static const struct wl_keyboard_listener kb_listener = {
 	kb_keymap, kb_enter, kb_leave, kb_key, kb_mods, kb_repeat,
 };
 
+/* a wl_keyboard bound now, as a window opening now binds it: it must get a
+ * real keymap first, or Chromium/Electron crash on the modifiers after it */
+static uint32_t fresh_fmt;
+static bool fresh_mods_first;
+
+static void fresh_keymap(void *d, struct wl_keyboard *k, uint32_t fmt, int32_t fd, uint32_t size)
+{
+	(void)d; (void)k; (void)size;
+	fresh_fmt = fmt;
+	close(fd);
+}
+
+static void fresh_mods(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t a, uint32_t b, uint32_t c, uint32_t g)
+{
+	(void)d; (void)k; (void)serial; (void)a; (void)b; (void)c; (void)g;
+	if (fresh_fmt != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
+		fresh_mods_first = true;
+}
+
+static const struct wl_keyboard_listener fresh_listener = {
+	fresh_keymap, kb_enter, kb_leave, kb_key, fresh_mods, kb_repeat,
+};
+
+static void expect_keymap(struct globals *g, const char *what)
+{
+	fresh_fmt = 0xffffffff;
+	fresh_mods_first = false;
+	struct wl_keyboard *k = wl_seat_get_keyboard(seat);
+	wl_keyboard_add_listener(k, &fresh_listener, NULL);
+	roundtrip(g);
+	if (fresh_fmt != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 || fresh_mods_first)
+		fail("%s: keymap format %d%s", what, (int)fresh_fmt,
+		     fresh_mods_first ? ", modifiers before it" : "");
+	printf("ok %s\n", what);
+	wl_keyboard_destroy(k); /* the seat is bound at v1: no release */
+}
+
 static void seat_caps(void *d, struct wl_seat *s, uint32_t caps)
 {
 	(void)d;
@@ -221,6 +258,15 @@ int main(void)
 	roundtrip(&g);
 	struct wl_surface *b = window(&g);
 	expect("a window mapped after the typing keyboard left gets the keyboard", b);
+	expect_keymap(&g, "a keyboard bound after the typing keyboard left gets a keymap");
+
+	/* a virtual keyboard that hasn't sent its keymap yet takes nothing */
+	struct zwp_virtual_keyboard_v1 *bare =
+		zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(vk_mgr, seat);
+	roundtrip(&g);
+	expect_keymap(&g, "a new keymap-less virtual keyboard leaves the seat's keymap");
+	zwp_virtual_keyboard_v1_destroy(bare);
+	roundtrip(&g);
 
 	tap(&g, vk);
 	struct ext_session_lock_v1 *lock = ext_session_lock_manager_v1_lock(lock_mgr);

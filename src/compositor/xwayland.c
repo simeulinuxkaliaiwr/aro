@@ -187,6 +187,8 @@ static void xwl_associate(struct wl_listener *l, void *data);
 /* the keyboard goes to a surface without moving aro's own focus */
 static void unmanaged_keyboard(struct aro_server *s, struct wlr_surface *surface)
 {
+	if (!wlr_seat_get_keyboard(s->seat))
+		seat_keyboard_fallback(s);
 	struct wlr_keyboard *kb = wlr_seat_get_keyboard(s->seat);
 	if (surface && kb)
 		wlr_seat_keyboard_notify_enter(s->seat, surface, kb->keycodes,

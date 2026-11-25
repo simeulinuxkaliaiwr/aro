@@ -78,6 +78,7 @@ bool ws_monocle(struct aro_server *s, struct aro_output *o, int ws);
 
 /* input.c */
 void apply_keymap(struct aro_server *s, struct wlr_keyboard *wlr_kb);
+void seat_keyboard_fallback(struct aro_server *s);
 void constraint_sync(struct aro_server *s);
 void cursor_axis(struct wl_listener *l, void *data);
 void cursor_button(struct wl_listener *l, void *data);

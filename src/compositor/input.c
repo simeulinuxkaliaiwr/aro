@@ -173,14 +173,45 @@ static void keyboard_modifiers(struct wl_listener *l, void *data)
 	                                   &kb->wlr_keyboard->modifiers);
 }
 
+/*
+ * A seat without a keyboard gives clients no keymap: a window that binds
+ * wl_keyboard then gets enter and modifiers with nothing before them, and
+ * Chromium/Electron crash in xkb_state_update_mask (Heroic, launched right
+ * after fcitx5's or wtype's virtual keyboard went away). So the seat always
+ * keeps one: a real keyboard first, else any keyboard that has a keymap.
+ */
+void seat_keyboard_fallback(struct aro_server *s)
+{
+	struct aro_keyboard *kb, *pick = NULL;
+	wl_list_for_each(kb, &s->keyboards, link) {
+		if (!kb->wlr_keyboard->keymap)
+			continue;
+		if (!kb->is_virtual) {
+			pick = kb;
+			break;
+		}
+		if (!pick)
+			pick = kb;
+	}
+	if (pick)
+		wlr_seat_set_keyboard(s->seat, pick->wlr_keyboard);
+}
+
 static void keyboard_destroy(struct wl_listener *l, void *data)
 {
 	struct aro_keyboard *kb = wl_container_of(l, kb, destroy);
+	struct aro_server *s = kb->server;
 	(void)data;
 	wl_list_remove(&kb->modifiers.link);
 	wl_list_remove(&kb->key.link);
 	wl_list_remove(&kb->destroy.link);
 	wl_list_remove(&kb->link);
+
+	/* wlroots clears the seat's keyboard when it goes, before or after
+	 * this listener runs: either way, hand the seat another one */
+	struct wlr_keyboard *cur = wlr_seat_get_keyboard(s->seat);
+	if (!cur || cur == kb->wlr_keyboard)
+		seat_keyboard_fallback(s);
 	free(kb);
 }
 
@@ -244,7 +275,10 @@ static void new_keyboard(struct aro_server *s, struct wlr_input_device *dev,
 	kb->destroy.notify = keyboard_destroy;
 	wl_signal_add(&dev->events.destroy, &kb->destroy);
 
-	wlr_seat_set_keyboard(s->seat, wlr_kb);
+	/* a virtual keyboard has no keymap yet: it becomes the seat's when it
+	 * types (it must send one first), not now, or clients get NO_KEYMAP */
+	if (!is_virtual || !wlr_seat_get_keyboard(s->seat))
+		wlr_seat_set_keyboard(s->seat, wlr_kb);
 	wl_list_insert(&s->keyboards, &kb->link);
 }
 
