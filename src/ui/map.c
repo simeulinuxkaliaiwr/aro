@@ -29,8 +29,8 @@
 #include <wlr/util/log.h>
 
 #define MAP_MAX 64
-#define MAP_MARGIN 0.09         /* of the screen, round the map */
-#define MAP_MAX_K 0.7           /* the map is always a step back */
+#define MAP_MARGIN 0.12         /* of the screen, round the map */
+#define MAP_MAX_K 0.5           /* the map is always a step back */
 #define MAP_EDGE 2              /* a card's frame, px */
 #define MAP_LABEL 22            /* room for a card's title under it */
 
@@ -403,7 +403,7 @@ bool map_tick(struct aro_server *s, uint32_t now)
 
 	float col[4];
 	ui_color(s->cfg.theme.bg, col);
-	col[3] *= (float)(0.975 * e);
+	col[3] *= (float)e;          /* the map is its own surface: nothing shows through */
 	if (m->scrim)
 		wlr_scene_rect_set_color(m->scrim, col);
 	if (m->art)
