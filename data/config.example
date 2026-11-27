@@ -197,6 +197,7 @@ bar_color = 0x0a0d11ff
 urgent = 0xc0566bff
 drop_fill = 0xe6a54b1f      # drag-and-drop preview background
 drop_line = 0xe6a54bcc
+canvas_grid = 0xffffff24    # layout = canvas: the dots that move with the plane (alpha 00: none)
 
 # built-in toast notifications (not a real notification daemon)
 notify_color = 0x12161deb
