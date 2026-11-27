@@ -306,6 +306,18 @@ void canvas_show(struct aro_server *s, struct aro_view *v, int *dx, int *dy)
 		*dy = (int)lround(o->cam.y[o->cur_ws] - (cy - my));
 }
 
+void canvas_look_at(struct aro_server *s, struct aro_output *o, double x, double y)
+{
+	if (!o || !ws_canvas(s, o, o->cur_ws))
+		return;
+	const ly_box u = usable_area(o);
+	double cx, cy;
+	cam_dest(o, &cx, &cy);
+	/* where (x, y) will be once a flight under way ends */
+	const double fx = x + (o->cam.x[o->cur_ws] - cx), fy = y + (o->cam.y[o->cur_ws] - cy);
+	fly(o, cx + (fx - (u.x + u.w / 2.0)), cy + (fy - (u.y + u.h / 2.0)));
+}
+
 bool canvas_tick(struct aro_server *s, struct aro_output *o, uint32_t now)
 {
 	if (!ws_canvas(s, o, o->cur_ws)) {

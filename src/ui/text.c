@@ -71,6 +71,11 @@ static struct wlr_buffer *surface_buffer(cairo_surface_t *surface)
 	return &cb->base;
 }
 
+struct wlr_buffer *ui_surface_buffer(void *surface)
+{
+	return surface_buffer(surface);
+}
+
 struct wlr_buffer *ui_dots_render(int w, int h, int step, double radius, uint32_t rgba, float scale)
 {
 	const int pw = (int)(w * scale + 0.5), ph = (int)(h * scale + 0.5);

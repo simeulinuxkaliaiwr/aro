@@ -339,23 +339,37 @@ static int slide_offset(const struct aro_output *o, uint32_t now)
 	return (int)(off + (off >= 0 ? 0.5 : -0.5));
 }
 
+/* how far the slide moves v this frame; 0 with no slide */
+static int draw_offset(struct aro_view *v, uint32_t now)
+{
+	struct aro_output *o = v->output;
+	if (!o || !o->slide.active || v->sticky)
+		return 0;               /* a sticky window is on both workspaces: it stays put */
+	if (view_visible(v))
+		return slide_offset(o, now) + o->slide.span;
+	if (view_leaving(v))
+		return slide_offset(o, now);
+	return 0;
+}
+
 /* where to draw a window this frame: geo.cur, plus the slide */
 ly_box view_draw_box(struct aro_view *v, uint32_t now)
 {
 	ly_box b = v->geo.cur;
-	struct aro_output *o = v->output;
-	if (!o || !o->slide.active || v->sticky)
-		return b;               /* a sticky window is on both workspaces: it stays put */
-
-	int off;
-	if (view_visible(v))
-		off = slide_offset(o, now) + o->slide.span;
-	else if (view_leaving(v))
-		off = slide_offset(o, now);
+	const int off = draw_offset(v, now);
+	if (v->output && v->output->slide.vertical)
+		b.y += off;
 	else
-		return b;
+		b.x += off;
+	return b;
+}
 
-	if (o->slide.vertical)
+/* the screen a clipped window is cut to, moved with its workspace as it slides */
+ly_box aro_view_clip_box(struct aro_view *v)
+{
+	ly_box b = v->output ? v->output->box : (ly_box){ 0, 0, 0, 0 };
+	const int off = draw_offset(v, aro_now_ms());
+	if (v->output && v->output->slide.vertical)
 		b.y += off;
 	else
 		b.x += off;

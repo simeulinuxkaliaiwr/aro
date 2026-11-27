@@ -27,6 +27,8 @@ void canvas_pan(struct aro_server *s, struct aro_output *o, double dx, double dy
 void canvas_glide(struct aro_server *s, struct aro_output *o, ly_edge e, bool home);
 /* bring v into view, flying; *dx, *dy (may be NULL) say how far it will move */
 void canvas_show(struct aro_server *s, struct aro_view *v, int *dx, int *dy);
+/* fly the camera so the screen point (x, y), where the plane is now, comes to the middle */
+void canvas_look_at(struct aro_server *s, struct aro_output *o, double x, double y);
 /* per frame; true while still moving */
 bool canvas_tick(struct aro_server *s, struct aro_output *o, uint32_t now);
 

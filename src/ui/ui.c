@@ -424,7 +424,7 @@ void ui_frame_geometry(struct aro_view *v, ly_box b)
 	/* a scroll column is cut at its screen's edge, not drawn on the next screen */
 	ly_box vis = { 0, 0, b.w, b.h };
 	if (aro_view_clipped(v)) {
-		ly_box ob = v->output->box;
+		ly_box ob = aro_view_clip_box(v);       /* a slide moves the edge with the windows */
 		box_meet(vis, (ly_box){ ob.x - b.x, ob.y - b.y, ob.w, ob.h }, &vis);
 	}
 	const bool cut = vis.x != 0 || vis.y != 0 || vis.w != b.w || vis.h != b.h;

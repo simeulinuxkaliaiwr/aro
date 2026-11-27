@@ -121,6 +121,14 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		return;
 	}
 
+	/* so does the canvas map */
+	if (!handled && !aro_locked(s) && map_active(s) &&
+	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		for (int i = 0; i < nraw && map_active(s); i++)
+			map_key(s, mods, raw[i]);
+		return;
+	}
+
 	/*
 	 * The switcher owns key presses while it is open, so mod+q on the way
 	 * to a window cannot close another. Releases still reach the client:
@@ -651,7 +659,8 @@ static void fullscreen_confine(struct aro_server *s, double *dx, double *dy)
 	struct aro_view *v = s->focused;
 	if (!s->cfg.fullscreen_confine || !v || !v->mapped || !v->fullscreen || !v->output)
 		return;
-	if (s->focused_layer || aro_locked(s) || prompt_active(s) || picker_active(s) || overview_active(s))
+	if (s->focused_layer || aro_locked(s) || prompt_active(s) || picker_active(s) || overview_active(s) ||
+	    map_active(s))
 		return;
 	struct wlr_box box;
 	wlr_output_layout_get_box(s->output_layout, v->output->wlr_output, &box);
@@ -729,6 +738,10 @@ void cursor_motion(struct wl_listener *l, void *data)
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && map_active(s)) {
+		map_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
 	if (!aro_locked(s) && sweep_active(s)) {
 		sweep_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -767,6 +780,10 @@ void cursor_motion_abs(struct wl_listener *l, void *data)
 	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (!aro_locked(s) && map_active(s)) {
+		map_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
 	if (!aro_locked(s) && sweep_active(s)) {
@@ -836,6 +853,16 @@ void cursor_button(struct wl_listener *l, void *data)
 			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
 			                               ev->button, ev->state);
 		overview_pointer_button(s, s->cursor->x, s->cursor->y, down);
+		return;
+	}
+
+	/* the canvas map: a card goes to its window, the empty map moves the camera */
+	if (!aro_locked(s) && map_active(s)) {
+		bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
+		if (!down && s->seat->pointer_state.button_count > 0)
+			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
+			                               ev->button, ev->state);
+		map_pointer_button(s, ev->button, down);
 		return;
 	}
 
@@ -972,6 +999,10 @@ void aro_pointer_moved(struct aro_server *s, uint32_t time)
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && map_active(s)) {
+		map_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
 	if (!aro_locked(s) && sweep_active(s)) {
 		sweep_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
@@ -1025,6 +1056,8 @@ void cursor_axis(struct wl_listener *l, void *data)
 		overview_pointer_axis(s, ev->delta, ev->delta_discrete);
 		return;
 	}
+	if (!aro_locked(s) && map_active(s))
+		return;
 	/* a wheel over a group's tabs steps through them */
 	if (!aro_locked(s) && ev->delta_discrete && ev->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
 		double sx, sy;

@@ -34,7 +34,8 @@
   plane, the screen a camera over it: drag the empty desktop, scroll or
   swipe to look around, and a flick keeps gliding. Focus a window off
   screen and the camera flies to it; switch back to a tiling layout and
-  the windows tile again.
+  the windows tile again. `mod+o` there is a map of the plane: live cards
+  joined by soft lines, your screen's patch dashed; click to go anywhere.
 - **Draw where a window opens.** `mod+shift+Return` turns the cursor into a
   crosshair; drag a box and foot opens in it, floating. The box is drawn
   before the window exists, so the very first size the app is told is the

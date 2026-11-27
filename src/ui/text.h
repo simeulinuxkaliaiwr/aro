@@ -41,6 +41,9 @@ struct wlr_buffer *ui_png_load(const char *path);
 #define UI_GLOSS_H 64
 struct wlr_buffer *ui_gloss_render(double amount);
 
+/* a cairo image surface (a cairo_surface_t *) as a buffer, which then owns it; NULL on failure */
+struct wlr_buffer *ui_surface_buffer(void *surface);
+
 /* w x h logical pixels of dots step apart, drawn at scale; rgba 0xRRGGBBAA; to drop when done */
 struct wlr_buffer *ui_dots_render(int w, int h, int step, double radius, uint32_t rgba, float scale);
 

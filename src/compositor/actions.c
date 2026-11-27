@@ -333,7 +333,10 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 		layout_set(s, b->num);
 		return;
 	case Q_OVERVIEW:
-		if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
+		/* on a canvas, a map of the plane instead */
+		if (s->map.open || (s->cursor_mode == ARO_CURSOR_PASSTHROUGH && map_wants(s) && !overview_active(s)))
+			map_toggle(s);
+		else if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)
 			overview_toggle(s);
 		return;
 	case Q_MOVE_WS:

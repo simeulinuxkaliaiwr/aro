@@ -194,6 +194,7 @@ if get_option('compositor')
     'src/ui/ghost.c',
     'src/ui/notify.c',
     'src/ui/overview.c',
+    'src/ui/map.c',
     'src/ui/picker.c',
     'src/ui/prompt.c',
     'src/ui/switcher.c',

@@ -28,7 +28,9 @@ allow_tearing = false
 # canvas: every window floats on an endless plane and the screen is a camera
 #   over it. drag the empty desktop, scroll over it or swipe to look around;
 #   mod+arrows pan, mod+Home goes back. focusing a window off screen flies
-#   there. leaving the canvas tiles its windows again.
+#   there. leaving the canvas tiles its windows again. mod+o there is a map of
+#   the plane: windows as cards joined by soft lines, the screen's patch dashed;
+#   a card takes you to its window, an empty spot flies the camera there.
 # mod+v / mod+s will temporarily override either mode for the next window.
 layout = dwindle
 

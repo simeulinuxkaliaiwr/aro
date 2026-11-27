@@ -93,6 +93,8 @@ static void output_frame(struct wl_listener *l, void *data)
 		moving = true;
 	if (overview_tick(s, now))
 		moving = true;
+	if (map_tick(s, now))
+		moving = true;
 	if (picker_tick(s, now))
 		moving = true;
 	if (ghost_tick(s, o, now))
@@ -344,6 +346,7 @@ struct aro_output *output_evacuate(struct aro_server *s,
 	prompt_output_gone(s, o);
 	switcher_output_gone(s, o);
 	overview_output_gone(s, o);
+	map_output_gone(s, o);
 	picker_output_gone(s, o);
 	sweep_output_gone(s, o);
 	canvas_forget_output(s, o);

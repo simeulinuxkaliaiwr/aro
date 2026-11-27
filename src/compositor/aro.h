@@ -24,6 +24,7 @@
 #include "idle.h"
 #include "ime.h"
 #include "lock.h"
+#include "map.h"
 #include "notify.h"
 #include "overview.h"
 #include "picker.h"
@@ -406,6 +407,7 @@ struct aro_server {
 	struct aro_switcher switcher;        /* mod+tab */
 	struct aro_overview overview;
 	struct aro_picker picker;            /* wallpapers to choose from */
+	struct aro_map map;                  /* layout = canvas: mod+o's map of the plane */
 	struct aro_sweep sweep;              /* a box drawn for the next window */
 	struct wl_list ghosts;               /* closed windows fading out */
 	struct wl_list inhibitors;
@@ -538,6 +540,8 @@ struct wlr_surface *aro_surface_at(struct aro_server *s, double *sx, double *sy)
 
 /* for ui.c: a scroll column is cut at its screen's edge rather than drawn on the next */
 bool aro_view_clipped(struct aro_view *v);
+/* ...and the box it is cut to: its screen, sliding with its workspace */
+ly_box aro_view_clip_box(struct aro_view *v);
 
 /* for overview.c: on a scroll strip, whether two windows share a column */
 bool aro_same_column(struct aro_view *a, struct aro_view *b);

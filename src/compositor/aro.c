@@ -1677,6 +1677,7 @@ void view_unmap(struct wl_listener *l, void *data)
 	ftl_destroy(v);
 	mru_remove(s, v);
 	overview_rebuild(s);
+	map_view_gone(s, v);
 
 	/* drop tiled resize grab if windows close */
 	if (s->cursor_mode == ARO_CURSOR_RESIZE_TILE)
@@ -1725,6 +1726,7 @@ static void view_commit(struct wl_listener *l, void *data)
 	/* clip rounded corners */
 	ui_frame_clip_content(v);
 	overview_view_commit(v->server, v);
+	map_view_commit(v->server, v);
 }
 
 void view_sweep_answer(struct aro_view *v, const ly_box *box)
@@ -2670,6 +2672,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	sweep_init(&s);
+	map_init(&s);
 
 	s.clock_timer = wl_event_loop_add_timer(s.loop, clock_tick, &s);
 	wl_event_source_timer_update(s.clock_timer, 1000);
@@ -2862,6 +2865,7 @@ teardown:
 	notify_finish(&s);
 	prompt_finish(&s);
 	overview_finish(&s);
+	map_finish(&s);
 	picker_finish(&s);
 	switcher_finish(&s);
 	ghost_drop(&s, NULL);

@@ -734,8 +734,17 @@ if wait_for "$T/canvas.out" "2 windows open"; then
 	[ "$(ctl windows | grep -c floating)" = 2 ] && [ "$tw" -lt 1200 ] \
 		&& ok "canvas: coming back floats them where the tiles were" \
 		|| bad "canvas: coming back floats them where the tiles were: $(ctl windows | tr '\n' '|')"
+	# on a canvas mod+o is the map: a click on a card goes to its window
+	f=$(focus_id)
+	if [ "$f" = "$A" ]; then other=$B; else other=$A; fi
+	ctl dispatch overview > /dev/null; sleep 0.8
 	ctl dispatch overview > /dev/null; sleep 0.6
-	ctl dispatch overview > /dev/null; sleep 0.4
+	ctl dispatch overview > /dev/null; sleep 0.8
+	# a right click folds the map away, and nothing else happens
+	client click right 5 5
+	sleep 0.6
+	[ "$(focus_id)" = "$f" ] && ok "canvas: mod+o opens the map and a right click folds it" \
+		|| bad "canvas: mod+o opens the map and a right click folds it ($(focus_id) != $f)"
 	alive
 fi
 kill "$CC" 2> /dev/null; wait "$CC" 2> /dev/null
