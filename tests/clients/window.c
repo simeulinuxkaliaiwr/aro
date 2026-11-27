@@ -1,4 +1,4 @@
-/* window: opens N windows (prints the first one's first buffer size), keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface, "clear" fully see-through */
+/* window: opens N windows (prints the first one's first buffer size), keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface, "clear" fully see-through, "patient" waits up to 10 s to be told its size (sweep_new holds it until a box is drawn) */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
@@ -108,6 +108,7 @@ int main(int argc, char **argv)
 	icon |= icon_name != NULL;
 	sub = argc > 3 && !strcmp(argv[3], "sub");
 	clear = argc > 3 && !strcmp(argv[3], "clear");
+	const int patient = argc > 3 && !strcmp(argv[3], "patient");
 	if (n < 1 || n > MAX_WINDOWS)
 		fail("usage: window N HOLD [modal], N from 1 to %d", MAX_WINDOWS);
 	connect_globals(&g);
@@ -150,12 +151,14 @@ int main(int argc, char **argv)
 		wl_surface_commit(w->surf);
 		roundtrip(&g);
 	}
-	for (int tries = 0; tries < 20; tries++) {
+	for (int tries = 0; tries < (patient ? 200 : 20); tries++) {
 		int all = 1;
 		for (int i = 0; i < n; i++)
 			all &= wins[i].drawn;
 		if (all)
 			break;
+		if (patient)
+			usleep(50000);
 		roundtrip(&g);
 	}
 	/* tiled states come with the configure after mapping */

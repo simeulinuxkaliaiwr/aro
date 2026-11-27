@@ -27,6 +27,7 @@ enum q_layout {
 	Q_LAYOUT_DWINDLE,
 	Q_LAYOUT_MONOCLE,       /* one window at a time, the tree kept underneath */
 	Q_LAYOUT_SCROLL,        /* columns on an endless strip, the screen a window onto it */
+	Q_LAYOUT_CANVAS,        /* floating windows on an endless plane, the screen a camera */
 };
 #define Q_LAYOUT_INHERIT (-1)   /* use global layout */
 #define Q_LAYOUT_TOGGLE  (-1)
@@ -72,6 +73,7 @@ enum q_action {
 	Q_TAB,          /* num: +1 next tab, -1 previous */
 	Q_WALLPAPERS,   /* the wallpaper picker */
 	Q_SWEEP,        /* draw a box for the next window; arg: shell command or NULL */
+	Q_PAN,          /* layout = canvas, num: ly_edge, or -1 for home; the camera flies there */
 };
 
 struct q_bind {
@@ -106,6 +108,7 @@ struct q_rule {
 	int center;             /* 1 only */
 	char *monitor;          /* glob on name or "make model serial"; owned */
 	int no_border, no_header, no_radius, no_bg;     /* 1 only */
+	int no_sweep;           /* 1 only: opens at once though sweep_new holds windows */
 	double opacity[2];      /* focused, unfocused; 0 unset */
 };
 
@@ -115,7 +118,7 @@ struct q_rule_result {
 	struct q_len size[2], pos[2];
 	const char *monitor;    /* the rule's; only good until the next reload */
 	unsigned monitor_hash;  /* what changes are told by; 0 unset */
-	int no_border, no_header, no_radius, no_bg;
+	int no_border, no_header, no_radius, no_bg, no_sweep;
 	double opacity[2];
 };
 
@@ -159,6 +162,7 @@ struct q_theme {
 	uint32_t bg, frame, frame_on, line;
 	uint32_t accent, accent_soft, ink, dim;
 	uint32_t bar_bg, urgent, drop_fill, drop_line;
+	uint32_t canvas_grid;           /* layout = canvas: the dots on the plane; alpha 0, none */
 	uint32_t notify_bg;
 	uint32_t scrim;                 /* behind a prompt */
 	int notify_ms, notify_max_w;
@@ -184,6 +188,8 @@ struct aro_config {
 	bool fullscreen_confine;        /* a focused fullscreen window keeps the pointer on its output */
 	bool allow_tearing;     /* fullscreen apps that ask may skip vsync */
 	enum q_layout layout;
+	/* new windows wait for a drawn box: never, on a canvas, or anywhere */
+	enum q_sweep_new { Q_SWEEP_NEW_OFF, Q_SWEEP_NEW_CANVAS, Q_SWEEP_NEW_ALWAYS } sweep_new;
 	/* per-workspace layout */
 	int ws_layout[ARO_MAX_WS];
 	enum q_header header;

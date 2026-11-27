@@ -137,17 +137,52 @@ static bool clip_box(ly_box b, ly_box clip, ly_box *out)
 	return true;
 }
 
-/* a scroll workspace's strip, scaled to fit its screen, so the overview shows every column */
+/* a scroll workspace's strip, scaled to fit its screen, so the overview shows every column;
+ * a canvas the same both ways, so it shows every window on the plane */
 struct strip_fit {
 	bool on;
+	bool plane;             /* a canvas: fitted from (x0, y0), centred at (ox, oy) */
 	double k;
-	int x0;
+	int x0, y0;
+	double ox, oy;
 	ly_box view;
 };
+
+static struct strip_fit plane_fit(struct aro_server *s, struct aro_output *o, int ws)
+{
+	struct strip_fit f = { .k = 1.0 };
+	const int g = s->cfg.theme.outer_gap;
+	ly_box u = aro_output_usable(o);
+	f.view = (ly_box){ u.x + g, u.y + g, u.w - 2 * g, u.h - 2 * g };
+	/* what the screen shows, and every window beyond it */
+	int x0 = f.view.x, y0 = f.view.y, x1 = f.view.x + f.view.w, y1 = f.view.y + f.view.h;
+	struct aro_view *v;
+	wl_list_for_each(v, &s->views, link) {
+		if (v->output != o || v->workspace != ws || v->fullscreen || !view_on_plane(v))
+			continue;
+		ly_box b = aro_view_box(v);
+		x0 = b.x < x0 ? b.x : x0;
+		y0 = b.y < y0 ? b.y : y0;
+		x1 = b.x + b.w > x1 ? b.x + b.w : x1;
+		y1 = b.y + b.h > y1 ? b.y + b.h : y1;
+	}
+	if (f.view.w < 1 || f.view.h < 1 || (x1 - x0 <= f.view.w && y1 - y0 <= f.view.h))
+		return f;               /* every window already on screen */
+	const double kx = (double)f.view.w / (x1 - x0), ky = (double)f.view.h / (y1 - y0);
+	f.on = f.plane = true;
+	f.k = kx < ky ? kx : ky;
+	f.x0 = x0;
+	f.y0 = y0;
+	f.ox = f.view.x + (f.view.w - (x1 - x0) * f.k) / 2.0;
+	f.oy = f.view.y + (f.view.h - (y1 - y0) * f.k) / 2.0;
+	return f;
+}
 
 static struct strip_fit strip_fit(struct aro_server *s, struct aro_output *o, int ws)
 {
 	struct strip_fit f = { .k = 1.0 };
+	if (aro_ws_layout(o, ws) == Q_LAYOUT_CANVAS)
+		return plane_fit(s, o, ws);
 	if (aro_ws_layout(o, ws) != Q_LAYOUT_SCROLL)
 		return f;
 	int x0 = INT_MAX, x1 = INT_MIN;
@@ -174,6 +209,9 @@ static ly_box strip_map(const struct strip_fit *f, ly_box b)
 {
 	if (!f->on)
 		return b;
+	if (f->plane)
+		return (ly_box){ round_i(f->ox + (b.x - f->x0) * f->k), round_i(f->oy + (b.y - f->y0) * f->k),
+		                 round_i(b.w * f->k), round_i(b.h * f->k) };
 	double top = f->view.y + f->view.h * (1.0 - f->k) / 2.0;
 	return (ly_box){ f->view.x + round_i((b.x - f->x0) * f->k),
 	                 round_i(top + (b.y - f->view.y) * f->k),
@@ -1056,6 +1094,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 		/* a strip runs on past its card when cards stack vertically; side by side, it is fitted */
 		const bool strip = v->node && !v->fullscreen &&
 		                   aro_ws_layout(o, v->workspace) == Q_LAYOUT_SCROLL;
+		const bool plane = !v->fullscreen && view_on_plane(v);
 		ly_box area = oo->cards[slot].drawn;
 		if (strip && g.vertical)
 			area = (ly_box){ clip.x, area.y, clip.w, area.h };
@@ -1064,7 +1103,7 @@ static void draw_output(struct aro_server *s, struct ov_output *oo)
 			cl = (ly_box){ 0 };
 		ly_box real = aro_view_box(v);
 		const int dx = strip_pan(s, oo, v, false);
-		const struct strip_fit fit = strip && !g.vertical
+		const struct strip_fit fit = (strip && !g.vertical) || plane
 		                           ? strip_fit(s, o, v->workspace) : (struct strip_fit){ .k = 1.0 };
 		ly_box b = dragged ? drag_box(ov) : ov_map(&g, strip_map(&fit, shift_x(real, dx)), slot - oo->c, p);
 		it->drawn = dragged ? (ly_box){ 0 } : b;        /* not a drop target */

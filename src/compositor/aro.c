@@ -1343,9 +1343,16 @@ void grab_end(struct aro_server *s)
 {
 	struct aro_view *v = s->grabbed;
 
+	if (s->cursor_mode == ARO_CURSOR_PAN) {
+		canvas_pan_end(s);
+		return;
+	}
+
 	if (v && s->cursor_mode == ARO_CURSOR_MOVE &&
 	    s->grab_from_tree && v->floating)
 		view_retile(s, v);
+	else if (v && s->cursor_mode == ARO_CURSOR_MOVE)
+		canvas_drag_end(s, v);
 
 	drop_clear(s);
 	s->cursor_mode = ARO_CURSOR_PASSTHROUGH;
@@ -1475,6 +1482,10 @@ static void grab_motion_resize(struct aro_server *s)
 
 void grab_motion(struct aro_server *s)
 {
+	if (s->cursor_mode == ARO_CURSOR_PAN) {
+		canvas_pan_motion(s);
+		return;
+	}
 	if (!s->grabbed || !s->grabbed->mapped) {
 		grab_end(s);
 		return;
@@ -1582,14 +1593,20 @@ void view_map(struct wl_listener *l, void *data)
 		ui_frame_content_box(v, v->fbox, &c);
 		view_configure(v, c.x, c.y, c.w, c.h);
 		v->sticky = r.sticky == 1;
-	} else if (floating) {
-		/* floating windows skip the tree */
+		/* tiles again if the canvas becomes tiling; a window that floats anyway does not */
+		v->canvas = ws_canvas(s, o, ws) && !v->sticky &&
+		            !(v->impl->wants_float && v->impl->wants_float(v)) && r.floating != 1;
+	} else if (floating || ws_canvas(s, o, ws)) {
+		/* floating windows skip the tree; on a canvas every window floats */
 		v->floating = true;
+		v->canvas = !floating;
 		v->fbox = float_box_for(v, true);
 		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
 		view_float_configure_once(v);
 		rule_place(v, &r);
 		v->sticky = r.sticky == 1 && !v->scratch;
+		if (ws_canvas(s, o, ws) && !v->sticky && !v->scratch)
+			v->fbox = canvas_spot(v, v->fbox);
 	} else {
 		ly_node *target = s->focused &&
 		                  s->focused->output == o &&
@@ -1655,6 +1672,7 @@ void view_unmap(struct wl_listener *l, void *data)
 	view_set_visible(v, false);
 	v->scratch = v->stashed = false;        /* rules decide again on the next map */
 	v->swept = false;
+	v->canvas = false;
 	grab_forget(s, v);
 	ftl_destroy(v);
 	mru_remove(s, v);
@@ -1692,17 +1710,12 @@ static void view_commit(struct wl_listener *l, void *data)
 	(void)data;
 
 	if (v->toplevel->base->initial_commit) {
-		/* a drawn box is the first size it hears; else it chooses */
-		v->swept = sweep_take(v->server, v, &v->fbox);
-		ly_box c = { 0 };
-		if (v->swept) {
-			struct q_rule_result r;
-			config_rules_eval(&v->server->cfg, view_app_id(v), view_title(v),
-			                  view_type(v), &r);
-			rule_chrome(v, &r);     /* a rule's border and header count */
-			ui_frame_content_box(v, v->fbox, &c);
-		}
-		wlr_xdg_toplevel_set_size(v->toplevel, c.w, c.h);
+		/* a drawn box is the first size it hears; else it waits for one, or chooses */
+		ly_box b;
+		if (sweep_take(v->server, v, &b))
+			view_sweep_answer(v, &b);
+		else if (!sweep_hold(v->server, v))
+			view_sweep_answer(v, NULL);
 	}
 
 	/* follow client float commits */
@@ -1712,6 +1725,22 @@ static void view_commit(struct wl_listener *l, void *data)
 	/* clip rounded corners */
 	ui_frame_clip_content(v);
 	overview_view_commit(v->server, v);
+}
+
+void view_sweep_answer(struct aro_view *v, const ly_box *box)
+{
+	ly_box c = { 0 };
+	v->swept = box != NULL;
+	if (box) {
+		v->fbox = *box;
+		struct q_rule_result r;
+		config_rules_eval(&v->server->cfg, view_app_id(v), view_title(v),
+		                  view_type(v), &r);
+		rule_chrome(v, &r);     /* a rule's border and header count */
+		ui_frame_content_box(v, v->fbox, &c);
+	}
+	if (v->toplevel)
+		wlr_xdg_toplevel_set_size(v->toplevel, c.w, c.h);
 }
 
 void view_set_title(struct wl_listener *l, void *data)
@@ -1752,6 +1781,7 @@ static void view_destroy(struct wl_listener *l, void *data)
 
 	ftl_destroy(v);
 	mru_remove(v->server, v);
+	sweep_view_gone(v->server, v);
 
 	if (v->server->focused == v)
 		v->server->focused = NULL;
@@ -2608,6 +2638,7 @@ int main(int argc, char *argv[])
 	ui_color(s.cfg.theme.bg, bg);
 	s.root_bg = wlr_scene_rect_create(&s.scene->tree, 1920, 1080, bg);
 	s.l_background = wlr_scene_tree_create(&s.scene->tree);
+	s.l_canvas     = wlr_scene_tree_create(&s.scene->tree);
 	s.l_bottom     = wlr_scene_tree_create(&s.scene->tree);
 	s.l_tiled      = wlr_scene_tree_create(&s.scene->tree);
 	s.l_preview    = wlr_scene_tree_create(&s.scene->tree);
@@ -2621,7 +2652,7 @@ int main(int argc, char *argv[])
 	s.l_overlay    = wlr_scene_tree_create(&s.scene->tree);
 	s.l_dragicon   = wlr_scene_tree_create(&s.scene->tree);
 	s.l_lock       = wlr_scene_tree_create(&s.scene->tree);
-	if (!s.root_bg || !s.l_background || !s.l_bottom || !s.l_tiled ||
+	if (!s.root_bg || !s.l_background || !s.l_canvas || !s.l_bottom || !s.l_tiled ||
 	    !s.l_preview || !s.l_float || !s.l_overview || !s.l_unmanaged || !s.l_bar || !s.l_top || !s.l_fullscreen || !s.l_notify ||
 	    !s.l_overlay || !s.l_dragicon || !s.l_lock) {
 		wlr_log(WLR_ERROR, "could not build the scene layers");

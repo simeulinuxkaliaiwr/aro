@@ -228,6 +228,15 @@ bool config_parse_action(const char *name, const char *arg,
 		*action = Q_TAB;
 		return true;
 	}
+	if (!strcasecmp(name, "pan")) {
+		if (arg && !strcasecmp(arg, "home"))
+			*num = -1;
+		else if (!arg || !parse_edge(arg, num))
+			return false;
+		*action = Q_PAN;
+		return true;
+	}
+
 	if (!strcasecmp(name, "sweep")) {
 		*action = Q_SWEEP;              /* the command, if any, stays in arg */
 		return true;
@@ -312,6 +321,8 @@ bool config_parse_action(const char *name, const char *arg,
 			*num = Q_LAYOUT_MONOCLE;
 		else if (!strcasecmp(arg, "scroll"))
 			*num = Q_LAYOUT_SCROLL;
+		else if (!strcasecmp(arg, "canvas"))
+			*num = Q_LAYOUT_CANVAS;
 		else
 			return false;
 		*action = Q_LAYOUT;
@@ -327,6 +338,7 @@ static bool parse_layout(const char *s, enum q_layout *out)
 	if (!strcasecmp(s, "dwindle")) { *out = Q_LAYOUT_DWINDLE; return true; }
 	if (!strcasecmp(s, "monocle")) { *out = Q_LAYOUT_MONOCLE; return true; }
 	if (!strcasecmp(s, "scroll"))  { *out = Q_LAYOUT_SCROLL;  return true; }
+	if (!strcasecmp(s, "canvas"))  { *out = Q_LAYOUT_CANVAS;  return true; }
 	return false;
 }
 
@@ -336,6 +348,7 @@ const char *config_layout_name(enum q_layout l)
 	case Q_LAYOUT_DWINDLE: return "dwindle";
 	case Q_LAYOUT_MONOCLE: return "monocle";
 	case Q_LAYOUT_SCROLL:  return "scroll";
+	case Q_LAYOUT_CANVAS:  return "canvas";
 	default:               return "manual";
 	}
 }
@@ -403,12 +416,17 @@ static void install_default_binds(struct aro_config *c)
 	bind_add(c, M, XKB_KEY_bracketright, Q_TAB, 1, NULL);
 	bind_add(c, M, XKB_KEY_bracketleft, Q_TAB, -1, NULL);
 	bind_add(c, M, XKB_KEY_w, Q_WALLPAPERS, 0, NULL);
+	bind_add(c, M, XKB_KEY_Home, Q_PAN, -1, NULL);
 
 	const xkb_keysym_t hjkl[4] = {
 		XKB_KEY_h, XKB_KEY_j, XKB_KEY_k, XKB_KEY_l,
 	};
+	const xkb_keysym_t arrows[4] = {
+		XKB_KEY_Left, XKB_KEY_Down, XKB_KEY_Up, XKB_KEY_Right,
+	};
 	const int edge[4] = { LY_LEFT, LY_DOWN, LY_UP, LY_RIGHT };
 	for (int i = 0; i < 4; i++) {
+		bind_add(c, M,     arrows[i], Q_PAN, edge[i], NULL);
 		bind_add(c, M,     hjkl[i], Q_FOCUS,  edge[i], NULL);
 		bind_add(c, M | S, hjkl[i], Q_MOVE,   edge[i], NULL);
 		bind_add(c, M | C, hjkl[i], Q_RESIZE, edge[i], NULL);
@@ -495,7 +513,7 @@ void config_defaults(struct aro_config *c)
 		.line = TH_LINE, .accent = TH_ACCENT, .accent_soft = TH_ACCENT_SOFT,
 		.ink = TH_INK, .dim = TH_DIM, .bar_bg = TH_BAR_BG,
 		.urgent = TH_URGENT, .drop_fill = TH_DROP_FILL,
-		.drop_line = TH_DROP_LINE,
+		.drop_line = TH_DROP_LINE, .canvas_grid = TH_CANVAS_GRID,
 		.notify_bg = TH_NOTIFY_BG, .notify_ms = TH_NOTIFY_MS,
 		.scrim = TH_SCRIM,
 		.notify_max_w = TH_NOTIFY_MAX_W,
@@ -720,6 +738,7 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 		.no_header = Q_RULE_UNSET,
 		.no_radius = Q_RULE_UNSET,
 		.no_bg = Q_RULE_UNSET,
+		.no_sweep = Q_RULE_UNSET,
 	};
 	bool acts = false, bad_quote = false;
 	char *cur = value, *w;
@@ -768,6 +787,9 @@ static void parse_rule(struct aro_config *c, int lineno, char *value)
 			acts = true;
 		} else if (!strcasecmp(w, "no_bg")) {
 			r.no_bg = 1;
+			acts = true;
+		} else if (!strcasecmp(w, "no_sweep")) {
+			r.no_sweep = 1;
 			acts = true;
 		} else if (!strcasecmp(w, "size") || !strcasecmp(w, "position")) {
 			const bool size = !strcasecmp(w, "size");
@@ -853,6 +875,7 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 		.sticky = Q_RULE_UNSET, .center = Q_RULE_UNSET,
 		.no_border = Q_RULE_UNSET, .no_header = Q_RULE_UNSET,
 		.no_radius = Q_RULE_UNSET, .no_bg = Q_RULE_UNSET,
+		.no_sweep = Q_RULE_UNSET,
 	};
 	const char *a = app_id ? app_id : "";
 	const char *t = title ? title : "";
@@ -886,6 +909,8 @@ void config_rules_eval(const struct aro_config *c, const char *app_id,
 			out->no_radius = r->no_radius;
 		if (r->no_bg != Q_RULE_UNSET)
 			out->no_bg = r->no_bg;
+		if (r->no_sweep != Q_RULE_UNSET)
+			out->no_sweep = r->no_sweep;
 		if (r->size[0].set) {
 			out->size[0] = r->size[0];
 			out->size[1] = r->size[1];
@@ -1202,6 +1227,7 @@ static const struct theme_key theme_keys[] = {
 	{ "urgent",      K_COLOR, T(urgent),      0, 0 },
 	{ "drop_fill",   K_COLOR, T(drop_fill),   0, 0 },
 	{ "drop_line",   K_COLOR, T(drop_line),   0, 0 },
+	{ "canvas_grid", K_COLOR, T(canvas_grid), 0, 0 },
 	{ "notify_color",    K_COLOR, T(notify_bg),    0, 0 },
 	{ "notify_ms",       K_INT,   T(notify_ms),    0, 120000 },
 	{ "notify_max_width",K_INT,   T(notify_max_w), 100, 4000 },
@@ -1524,6 +1550,14 @@ bool config_load(struct aro_config *c, const char *path)
 				c->tp_speed = d;
 		} else if (!strcasecmp(key, "focus_follows_mouse")) {
 			ok = parse_bool(value, &c->focus_follows_mouse);
+		} else if (!strcasecmp(key, "sweep_new")) {
+			bool b;
+			if (!strcasecmp(value, "canvas"))
+				c->sweep_new = Q_SWEEP_NEW_CANVAS;
+			else if (!strcasecmp(value, "always"))
+				c->sweep_new = Q_SWEEP_NEW_ALWAYS;
+			else if ((ok = parse_bool(value, &b)))
+				c->sweep_new = b ? Q_SWEEP_NEW_ALWAYS : Q_SWEEP_NEW_OFF;
 		} else if (!strcasecmp(key, "confirm_quit")) {
 			ok = parse_bool(value, &c->confirm_quit);
 		} else if (!strcasecmp(key, "fullscreen_confine")) {

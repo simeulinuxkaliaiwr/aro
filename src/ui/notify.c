@@ -68,14 +68,14 @@ static int notification_expire(void *data)
 	return 0;
 }
 
-void notify(struct aro_server *s, enum notify_level level,
-            const char *fmt, ...)
+uint32_t notify(struct aro_server *s, enum notify_level level,
+                const char *fmt, ...)
 {
 	const struct q_theme *th = &s->cfg.theme;
 
 	/* drop toast if no output exists */
 	if (!s->l_notify || !aro_focused_output(s))
-		return;
+		return 0;
 
 	char msg[512];
 	va_list ap;
@@ -85,14 +85,18 @@ void notify(struct aro_server *s, enum notify_level level,
 
 	struct aro_notification *n = calloc(1, sizeof *n);
 	if (!n)
-		return;
+		return 0;
+	static uint32_t next_id;
 	n->server = s;
 	n->level = level;
+	if (++next_id == 0)
+		next_id = 1;            /* 0 is never one */
+	n->id = next_id;
 
 	n->tree = wlr_scene_tree_create(s->l_notify);
 	if (!n->tree) {
 		free(n);
-		return;
+		return 0;
 	}
 
 	float col[4];
@@ -105,7 +109,7 @@ void notify(struct aro_server *s, enum notify_level level,
 	if (!n->edge || !n->bg || !qtext_init(&n->text, n->tree, th->font)) {
 		wlr_scene_node_destroy(&n->tree->node);
 		free(n);
-		return;
+		return 0;
 	}
 
 	qtext_set(&n->text, msg,
@@ -126,6 +130,17 @@ void notify(struct aro_server *s, enum notify_level level,
 	}
 
 	notify_layout(s);
+	return n->id;
+}
+
+void notify_dismiss(struct aro_server *s, uint32_t id)
+{
+	struct aro_notification *n;
+	wl_list_for_each(n, &s->notifications, link)
+		if (id && n->id == id) {
+			notification_destroy(n);
+			return;
+		}
 }
 
 void notify_clear_errors(struct aro_server *s)

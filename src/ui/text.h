@@ -41,4 +41,7 @@ struct wlr_buffer *ui_png_load(const char *path);
 #define UI_GLOSS_H 64
 struct wlr_buffer *ui_gloss_render(double amount);
 
+/* w x h logical pixels of dots step apart, drawn at scale; rgba 0xRRGGBBAA; to drop when done */
+struct wlr_buffer *ui_dots_render(int w, int h, int step, double radius, uint32_t rgba, float scale);
+
 #endif

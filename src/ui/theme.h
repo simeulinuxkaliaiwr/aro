@@ -89,6 +89,7 @@
 /* drop preview colors */
 #define TH_DROP_FILL    0xe6a54b1f
 #define TH_DROP_LINE    0xe6a54bcc
+#define TH_CANVAS_GRID  0xffffff24      /* the dots a canvas plane carries; alpha 0: none */
 #define TH_DROP_MS      160     /* it chases the cursor, so it moves faster */
 
 /* behavior defaults */

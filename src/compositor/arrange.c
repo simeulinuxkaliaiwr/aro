@@ -225,8 +225,14 @@ void ws_arrange(struct aro_server *s, struct aro_output *o, int ws)
 
 bool aro_view_clipped(struct aro_view *v)
 {
-	return v->node && !v->fullscreen && v->output &&
-	       ws_layout(v->server, v->output, v->workspace) == Q_LAYOUT_SCROLL;
+	if (v->fullscreen || !v->output)
+		return false;
+	/* a canvas window past the edge is off screen, not on the next one; one held is not cut */
+	const struct aro_server *s = v->server;
+	if (s->grabbed == v && s->cursor_mode == ARO_CURSOR_MOVE)
+		return false;
+	return v->node ? ws_layout(v->server, v->output, v->workspace) == Q_LAYOUT_SCROLL
+	               : view_on_plane(v);
 }
 
 /* final target geometry */
@@ -468,6 +474,8 @@ void aro_arrange(struct aro_server *s)
 	uint32_t now = aro_now_ms();
 	slides_reap(s, now);
 	ipc_notify(s);          /* whatever moved, subscribers hear once aro is idle */
+	canvas_reconcile(s);    /* a layout switch or a move may have crossed onto or off a canvas */
+	canvas_grid_sync(s);
 
 	/* arrange each output's current workspace */
 	struct aro_output *o;

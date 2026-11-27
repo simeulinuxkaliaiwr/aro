@@ -103,11 +103,14 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 		}
 		int at = ly_pick(boxes, n, view_target(f), e);
 		if (at >= 0) {
+			int dx, dy;
 			aro_focus(s, cand[at]);
-			cursor_warp_to_view(s, cand[at]);
+			canvas_show(s, cand[at], &dx, &dy);     /* off in the plane: fly to it */
+			cursor_warp_to_box(s, view_target(cand[at]), dx, dy);
 		}
 		return;
 	}
+	const bool plane = view_on_plane(f);
 
 	ly_box u = usable_area(o);
 	int sx = (int)(u.w * th->resize_step + 0.5), sy = (int)(u.h * th->resize_step + 0.5);
@@ -122,14 +125,14 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 	if (action == Q_MOVE) {
 		b.x += dx;
 		b.y += dy;
-		/* stay on screen: flush against an edge, not past it */
-		if (b.x + b.w > u.x + u.w)
+		/* stay on screen: flush against an edge, not past it; a canvas has no edge */
+		if (!plane && b.x + b.w > u.x + u.w)
 			b.x = u.x + u.w - b.w;
-		if (b.y + b.h > u.y + u.h)
+		if (!plane && b.y + b.h > u.y + u.h)
 			b.y = u.y + u.h - b.h;
-		if (b.x < u.x)
+		if (!plane && b.x < u.x)
 			b.x = u.x;
-		if (b.y < u.y)
+		if (!plane && b.y < u.y)
 			b.y = u.y;
 	} else {
 		b.w += dx;
@@ -152,6 +155,8 @@ static void float_directional(struct aro_server *s, struct aro_view *f,
 		return;
 	f->fbox = b;
 	aro_arrange(s);
+	if (plane)
+		canvas_show(s, f, NULL, NULL);  /* walked off the screen: the camera follows */
 }
 
 static bool ws_empty(struct aro_server *s, struct aro_output *o, int ws)
@@ -216,6 +221,12 @@ static void workspace_move_to_output(struct aro_server *s, ly_edge e)
 	o->ws_layout[from] = Q_LAYOUT_INHERIT;
 	dest->scroll[to] = o->scroll[from];
 	o->scroll[from] = 0;
+	dest->cam.x[to] = o->cam.x[from];
+	dest->cam.y[to] = o->cam.y[from];
+	dest->cam.ix[to] = o->cam.ix[from];
+	dest->cam.iy[to] = o->cam.iy[from];
+	o->cam.x[from] = o->cam.y[from] = 0;
+	o->cam.ix[from] = o->cam.iy[from] = 0;
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
@@ -251,11 +262,12 @@ static void layout_set(struct aro_server *s, int want)
 		return;
 	const int ws = o->cur_ws;
 	enum q_layout cur = ws_layout(s, o, ws);
-	/* toggle cycles manual, dwindle, monocle, scroll */
+	/* toggle cycles manual, dwindle, monocle, scroll, canvas */
 	enum q_layout next = want == Q_LAYOUT_TOGGLE
 	                   ? (cur == Q_LAYOUT_MANUAL  ? Q_LAYOUT_DWINDLE
 	                   :  cur == Q_LAYOUT_DWINDLE ? Q_LAYOUT_MONOCLE
 	                   :  cur == Q_LAYOUT_MONOCLE ? Q_LAYOUT_SCROLL
+	                   :  cur == Q_LAYOUT_SCROLL  ? Q_LAYOUT_CANVAS
 	                   :                            Q_LAYOUT_MANUAL)
 	                   : (enum q_layout)want;
 
@@ -266,7 +278,7 @@ static void layout_set(struct aro_server *s, int want)
 	if (next != cur) {
 		notify(s, NOTIFY_INFO, "Workspace %d: %s", ws + 1,
 		       config_layout_name(next));
-		aro_arrange(s);         /* monocle and scroll place windows differently */
+		aro_arrange(s);         /* monocle and scroll place windows differently; a canvas floats them */
 	}
 }
 
@@ -301,7 +313,8 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 			quit_now(s);
 		return;
 	case Q_FLOAT:
-		if (f)
+		/* on a canvas everything floats: there is no tree to go back to */
+		if (f && !(f->floating && f->output && ws_canvas(s, f->output, f->workspace)))
 			view_set_floating(s, f, !f->floating);
 		return;
 	case Q_FULLSCREEN:
@@ -344,6 +357,9 @@ void run_action(struct aro_server *s, const struct q_bind *b)
 		return;
 	case Q_SWEEP:
 		sweep_start(s, b->arg);
+		return;
+	case Q_PAN:
+		canvas_glide(s, aro_focused_output(s), (ly_edge)(b->num < 0 ? 0 : b->num), b->num < 0);
 		return;
 	case Q_WALLPAPERS:
 		if (s->cursor_mode == ARO_CURSOR_PASSTHROUGH)

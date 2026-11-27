@@ -30,12 +30,18 @@
   instead, so the layout spirals on its own, `monocle` shows one
   window at a time without losing the splits underneath, and `scroll`
   puts windows in columns on a strip the screen slides along.
+- **Or no tiling at all.** `canvas` floats every window on an endless
+  plane, the screen a camera over it: drag the empty desktop, scroll or
+  swipe to look around, and a flick keeps gliding. Focus a window off
+  screen and the camera flies to it; switch back to a tiling layout and
+  the windows tile again.
 - **Draw where a window opens.** `mod+shift+Return` turns the cursor into a
   crosshair; drag a box and foot opens in it, floating. The box is drawn
   before the window exists, so the very first size the app is told is the
   box's — it never shows up at its own size and jumps. `sweep` without a
   command leaves the box for whatever opens next, from a launcher or a
-  terminal.
+  terminal. With `sweep_new = canvas` (or `always`) every new window waits
+  for its box, told nothing until you draw one.
 - **Spatial focus.** `mod+hjkl` moves to the window that is actually up,
   left or right on screen, not to the next one in a tree, and across
   monitors by the same rule.
@@ -305,7 +311,8 @@ replaces this table entirely.
 | `mod+tab` / `mod+shift+tab` | window switcher, recently used order |
 | `mod+o` | overview: every workspace, zoomed out |
 | `mod+w` | wallpaper picker: arrows browse, type to search, enter applies |
-| `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll |
+| `mod+t` | cycle this workspace's layout: manual, dwindle, monocle, scroll, canvas |
+| `mod+arrows` / `mod+Home` | canvas: pan the camera / back home |
 | `mod+m` | scroll layout: column fills the screen, or goes back |
 | `mod+r` | scroll layout: next preset column width |
 | `mod+shift+minus` / `mod+minus` | into the scratchpad / show or hide it |

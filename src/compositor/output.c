@@ -73,6 +73,9 @@ static void output_frame(struct wl_listener *l, void *data)
 	slides_reap(s, now);
 	/* any output's slide: its windows can cross onto this one */
 	bool moving = slides_active(s);
+	/* the camera first, so the windows it carries are drawn where it put them */
+	if (canvas_tick(s, o, now))
+		moving = true;
 
 	struct aro_view *v;
 	wl_list_for_each(v, &s->views, link) {
@@ -343,6 +346,7 @@ struct aro_output *output_evacuate(struct aro_server *s,
 	overview_output_gone(s, o);
 	picker_output_gone(s, o);
 	sweep_output_gone(s, o);
+	canvas_forget_output(s, o);
 	ghost_drop(s, o);
 
 	/* clear grabs on output loss */

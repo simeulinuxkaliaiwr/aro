@@ -29,11 +29,15 @@ struct aro_notification {
 	anim_box geo;
 	struct wl_event_source *timer;  /* NULL for an error: it does not expire */
 	enum notify_level level;
+	uint32_t id;                    /* what notify_dismiss names it by */
 };
 
-/* post toast; errors persist until cleared */
-void notify(struct aro_server *s, enum notify_level level,
-            const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+/* post toast; errors persist until cleared. Returns its id, 0 if none was shown */
+uint32_t notify(struct aro_server *s, enum notify_level level,
+                const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+
+/* take a toast down early; one already gone is fine */
+void notify_dismiss(struct aro_server *s, uint32_t id);
 
 /* clear error toasts */
 void notify_clear_errors(struct aro_server *s);

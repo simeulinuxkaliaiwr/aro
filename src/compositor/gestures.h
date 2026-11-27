@@ -11,6 +11,9 @@ struct aro_gestures {
 	struct wlr_pointer_gestures_v1 *proto;
 	bool swiping;                   /* this swipe is aro's, not the app's */
 	double dx, dy;                  /* how far it has gone */
+	struct aro_output *panning;     /* layout = canvas: this swipe moves its plane */
+	double pan_vx, pan_vy;          /* px/s, for the fling at the end */
+	uint32_t pan_ms;
 
 	struct wl_listener swipe_begin, swipe_update, swipe_end;
 	struct wl_listener pinch_begin, pinch_update, pinch_end;

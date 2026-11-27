@@ -53,15 +53,17 @@ static bool handle_vt(struct aro_server *s, xkb_keysym_t sym)
 /* warp cursor on keyboard focus */
 void cursor_warp_to_view(struct aro_server *s, struct aro_view *v)
 {
-	if (!v)
-		return;
+	if (v)
+		cursor_warp_to_box(s, view_target(v), 0, 0);
+}
 
-	ly_box b = view_target(v);
+void cursor_warp_to_box(struct aro_server *s, ly_box b, int dx, int dy)
+{
 	if (b.w <= 0 || b.h <= 0)
 		return;
 
 	wlr_cursor_warp_closest(s->cursor, NULL,
-	                        b.x + b.w / 2.0, b.y + b.h / 2.0);
+	                        b.x + dx + b.w / 2.0, b.y + dy + b.h / 2.0);
 	/* our own move, not the user's: what is drawn there may still be sliding away */
 	s->warping = true;
 	pointer_motion_common(s, aro_now_ms());
@@ -919,6 +921,16 @@ void cursor_button(struct wl_listener *l, void *data)
 		}
 	}
 
+	/* layout = canvas: grabbing the empty desktop drags the plane */
+	if (ev->state == WL_POINTER_BUTTON_STATE_PRESSED && !v && ev->button == BTN_LEFT &&
+	    !aro_locked(s)) {
+		struct aro_output *co = canvas_under_cursor(s, surface);
+		if (co) {
+			canvas_pan_begin(s, co);
+			return;
+		}
+	}
+
 	/* a release goes where the press went (the implicit grab), even if the
 	 * pointer has wandered onto another surface; then focus moves on to that */
 	struct wlr_surface *held = s->seat->pointer_state.focused_surface;
@@ -1023,6 +1035,18 @@ void cursor_axis(struct wl_listener *l, void *data)
 			return;
 		}
 	}
+	/* layout = canvas: scrolling over the empty desktop moves the plane */
+	if (!aro_locked(s) && s->cursor_mode == ARO_CURSOR_PASSTHROUGH) {
+		double sx, sy;
+		struct wlr_surface *surface = NULL;
+		struct aro_view *v = view_at(s, s->cursor->x, s->cursor->y, &surface, &sx, &sy);
+		struct aro_output *co = v ? NULL : canvas_under_cursor(s, surface);
+		if (co) {
+			canvas_scroll(s, co, ev->orientation == WL_POINTER_AXIS_HORIZONTAL_SCROLL,
+			              ev->delta, ev->source == WL_POINTER_AXIS_SOURCE_FINGER);
+			return;
+		}
+	}
 	wlr_seat_pointer_notify_axis(s->seat, ev->time_msec, ev->orientation,
 	                             ev->delta, ev->delta_discrete, ev->source,
 	                             ev->relative_direction);
@@ -1081,8 +1105,10 @@ void view_raise_and_focus(struct aro_server *s, struct aro_view *v)
 	if (v->workspace != v->output->cur_ws)
 		workspace_show(s, v->workspace);
 	aro_focus(s, v);
+	int dx, dy;
+	canvas_show(s, v, &dx, &dy);    /* off in the plane: the camera flies to it */
 	if (s->cfg.focus_follows_mouse)
-		cursor_warp_to_view(s, v);
+		cursor_warp_to_box(s, view_target(v), dx, dy);
 }
 
 /*

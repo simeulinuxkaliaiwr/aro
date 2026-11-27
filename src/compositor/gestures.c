@@ -32,9 +32,15 @@ static void swipe_begin(struct wl_listener *l, void *data)
 	struct wlr_pointer_swipe_begin_event *ev = data;
 	struct aro_gestures *g = &s->gestures;
 
-	g->swiping = s->cfg.gesture_fingers > 0 && !aro_locked(s) &&
-	             ev->fingers == (uint32_t)s->cfg.gesture_fingers;
+	const uint32_t want = s->cfg.gesture_fingers > 0 ? (uint32_t)s->cfg.gesture_fingers : 0;
 	g->dx = g->dy = 0;
+	g->swiping = false;
+	/* on a canvas the swipe moves the plane; one finger more switches workspaces */
+	if (want && ev->fingers == want && canvas_swipe_begin(s, ev->time_msec))
+		return;
+	struct aro_output *o = output_under_cursor(s);
+	const bool canvas = o && aro_ws_layout(o, o->cur_ws) == Q_LAYOUT_CANVAS;
+	g->swiping = want && !aro_locked(s) && ev->fingers == want + (canvas ? 1 : 0);
 	if (!g->swiping)
 		wlr_pointer_gestures_v1_send_swipe_begin(g->proto, s->seat,
 		                                         ev->time_msec, ev->fingers);
@@ -46,6 +52,10 @@ static void swipe_update(struct wl_listener *l, void *data)
 	struct wlr_pointer_swipe_update_event *ev = data;
 	struct aro_gestures *g = &s->gestures;
 
+	if (g->panning) {
+		canvas_swipe_update(s, ev->dx, ev->dy, ev->time_msec);
+		return;
+	}
 	if (g->swiping) {
 		g->dx += ev->dx;
 		g->dy += ev->dy;
@@ -61,6 +71,10 @@ static void swipe_end(struct wl_listener *l, void *data)
 	struct wlr_pointer_swipe_end_event *ev = data;
 	struct aro_gestures *g = &s->gestures;
 
+	if (g->panning) {
+		canvas_swipe_end(s, ev->cancelled);
+		return;
+	}
 	if (!g->swiping) {
 		wlr_pointer_gestures_v1_send_swipe_end(g->proto, s->seat,
 		                                       ev->time_msec, ev->cancelled);

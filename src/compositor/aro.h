@@ -12,6 +12,7 @@
 
 #include "anim.h"
 #include "bar.h"
+#include "canvas.h"
 #include "config.h"
 #include "extws.h"
 #include "gestures.h"
@@ -127,7 +128,9 @@ struct aro_view {
 
 	/* float_follow: client controls floating size after initial configure */
 	bool float_follow;
+	bool canvas;            /* floats because its workspace is a canvas; tiles again off one */
 	bool swept;             /* opens in a drawn box, fbox; until it unmaps */
+	bool sweep_wait;        /* sweep_new: told nothing yet, waiting for a box */
 
 	/* last rule result; only changes are re-applied */
 	struct q_rule_result rule_last;
@@ -197,6 +200,7 @@ enum aro_cursor_mode {
 	ARO_CURSOR_MOVE,
 	ARO_CURSOR_RESIZE,       /* a floating window's own box */
 	ARO_CURSOR_RESIZE_TILE,  /* a boundary two tiled windows share */
+	ARO_CURSOR_PAN,          /* layout = canvas: the desktop dragged, the plane with it */
 };
 
 /* ── an output ─────────────────────────────────────────────────────────── */
@@ -215,6 +219,21 @@ struct aro_output {
 	/* runtime layout per workspace; Q_LAYOUT_INHERIT = config */
 	int ws_layout[ARO_MAX_WS];
 	double scroll[ARO_MAX_WS];      /* layout = scroll: where the screen sits on the strip */
+	/* layout = canvas: the camera over each workspace's plane, and how it moves */
+	struct {
+		double x[ARO_MAX_WS], y[ARO_MAX_WS];    /* every move added up; 0, 0 is home */
+		int ix[ARO_MAX_WS], iy[ARO_MAX_WS];     /* the whole pixels windows have moved */
+		double vx, vy;                  /* a fling, px/s, slowing */
+		uint32_t ms;                    /* its last tick */
+		bool flying;                    /* to fx1, fy1, from fx0, fy0 */
+		int fly_ws;
+		double fx0, fy0, fx1, fy1;
+		uint32_t fstart;
+		struct wlr_scene_buffer *grid;  /* the dots, one screen and a step big; NULL: none yet */
+		int grid_w, grid_h;             /* what grid was drawn for */
+		uint32_t grid_rgba;
+		float grid_scale;
+	} cam;
 
 	/*
 	 * Workspace slide. Draw-time only: geo stays the real position and
@@ -305,6 +324,7 @@ struct aro_server {
 
 	/* stacking layers, bottom to top */
 	struct wlr_scene_tree *l_background;
+	struct wlr_scene_tree *l_canvas;        /* layout = canvas: the plane's dots */
 	struct wlr_scene_tree *l_bottom;
 	struct wlr_scene_tree *l_tiled;         /* our windows */
 	struct wlr_scene_tree *l_preview;       /* drop indicator, over the tiles */
@@ -475,6 +495,14 @@ struct aro_server {
 	struct wl_listener cursor_frame;
 	struct wl_listener request_cursor;
 
+	/* layout = canvas: the desktop being dragged */
+	struct {
+		struct aro_output *o;
+		double lx, ly;          /* the pointer at the last motion */
+		double vx, vy;          /* px/s, for the fling at release */
+		uint32_t ms;
+	} pan;
+
 	/* pointer focus origin for grabbed motion */
 	double ptr_lx, ptr_ly;
 
@@ -522,6 +550,8 @@ ly_box aro_output_usable(struct aro_output *o);
 /* where the frame is going (view_target): output box, fbox or leaf box */
 ly_box aro_view_box(struct aro_view *v);
 const char *aro_view_type(struct aro_view *v);
+/* for sweep.c: a held window's first configure, the box's size or (NULL) its own */
+void view_sweep_answer(struct aro_view *v, const ly_box *box);
 /* effective workspace layout */
 enum q_layout aro_ws_layout(struct aro_output *o, int ws);
 

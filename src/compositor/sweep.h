@@ -25,6 +25,8 @@ struct aro_sweep {
 	double x0, y0;                  /* where the press was */
 	ly_box box;                     /* the frame, layout coordinates */
 	char *cmd;                      /* run once the box is drawn; owned */
+	struct aro_view *held;          /* sweep_new: the window waiting for this box */
+	uint32_t toast;                 /* ...and the toast saying so */
 	struct wl_event_source *timer;  /* a box nothing takes goes away */
 };
 
@@ -44,6 +46,11 @@ bool sweep_key(struct aro_server *s, xkb_keysym_t sym);
 
 /* a new window takes the waiting box: fills *box (the frame) and returns true */
 bool sweep_take(struct aro_server *s, struct aro_view *v, ly_box *box);
+
+/* sweep_new: at its first commit, whether v waits for a box; true means it was told nothing */
+bool sweep_hold(struct aro_server *s, struct aro_view *v);
+/* a window going away must not be waited for */
+void sweep_view_gone(struct aro_server *s, struct aro_view *v);
 
 void sweep_retheme(struct aro_server *s);
 void sweep_output_gone(struct aro_server *s, struct aro_output *o);

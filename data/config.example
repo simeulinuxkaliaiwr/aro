@@ -25,6 +25,10 @@ allow_tearing = false
 #   focused one and the neighbours peek in. beside a window (mod+v, or a drop
 #   at its side) makes a new column; below it (mod+s, or a drop above/below)
 #   stacks in that column. mod+ctrl+h/l change a column's width.
+# canvas: every window floats on an endless plane and the screen is a camera
+#   over it. drag the empty desktop, scroll over it or swipe to look around;
+#   mod+arrows pan, mod+Home goes back. focusing a window off screen flies
+#   there. leaving the canvas tiles its windows again.
 # mod+v / mod+s will temporarily override either mode for the next window.
 layout = dwindle
 
@@ -35,7 +39,12 @@ scroll_peek = 40
 # the widths mod+r steps a column through
 scroll_presets = 0.333 0.5 0.667
 
-# per-workspace layout. mod+t cycles manual, dwindle, monocle and scroll for the
+# new windows wait for a box drawn with the left button, and open in it at that
+# size (see the sweep action). off, canvas (only on canvas workspaces) or always.
+# Escape or another button lets the window open as usual. X11 windows never wait.
+sweep_new = off
+
+# per-workspace layout. mod+t cycles manual, dwindle, monocle, scroll and canvas for the
 # current workspace; bind `layout, monocle` to jump straight to one.
 # workspace = 3 layout manual
 # workspace = 4 layout monocle
@@ -263,6 +272,7 @@ resize_step = 0.04          # resize amount per keypress
 #          center             floating, centred (the default place)
 #          no_border | no_header | no_radius | no_bg   take that part of the frame
 #                             away (no_bg: the backdrop, for round or see-through apps)
+#          no_sweep           opens at once, though sweep_new would make it wait
 #          opacity <n> | opacity_unfocused <n>   0.05 to 1, over the config's
 #          scratchpad opens the window hidden, for scratchpad_show to bring out.
 #          use `tile` to force tiling on dialogs, or `float` to force floating;
@@ -311,6 +321,8 @@ resize_step = 0.04          # resize amount per keypress
 #                   latest matching the glob, to this workspace; again hides it)
 #          maximize (layout = scroll: the column fills the screen, or goes back)
 #          width next|prev   (layout = scroll: the next preset column width)
+#          pan left|right|up|down|home   (layout = canvas: the camera a third of
+#                   the screen that way, or back where it started)
 #          workspace|sendto 1..32
 #          split right|down
 #          switch next|prev
@@ -351,6 +363,11 @@ bind = mod+ctrl+h, resize, left
 bind = mod+ctrl+j, resize, down
 bind = mod+ctrl+k, resize, up
 bind = mod+ctrl+l, resize, right
+bind = mod+Left, pan, left
+bind = mod+Down, pan, down
+bind = mod+Up, pan, up
+bind = mod+Right, pan, right
+bind = mod+Home, pan, home
 bind = mod+1, workspace, 1
 bind = mod+2, workspace, 2
 bind = mod+3, workspace, 3

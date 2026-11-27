@@ -70,7 +70,7 @@ Input lag drops, at the cost of visible tearing.
 Only that app is affected, and only while it is fullscreen.
 Default: false.
 .TP
-.BR layout " = " manual | dwindle | monocle | scroll
+.BR layout " = " manual | dwindle | monocle | scroll | canvas
 How new windows are placed.
 .B manual
 splits beside the focused window, the way
@@ -91,7 +91,30 @@ A window opened or dropped beside another starts a new column; one opened
 below it
 .RB ( mod+s )
 or dropped above or below it shares that column.
+.B canvas
+floats every window on an endless plane, with the screen a camera over
+it: drag the empty desktop, scroll over it, or swipe with
+.B gesture_fingers
+to look around (one finger more switches workspaces there), and a fling
+keeps gliding.
+Windows overlap and move freely, as floating windows do; focusing one off
+screen flies the camera to it.
+Leaving the canvas tiles its windows again, and coming back floats them
+where their tiles were.
 Default: manual.
+.TP
+.BR sweep_new " = " off | canvas | always
+New windows wait for a box drawn with the left button, and open in it,
+floating; the size they are first told is the box's, so they never draw
+at their own size first.
+.B canvas
+waits only on canvas workspaces.
+A click, Escape or another button lets the window open as usual.
+Dialogs, windows that ask for fullscreen, windows a rule sends elsewhere,
+X11 windows, and those a
+.B no_sweep
+rule names open at once.
+Default: off.
 .TP
 .BI "scroll_width = " share
 How wide a new column is in the scroll layout, from 0.1 to 1.0 of the
@@ -521,6 +544,10 @@ which take that part of the window's frame away
 .RB ( no_bg :
 the backdrop behind the window, for apps with round or see-through
 corners),
+.B no_sweep
+(opens at once though
+.B sweep_new
+would make it wait),
 or
 .BI opacity " n"
 and
@@ -589,6 +616,12 @@ Dialogs do not take the box: they belong with their parent window.
 .TP
 .BR focus ", " move ", " resize " " left | right | up | down
 Across monitors too, by the same rule.
+.TP
+.BR pan " " left | right | up | down | home
+On a
+.B canvas
+workspace, fly the camera a third of the screen that way, or back where it
+started.
 .TP
 .B maximize
 On a
@@ -660,9 +693,9 @@ Where the next window opens.
 .BR switch " " next | prev
 The window switcher.
 .TP
-.BR layout " " toggle | manual | dwindle | monocle
+.BR layout " " toggle | manual | dwindle | monocle | scroll | canvas
 .B toggle
-cycles the three.
+cycles them all.
 .PP
 The same actions work from the command line, as
 .BR "aroctl dispatch" .

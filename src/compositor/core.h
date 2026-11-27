@@ -86,6 +86,8 @@ void cursor_frame(struct wl_listener *l, void *data);
 void cursor_motion(struct wl_listener *l, void *data);
 void cursor_motion_abs(struct wl_listener *l, void *data);
 void cursor_warp_to_view(struct aro_server *s, struct aro_view *v);
+/* to the middle of b moved by dx, dy: where a window will be once the canvas has flown */
+void cursor_warp_to_box(struct aro_server *s, ly_box b, int dx, int dy);
 void new_constraint(struct wl_listener *l, void *data);
 void new_input(struct wl_listener *l, void *data);
 void new_virtual_keyboard(struct wl_listener *l, void *data);

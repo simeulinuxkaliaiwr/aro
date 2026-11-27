@@ -6,6 +6,7 @@
 
 #include "sweep.h"
 #include "core.h"
+#include "notify.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
 /*
@@ -109,26 +111,61 @@ bool sweep_active(struct aro_server *s)
 	return s->sweep.state == SWEEP_ARMED || s->sweep.state == SWEEP_DRAWING;
 }
 
-void sweep_start(struct aro_server *s, const char *cmd)
+/* the crosshair, the pointer the sweep's; false if something else has it */
+static bool arm(struct aro_server *s)
 {
 	if (aro_locked(s) || prompt_active(s) || picker_active(s) || overview_active(s) ||
 	    s->cursor_mode != ARO_CURSOR_PASSTHROUGH || !s->sweep_mark.tree)
-		return;
-
-	/* a second sweep replaces a box still waiting */
-	sweep_cancel(s);
-	s->sweep.cmd = cmd && *cmd ? strdup(cmd) : NULL;
+		return false;
 	s->sweep.state = SWEEP_ARMED;
 	wlr_seat_pointer_notify_clear_focus(s->seat);
 	wlr_cursor_set_xcursor(s->cursor, s->xcursor_mgr, "crosshair");
-	wlr_log(WLR_INFO, "sweep: armed%s%s", cmd ? " for " : "", cmd ? cmd : "");
+	return true;
 }
 
-void sweep_cancel(struct aro_server *s)
+/* the held window hears at last: the box's size, or its own choice */
+static void answer(struct aro_server *s, const ly_box *box)
+{
+	struct aro_view *v = s->sweep.held;
+	s->sweep.held = NULL;
+	notify_dismiss(s, s->sweep.toast);
+	s->sweep.toast = 0;
+	if (v) {
+		v->sweep_wait = false;
+		view_sweep_answer(v, box);
+	}
+}
+
+/* the oldest window still waiting gets the crosshair; one that cannot opens as usual */
+static void hold_next(struct aro_server *s)
+{
+	while (s->sweep.state == SWEEP_OFF && !s->sweep.held) {
+		struct aro_view *v, *next = NULL;
+		wl_list_for_each_reverse(v, &s->views, link)
+			if (v->sweep_wait) {
+				next = v;
+				break;
+			}
+		if (!next)
+			return;
+		s->sweep.held = next;
+		if (!arm(s)) {
+			answer(s, NULL);
+			continue;
+		}
+		const char *app = view_app_id(next);
+		s->sweep.toast = notify(s, NOTIFY_INFO, "Draw where %s opens (Escape: as usual)",
+		                        app && *app ? app : "the window");
+		wlr_log(WLR_INFO, "sweep: holding %s", app ? app : "?");
+	}
+}
+
+/* back to nothing, without handing the crosshair on */
+static void stop(struct aro_server *s)
 {
 	struct aro_sweep *w = &s->sweep;
 	bool had_pointer = sweep_active(s);
-	if (w->state == SWEEP_OFF)
+	if (w->state == SWEEP_OFF && !w->held)
 		return;
 	w->state = SWEEP_OFF;
 	free(w->cmd);
@@ -137,6 +174,28 @@ void sweep_cancel(struct aro_server *s)
 	mark_show(s, false);
 	if (had_pointer)
 		pointer_back(s);
+	answer(s, NULL);        /* a held window opens where it always would */
+}
+
+void sweep_start(struct aro_server *s, const char *cmd)
+{
+	/* a window already waits for its box: that one comes first */
+	if (s->sweep.held)
+		return;
+	/* a second sweep replaces a box still waiting */
+	stop(s);
+	if (!arm(s)) {
+		hold_next(s);
+		return;
+	}
+	s->sweep.cmd = cmd && *cmd ? strdup(cmd) : NULL;
+	wlr_log(WLR_INFO, "sweep: armed%s%s", cmd ? " for " : "", cmd ? cmd : "");
+}
+
+void sweep_cancel(struct aro_server *s)
+{
+	stop(s);
+	hold_next(s);
 }
 
 void sweep_pointer_motion(struct aro_server *s, double lx, double ly)
@@ -192,6 +251,16 @@ static void drawn(struct aro_server *s)
 	}
 
 	grow_to_min(s, &w->box);
+	if (w->held) {
+		/* the window is there already, waiting: it opens in the box now */
+		w->state = SWEEP_OFF;
+		mark_show(s, false);
+		pointer_back(s);
+		wlr_log(WLR_INFO, "sweep: box %dx%d at %d,%d", w->box.w, w->box.h, w->box.x, w->box.y);
+		answer(s, &w->box);
+		hold_next(s);
+		return;
+	}
 	ui_preview_geometry(&s->sweep_mark, w->box);
 	w->state = SWEEP_WAITING;
 	if (w->timer)
@@ -246,7 +315,41 @@ bool sweep_take(struct aro_server *s, struct aro_view *v, ly_box *box)
 	s->sweep.state = SWEEP_OFF;
 	wait_stop(s);
 	mark_show(s, false);
+	hold_next(s);
 	return true;
+}
+
+bool sweep_hold(struct aro_server *s, struct aro_view *v)
+{
+	if (s->cfg.sweep_new == Q_SWEEP_NEW_OFF || !v->toplevel || v->toplevel->requested.fullscreen)
+		return false;
+	const char *type = aro_view_type(v);
+	if (type && strcmp(type, "normal"))
+		return false;
+	struct aro_output *o = aro_focused_output(s);
+	if (!o || (s->cfg.sweep_new == Q_SWEEP_NEW_CANVAS &&
+	           aro_ws_layout(o, o->cur_ws) != Q_LAYOUT_CANVAS))
+		return false;
+	/* a window that opens hidden, or whole-screen, has nowhere to draw */
+	struct q_rule_result r;
+	config_rules_eval(&s->cfg, view_app_id(v), view_title(v), type, &r);
+	if (r.no_sweep == 1 || r.fullscreen == 1 || r.scratch == 1 ||
+	    (r.workspace != Q_RULE_UNSET && r.workspace != o->cur_ws))
+		return false;
+	v->sweep_wait = true;
+	hold_next(s);
+	return v->sweep_wait;   /* false: it could not wait, and was told already */
+}
+
+void sweep_view_gone(struct aro_server *s, struct aro_view *v)
+{
+	v->sweep_wait = false;
+	if (s->sweep.held != v)
+		return;
+	s->sweep.held = NULL;
+	notify_dismiss(s, s->sweep.toast);
+	s->sweep.toast = 0;
+	sweep_cancel(s);
 }
 
 void sweep_retheme(struct aro_server *s)

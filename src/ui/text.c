@@ -71,6 +71,26 @@ static struct wlr_buffer *surface_buffer(cairo_surface_t *surface)
 	return &cb->base;
 }
 
+struct wlr_buffer *ui_dots_render(int w, int h, int step, double radius, uint32_t rgba, float scale)
+{
+	const int pw = (int)(w * scale + 0.5), ph = (int)(h * scale + 0.5);
+	if (pw < 1 || ph < 1 || step < 2)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_rgba(cr, ((rgba >> 24) & 0xff) / 255.0, ((rgba >> 16) & 0xff) / 255.0,
+	                      ((rgba >> 8) & 0xff) / 255.0, (rgba & 0xff) / 255.0);
+	for (int y = step / 2; y < h; y += step)
+		for (int x = step / 2; x < w; x += step) {
+			cairo_new_sub_path(cr);
+			cairo_arc(cr, x, y, radius, 0, 6.2832);
+		}
+	cairo_fill(cr);
+	cairo_destroy(cr);
+	return surface_buffer(surface);
+}
+
 /* Aero's highlight: bright above the middle, a hard edge, a faint glow below */
 struct wlr_buffer *ui_gloss_render(double amount)
 {

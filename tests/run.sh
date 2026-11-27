@@ -666,6 +666,125 @@ config
 sleep 0.3
 alive
 
+# 4g2. layout = canvas: every window floats on a plane, the screen a camera over it
+config "layout = canvas" "focus_follows_mouse = false" "switcher_debounce_ms = 0"
+sleep 0.3
+# window N as "x y w h", from aroctl's WxH+X+Y column; x and y may be negative
+cgeo() {
+	ctl windows | awk -v id="$1" '{
+		i = ($1 == "*") ? 2 : 1
+		if ($i != id) next
+		g = $(i + 4); match(g, /^[0-9]+x[0-9]+/); split(substr(g, 1, RLENGTH), wh, "x")
+		r = substr(g, RLENGTH + 1); p = match(substr(r, 2), /[+-]/)
+		print substr(r, 1, p) + 0, substr(r, p + 1) + 0, wh[1], wh[2]
+	}'
+}
+client window 2 14 > "$T/canvas.out" 2>&1 &
+CC=$!
+if wait_for "$T/canvas.out" "2 windows open"; then
+	sleep 0.4
+	set -- $(ctl windows | awk 'NR > 1 { print ($1 == "*") ? $2 : $1 }' | sort -n)
+	A=$1 B=$2
+	[ "$(ctl windows | grep -c floating)" = 2 ] && ok "canvas: new windows float" \
+		|| bad "canvas: new windows float: $(ctl windows | tr '\n' '|')"
+	read ax ay aw ah <<< "$(cgeo "$A")"
+	read bx by bw bh <<< "$(cgeo "$B")"
+	[ $((bx - ax)) = 32 ] && [ $((by - ay)) = 32 ] && ok "canvas: a second window cascades off the first" \
+		|| bad "canvas: a second window cascades off the first ($ax,$ay / $bx,$by)"
+	client click left 40 600 240 650
+	sleep 1.5                       # a fling dies down
+	read mx my _ _ <<< "$(cgeo "$A")"
+	[ $((mx - ax)) -ge 200 ] && [ $((my - ay)) -ge 50 ] \
+		&& ok "canvas: dragging the desktop moves the plane ($((mx - ax)),$((my - ay)))" \
+		|| bad "canvas: dragging the desktop moves the plane ($ax,$ay -> $mx,$my)"
+	read mbx mby _ _ <<< "$(cgeo "$B")"
+	[ $((mbx - mx)) = 32 ] && [ $((mby - my)) = 32 ] && ok "canvas: every window moves with it" \
+		|| bad "canvas: every window moves with it ($mx,$my / $mbx,$mby)"
+	ctl dispatch pan home > /dev/null; sleep 0.6
+	read hx hy _ _ <<< "$(cgeo "$A")"
+	[ "$hx,$hy" = "$ax,$ay" ] && ok "canvas: pan home brings it all back" \
+		|| bad "canvas: pan home brings it all back ($ax,$ay -> $hx,$hy)"
+	client click down 40 600
+	sleep 0.3
+	read sx sy _ _ <<< "$(cgeo "$A")"
+	[ "$sy" -lt "$ay" ] && [ "$sx" = "$ax" ] && ok "canvas: the wheel over the desktop scrolls the plane" \
+		|| bad "canvas: the wheel over the desktop scrolls the plane ($ax,$ay -> $sx,$sy)"
+	ctl dispatch pan home > /dev/null; sleep 0.6
+	for _ in 1 2 3 4 5; do ctl dispatch pan right > /dev/null; done
+	sleep 0.7
+	read ox _ _ _ <<< "$(cgeo "$A")"
+	[ "$ox" -lt -400 ] && ok "canvas: pan right leaves the windows behind ($ox)" \
+		|| bad "canvas: pan right leaves the windows behind ($ox)"
+	f=$(focus_id)
+	if [ "$f" = "$A" ]; then other=$B dir=right; else other=$A dir=left; fi
+	ctl dispatch focus $dir > /dev/null; sleep 0.7
+	read fx fy fw fh <<< "$(cgeo "$other")"
+	[ "$(focus_id)" = "$other" ] && [ "$fx" -ge 0 ] && [ $((fx + fw)) -le 1280 ] && [ "$fy" -ge 0 ] \
+		&& ok "canvas: focus flies the camera to a window off screen" \
+		|| bad "canvas: focus flies the camera to a window off screen ($(focus_id) at $fx,$fy)"
+	ctl dispatch move left > /dev/null; ctl dispatch move left > /dev/null; sleep 0.3
+	read gx _ _ _ <<< "$(cgeo "$other")"
+	[ "$gx" -lt "$fx" ] && ok "canvas: mod+shift moves a window on the plane" \
+		|| bad "canvas: mod+shift moves a window on the plane ($fx -> $gx)"
+	ctl dispatch layout manual > /dev/null; sleep 0.4
+	[ "$(ctl windows | grep -c tiled)" = 2 ] && ok "canvas: leaving it tiles the windows again" \
+		|| bad "canvas: leaving it tiles the windows again: $(ctl windows | tr '\n' '|')"
+	ctl dispatch layout canvas > /dev/null; sleep 0.4
+	read tx _ tw _ <<< "$(cgeo "$A")"
+	[ "$(ctl windows | grep -c floating)" = 2 ] && [ "$tw" -lt 1200 ] \
+		&& ok "canvas: coming back floats them where the tiles were" \
+		|| bad "canvas: coming back floats them where the tiles were: $(ctl windows | tr '\n' '|')"
+	ctl dispatch overview > /dev/null; sleep 0.6
+	ctl dispatch overview > /dev/null; sleep 0.4
+	alive
+fi
+kill "$CC" 2> /dev/null; wait "$CC" 2> /dev/null
+sleep 0.5
+
+# 4g3. sweep_new: a new window waits, told nothing, until a box is drawn for it
+config "layout = canvas" "sweep_new = canvas" "rule = app_id:aro-test no_border no_header"
+sleep 0.3
+client window 1 3 patient > "$T/hold.out" 2>&1 &
+CH=$!
+sleep 0.8
+grep -q "first buffer" "$T/hold.out" && bad "sweep_new: the window waits for a box" \
+	|| ok "sweep_new: the window waits for a box"
+client click left 300 200 800 600
+if wait_for "$T/hold.out" "1 windows open"; then
+	grep -q "first buffer 500x400" "$T/hold.out" && ok "sweep_new: it draws first at the box's size" \
+		|| bad "sweep_new: it draws first at the box's size: $(tr '\n' ' ' < "$T/hold.out")"
+	sleep 0.3
+	ctl -j windows | grep -q '"x":300,"y":200,"width":500,"height":400' \
+		&& ok "sweep_new: it opens where the box was" || bad "sweep_new: it opens where the box was: $(wbox)"
+else
+	bad "sweep_new: drawing the box opens the window"
+fi
+wait "$CH"
+client window 1 1 patient > "$T/hold2.out" 2>&1 &
+CH=$!
+sleep 0.6
+client click right 640 400
+wait_for "$T/hold2.out" "1 windows open" && ok "sweep_new: another button lets it open as usual" \
+	|| bad "sweep_new: another button lets it open as usual"
+wait "$CH"
+config "layout = canvas" "sweep_new = canvas" "rule = app_id:aro-test no_sweep"
+sleep 0.3
+client window 1 1 > "$T/hold3.out" 2>&1 &
+CH=$!
+wait_for "$T/hold3.out" "1 windows open" && ok "sweep_new: rule no_sweep opens at once" \
+	|| bad "sweep_new: rule no_sweep opens at once"
+wait "$CH"
+config "sweep_new = canvas"
+sleep 0.3
+client window 1 1 > "$T/hold4.out" 2>&1 &
+CH=$!
+wait_for "$T/hold4.out" "1 windows open" && ok "sweep_new = canvas: tiling workspaces open at once" \
+	|| bad "sweep_new = canvas: tiling workspaces open at once"
+wait "$CH"
+alive
+config
+sleep 0.3
+
 # 4j. an app's icon is drawn in its header, left of the title
 client window 1 3 icon > "$T/icon.out" 2>&1 &
 CI=$!
