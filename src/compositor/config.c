@@ -228,6 +228,10 @@ bool config_parse_action(const char *name, const char *arg,
 		*action = Q_TAB;
 		return true;
 	}
+	if (!strcasecmp(name, "sweep")) {
+		*action = Q_SWEEP;              /* the command, if any, stays in arg */
+		return true;
+	}
 	if (!strcasecmp(name, "scratchpad_show")) {
 		*action = Q_SCRATCH_SHOW;       /* arg, if any, stays in arg */
 		return true;
@@ -364,7 +368,7 @@ static bool parse_bind(struct aro_config *c, char *value)
 	int num;
 	if (!config_parse_action(action, arg, &a, &num))
 		return false;
-	if (!bind_add(c, mods, sym, a, num, (a == Q_SPAWN || a == Q_SCRATCH_SHOW) ? arg : NULL))
+	if (!bind_add(c, mods, sym, a, num, (a == Q_SPAWN || a == Q_SCRATCH_SHOW || a == Q_SWEEP) ? arg : NULL))
 		return false;
 	c->binds[c->nbinds - 1].button = button;
 	return true;
@@ -379,6 +383,7 @@ static void install_default_binds(struct aro_config *c)
 	const uint32_t C = WLR_MODIFIER_CTRL;
 
 	bind_add(c, M, XKB_KEY_Return, Q_SPAWN, 0, "foot");
+	bind_add(c, M | S, XKB_KEY_Return, Q_SWEEP, 0, "foot");
 	bind_add(c, M, XKB_KEY_d, Q_SPAWN, 0, "fuzzel");
 	bind_add(c, M, XKB_KEY_q, Q_CLOSE, 0, NULL);
 	bind_add(c, M | S, XKB_KEY_e, Q_QUIT, 0, NULL);

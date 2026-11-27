@@ -296,6 +296,9 @@ resize_step = 0.04          # resize amount per keypress
 #   bind = mod+mouse_back, workspace, 1
 #
 # actions: spawn <cmd> | close | quit | float | fullscreen
+#          sweep [cmd]   (drag a box with the left button, then run cmd; the next
+#                   window opens in the box, floating, already that size.
+#                   a click opens it as usual; Escape or another button gives up)
 #          focus|move|resize left|right|up|down
 #          move_workspace left|right|up|down   (to the monitor in that direction)
 #          sticky   (floating, on every workspace of its monitor)
@@ -312,6 +315,7 @@ resize_step = 0.04          # resize amount per keypress
 #          split right|down
 #          switch next|prev
 bind = mod+Return, spawn, foot
+bind = mod+shift+Return, sweep, foot
 bind = mod+d, spawn, fuzzel
 bind = mod+q, close
 bind = mod+shift+e, quit

@@ -30,6 +30,12 @@
   instead, so the layout spirals on its own, `monocle` shows one
   window at a time without losing the splits underneath, and `scroll`
   puts windows in columns on a strip the screen slides along.
+- **Draw where a window opens.** `mod+shift+Return` turns the cursor into a
+  crosshair; drag a box and foot opens in it, floating. The box is drawn
+  before the window exists, so the very first size the app is told is the
+  box's — it never shows up at its own size and jumps. `sweep` without a
+  command leaves the box for whatever opens next, from a launcher or a
+  terminal.
 - **Spatial focus.** `mod+hjkl` moves to the window that is actually up,
   left or right on screen, not to the next one in a tree, and across
   monitors by the same rule.
@@ -291,6 +297,7 @@ replaces this table entirely.
 | bind | action |
 | --- | --- |
 | `mod+Return` / `mod+d` | foot / fuzzel |
+| `mod+shift+Return` | draw a box, and foot opens in it |
 | `mod+v` / `mod+s` | next window opens right / below (one-shot) |
 | `mod+hjkl` | move focus |
 | `mod+shift+hjkl` | move the window |

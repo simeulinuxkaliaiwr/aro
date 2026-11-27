@@ -342,6 +342,7 @@ struct aro_output *output_evacuate(struct aro_server *s,
 	switcher_output_gone(s, o);
 	overview_output_gone(s, o);
 	picker_output_gone(s, o);
+	sweep_output_gone(s, o);
 	ghost_drop(s, o);
 
 	/* clear grabs on output loss */

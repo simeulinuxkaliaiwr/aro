@@ -1,4 +1,4 @@
-/* window: opens N windows, keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface, "clear" fully see-through */
+/* window: opens N windows (prints the first one's first buffer size), keeps them for HOLD seconds, closes them; "modal" makes the first a modal dialog, "tear" a fullscreen game, "icon" gives it a red icon, "iconname NAME" a theme icon, "sub" draws it grey with a red subsurface, "clear" fully see-through */
 #define _DEFAULT_SOURCE /* usleep */
 
 #include "common.h"
@@ -20,6 +20,7 @@ struct win {
 	int w, h;
 	int drawn;
 	int tiled;
+	int first_w, first_h;   /* the first buffer it drew */
 };
 
 static struct globals g;
@@ -66,6 +67,10 @@ static void xs_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 	}
 	wl_surface_attach(w->surf, solid_buffer(&g, bw, bh, clear ? 0x00000000 : sub && w == &wins[0] ? 0xff808080 : 0xff203040), 0, 0);
 	wl_surface_commit(w->surf);
+	if (!w->drawn) {
+		w->first_w = bw;
+		w->first_h = bh;
+	}
 	w->drawn = 1;
 }
 
@@ -165,6 +170,7 @@ int main(int argc, char **argv)
 		roundtrip(&g);
 	}
 	printf("%d windows open, %d tiled\n", n, tiled);
+	printf("first buffer %dx%d\n", wins[0].first_w, wins[0].first_h);
 	fflush(stdout);
 
 	for (int i = 0; i < hold * 10; i++) {

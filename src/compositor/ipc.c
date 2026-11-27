@@ -604,7 +604,7 @@ static void cmd_dispatch(struct req *r)
 	struct q_bind b = {
 		.action = action,
 		.num = num,
-		.arg = (action == Q_SPAWN || action == Q_SCRATCH_SHOW) && *arg ? arg : NULL,
+		.arg = (action == Q_SPAWN || action == Q_SCRATCH_SHOW || action == Q_SWEEP) && *arg ? arg : NULL,
 	};
 	aro_run_action(r->s, &b);
 	if (r->json)

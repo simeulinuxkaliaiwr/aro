@@ -362,6 +362,58 @@ wait "$CM"
 alive
 config
 
+# 4f2c. sweep: a box drawn first is the window's first size, where it was drawn
+config "rule = app_id:aro-test no_border no_header"
+sleep 0.3
+wbox() { ctl -j windows | grep -o '"state":"[a-z]*"\|"x":[0-9-]*,"y":[0-9-]*,"width":[0-9]*,"height":[0-9]*' | tr '\n' ' '; }
+ctl dispatch sweep "$CLIENTS/window 1 3 > $T/sweep.out 2>&1" > /dev/null
+client click left 200 150 700 550
+if wait_for "$T/sweep.out" "1 windows open"; then
+	grep -q "first buffer 500x400" "$T/sweep.out" && ok "sweep: the first buffer is the box's size" \
+		|| bad "sweep: the first buffer is the box's size: $(tr '\n' ' ' < "$T/sweep.out")"
+	ctl -j windows | grep -q '"state":"floating".*"x":200,"y":150,"width":500,"height":400' \
+		&& ok "sweep: it floats where the box was drawn" || bad "sweep: it floats where the box was drawn: $(wbox)"
+else
+	bad "sweep: the command ran once the box was drawn"
+fi
+sleep 3.2
+alive
+# a right click gives up; the next window opens as it always would
+ctl dispatch sweep > /dev/null
+client click right 300 300
+client window 1 2 > "$T/sweep2.out" 2>&1 &
+CS=$!
+if wait_for "$T/sweep2.out" "1 windows open"; then
+	ctl windows | grep -q "tiled.*aro-test" && ok "sweep: a right click gives up" \
+		|| bad "sweep: a right click gives up: $(wbox)"
+fi
+wait "$CS"
+# a click with no drag runs the command with no box
+ctl dispatch sweep "$CLIENTS/window 1 2 > $T/sweep3.out 2>&1" > /dev/null
+client click left 300 300
+if wait_for "$T/sweep3.out" "1 windows open"; then
+	ctl windows | grep -q "tiled.*aro-test" && ok "sweep: a click opens it the usual way" \
+		|| bad "sweep: a click opens it the usual way: $(wbox)"
+else
+	bad "sweep: a click still runs the command"
+fi
+sleep 2.2
+# a dialog leaves the box to the next plain window
+ctl dispatch sweep > /dev/null
+client click left 100 100 550 380
+client window 1 2 modal > "$T/sweep4.out" 2>&1 &
+CS=$!
+if wait_for "$T/sweep4.out" "1 windows open"; then
+	grep -q "first buffer 450x280" "$T/sweep4.out" && bad "sweep: a dialog does not take the box" \
+		|| ok "sweep: a dialog does not take the box"
+	client window 1 1 > "$T/sweep5.out" 2>&1
+	grep -q "first buffer 450x280" "$T/sweep5.out" && ok "sweep: the next plain window does" \
+		|| bad "sweep: the next plain window does: $(tr '\n' ' ' < "$T/sweep5.out")"
+fi
+wait "$CS"
+alive
+config
+
 # 4f3. opacity holds on a window that starts floating (a commit resets its buffer)
 config "rule = app_id:aro-test float size 400 300 position 100 100 opacity 0.5"
 sleep 0.3

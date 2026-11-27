@@ -27,6 +27,7 @@
 #include "overview.h"
 #include "picker.h"
 #include "prompt.h"
+#include "sweep.h"
 #include "switcher.h"
 #include "layout.h"
 #include "text.h"
@@ -126,6 +127,7 @@ struct aro_view {
 
 	/* float_follow: client controls floating size after initial configure */
 	bool float_follow;
+	bool swept;             /* opens in a drawn box, fbox; until it unmaps */
 
 	/* last rule result; only changes are re-applied */
 	struct q_rule_result rule_last;
@@ -384,6 +386,7 @@ struct aro_server {
 	struct aro_switcher switcher;        /* mod+tab */
 	struct aro_overview overview;
 	struct aro_picker picker;            /* wallpapers to choose from */
+	struct aro_sweep sweep;              /* a box drawn for the next window */
 	struct wl_list ghosts;               /* closed windows fading out */
 	struct wl_list inhibitors;
 
@@ -436,6 +439,7 @@ struct aro_server {
 
 	/* where the dragged window would land if dropped now */
 	struct aro_preview preview;
+	struct aro_preview sweep_mark;  /* the drawn box, until a window takes it */
 	struct aro_view *drop_target;
 	ly_edge drop_edge;
 	bool drop_join;         /* over the target's header: dropping makes a tab */

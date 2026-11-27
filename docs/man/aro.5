@@ -574,6 +574,17 @@ Run a command.
 .B exec
 is the same.
 .TP
+.BR sweep " [\fIcommand\fP]"
+Draw a box with the left button, then run the command.
+The next window to open goes into the box, floating, and the size it is
+first told is the box's, so it draws once, at that size, instead of opening
+at its own size and being resized.
+Without a command the box waits for whatever opens next, from a launcher or
+a terminal; after 30 seconds with no window it goes away.
+A click without a drag runs the command and the window opens as usual;
+Escape or any other button gives up.
+Dialogs do not take the box: they belong with their parent window.
+.TP
 .BR close ", " quit ", " float ", " fullscreen ", " overview
 .TP
 .BR focus ", " move ", " resize " " left | right | up | down

@@ -134,6 +134,12 @@ static void keyboard_key(struct wl_listener *l, void *data)
 		return;
 	}
 
+	/* Escape gives up a sweep; every other key works as usual */
+	if (!handled && !aro_locked(s) && sweep_active(s) &&
+	    ev->state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		for (int i = 0; i < nraw && !handled; i++)
+			handled = sweep_key(s, raw[i]);
+
 	if (!handled && ev->state == WL_KEYBOARD_KEY_STATE_PRESSED)
 		for (int i = 0; i < nraw; i++)
 			handled |= handle_bind(s, mods, raw[i]);
@@ -721,6 +727,10 @@ void cursor_motion(struct wl_listener *l, void *data)
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
+	if (!aro_locked(s) && sweep_active(s)) {
+		sweep_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
 		grab_motion(s);
 	else
@@ -755,6 +765,10 @@ void cursor_motion_abs(struct wl_listener *l, void *data)
 	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (!aro_locked(s) && sweep_active(s)) {
+		sweep_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)
@@ -820,6 +834,16 @@ void cursor_button(struct wl_listener *l, void *data)
 			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
 			                               ev->button, ev->state);
 		overview_pointer_button(s, s->cursor->x, s->cursor->y, down);
+		return;
+	}
+
+	/* drawing a box for the next window: no app sees the buttons */
+	if (!aro_locked(s) && sweep_active(s)) {
+		bool down = ev->state == WL_POINTER_BUTTON_STATE_PRESSED;
+		if (!down && s->seat->pointer_state.button_count > 0)
+			wlr_seat_pointer_notify_button(s->seat, ev->time_msec,
+			                               ev->button, ev->state);
+		sweep_pointer_button(s, ev->button, down);
 		return;
 	}
 
@@ -934,6 +958,10 @@ void aro_pointer_moved(struct aro_server *s, uint32_t time)
 	}
 	if (!aro_locked(s) && overview_active(s)) {
 		overview_pointer_motion(s, s->cursor->x, s->cursor->y);
+		return;
+	}
+	if (!aro_locked(s) && sweep_active(s)) {
+		sweep_pointer_motion(s, s->cursor->x, s->cursor->y);
 		return;
 	}
 	if (s->cursor_mode != ARO_CURSOR_PASSTHROUGH)

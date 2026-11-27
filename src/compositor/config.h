@@ -71,6 +71,7 @@ enum q_action {
 	Q_UNGROUP,      /* out of its group, into a tile of its own */
 	Q_TAB,          /* num: +1 next tab, -1 previous */
 	Q_WALLPAPERS,   /* the wallpaper picker */
+	Q_SWEEP,        /* draw a box for the next window; arg: shell command or NULL */
 };
 
 struct q_bind {
@@ -78,7 +79,7 @@ struct q_bind {
 	xkb_keysym_t sym;       /* level-0 keysym, as the key handler compares */
 	uint32_t button;        /* a mouse button (BTN_*) instead of a key; else 0 */
 	enum q_action action;
-	char *arg;              /* Q_SPAWN and Q_SCRATCH_SHOW; owned */
+	char *arg;              /* Q_SPAWN, Q_SCRATCH_SHOW and Q_SWEEP; owned */
 	int num;
 };
 

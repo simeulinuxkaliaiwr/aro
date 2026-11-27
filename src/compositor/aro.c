@@ -1535,6 +1535,16 @@ void view_map(struct wl_listener *l, void *data)
 		wlr_log(WLR_ERROR, "a window mapped with no output to put it on");
 		return;
 	}
+	/* X11 windows have no first configure before this */
+	if (!v->toplevel && !v->swept)
+		v->swept = sweep_take(s, v, &v->fbox);
+	/* a drawn box says where, and so which screen */
+	struct aro_output *so = v->swept
+	                      ? output_at(s, v->fbox.x + v->fbox.w / 2.0, v->fbox.y + v->fbox.h / 2.0)
+	                      : NULL;
+	v->swept = so != NULL;
+	if (so)
+		o = so;
 	v->output = o;
 	v->mapped = true;
 	v->float_follow = false;        /* a remap starts from scratch */
@@ -1548,22 +1558,31 @@ void view_map(struct wl_listener *l, void *data)
 	config_rules_eval(&s->cfg, app_id, title, view_type(v), &r);
 	v->rule_last = r;
 
-	struct aro_output *ro = r.monitor ? rule_output(s, r.monitor) : NULL;
+	struct aro_output *ro = r.monitor && !v->swept ? rule_output(s, r.monitor) : NULL;
 	if (ro)
 		v->output = o = ro;
 	rule_chrome(v, &r);             /* before any size is worked out */
 
-	const int ws = r.workspace != Q_RULE_UNSET ? r.workspace : o->cur_ws;
-	v->scratch = v->stashed = r.scratch == 1;       /* starts hidden */
+	/* the box was drawn on what is showing: it opens there, not hidden */
+	const int ws = r.workspace != Q_RULE_UNSET && !v->swept ? r.workspace : o->cur_ws;
+	v->scratch = v->stashed = r.scratch == 1 && !v->swept;  /* starts hidden */
 	const bool here = ws == o->cur_ws && !v->stashed;
 	v->workspace = ws;
 
 	/* rule overrides float heuristic */
-	bool floating = v->scratch || r.sticky == 1 || (r.floating != Q_RULE_UNSET
+	bool floating = v->swept || v->scratch || r.sticky == 1 || (r.floating != Q_RULE_UNSET
 	              ? r.floating == 1
 	              : v->impl->wants_float && v->impl->wants_float(v));
 
-	if (floating) {
+	if (v->swept) {
+		/* the drawn box, at the size it was told before it drew */
+		v->floating = true;
+		wlr_scene_node_reparent(&v->frame_tree->node, s->l_float);
+		ly_box c;
+		ui_frame_content_box(v, v->fbox, &c);
+		view_configure(v, c.x, c.y, c.w, c.h);
+		v->sticky = r.sticky == 1;
+	} else if (floating) {
 		/* floating windows skip the tree */
 		v->floating = true;
 		v->fbox = float_box_for(v, true);
@@ -1635,6 +1654,7 @@ void view_unmap(struct wl_listener *l, void *data)
 	v->mapped = false;
 	view_set_visible(v, false);
 	v->scratch = v->stashed = false;        /* rules decide again on the next map */
+	v->swept = false;
 	grab_forget(s, v);
 	ftl_destroy(v);
 	mru_remove(s, v);
@@ -1672,8 +1692,17 @@ static void view_commit(struct wl_listener *l, void *data)
 	(void)data;
 
 	if (v->toplevel->base->initial_commit) {
-		/* let client choose initial size */
-		wlr_xdg_toplevel_set_size(v->toplevel, 0, 0);
+		/* a drawn box is the first size it hears; else it chooses */
+		v->swept = sweep_take(v->server, v, &v->fbox);
+		ly_box c = { 0 };
+		if (v->swept) {
+			struct q_rule_result r;
+			config_rules_eval(&v->server->cfg, view_app_id(v), view_title(v),
+			                  view_type(v), &r);
+			rule_chrome(v, &r);     /* a rule's border and header count */
+			ui_frame_content_box(v, v->fbox, &c);
+		}
+		wlr_xdg_toplevel_set_size(v->toplevel, c.w, c.h);
 	}
 
 	/* follow client float commits */
@@ -2210,6 +2239,7 @@ static void config_reload(struct aro_server *s)
 		view_rules_reapply(v);
 
 	ui_preview_retheme(&s->preview);
+	sweep_retheme(s);
 
 	struct aro_output *o;
 	wl_list_for_each(o, &s->outputs, link)
@@ -2608,6 +2638,7 @@ int main(int argc, char *argv[])
 		wlr_log(WLR_ERROR, "could not build the drop indicator");
 		return 1;
 	}
+	sweep_init(&s);
 
 	s.clock_timer = wl_event_loop_add_timer(s.loop, clock_tick, &s);
 	wl_event_source_timer_update(s.clock_timer, 1000);
@@ -2796,6 +2827,7 @@ teardown:
 
 	/* finish UI state */
 	ui_preview_finish(&s.preview);
+	sweep_finish(&s);
 	notify_finish(&s);
 	prompt_finish(&s);
 	overview_finish(&s);
